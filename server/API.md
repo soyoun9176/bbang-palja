@@ -4,7 +4,7 @@ All requests and responses use JSON. Send `Authorization: Bearer <token>` after 
 
 ## Public and buyer
 
-- `GET /api/config` → `{demo, reward_step:30, staff_password_hint?}`. Password hint exists only in local demo.
+- `GET /api/config` → `{demo, reward_step:7, staff_password_hint?}`. Password hint exists only in local demo.
 - `POST /api/auth/register` or `/api/auth/login` body `{name,pin}` → `{token,user}`. PIN is exactly four numeric digits. Register rejects an existing name.
 - `POST /api/staff/login` body `{name,password}` → `{token,user}`.
 - `GET /api/auth/me` → `{user}`. `POST /api/auth/logout` → `{ok:true}`.
@@ -15,7 +15,7 @@ All requests and responses use JSON. Send `Authorization: Bearer <token>` after 
 - `POST /api/preorders/:id/claim` body `{request_id}` → `{order}`. Requires that buyer's successful name/phone lookup within the last 24 hours. Existing claim returns its order, including across retries.
 - `POST /api/dice/roll` body `{request_id}` → `{value,score,dice_balance}`. Die result is 1–6.
 - `GET /api/leaderboard` → `{leaders:[entry],neighbors:[entry],me:entry,total_participants}`. `entry={rank,id,name,score,is_me}`. Leaders are top three; neighbors contain self and up to two users on each side.
-- `POST /api/rewards/claim` body `{request_id}` → `{reward:{id,product_name,product_id,threshold,created_at},user}`. One bread for each 30 score points; weighted by current reward inventory.
+- `POST /api/rewards/claim` body `{request_id}` → `{reward:{id,product_name,product_id,threshold,created_at},user}`. One bread for each 7 score points; weighted by current reward inventory.
 - `GET /api/rewards` → `{rewards:[reward]}`.
 
 `user={id,name,role,score,dice_balance,rewards_claimed}`. `order={id,type,status,customer_name,user_id,items,total,quantity,created_at,approved_at,cancelled_at}`. Order types: `walkin`, `preorder`, `manual`. Status: `pending`, `approved`, `cancelled`. `items=[{product_id,name,quantity,price}]`.

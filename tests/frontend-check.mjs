@@ -12,6 +12,7 @@ const source = readFileSync(new URL('../frontend/app.js', import.meta.url), 'utf
 
 function fixture({guest = false, storage = new Map()} = {}) {
   const remote = {stock: 3, score: 10, approved: false, modal: false};
+  const root = {innerHTML: ''};
   let renderCount = 0;
   const requests = [];
   const response = (body, status = 200) => ({ok: status < 400, status, json: async () => body});
@@ -21,7 +22,7 @@ function fixture({guest = false, storage = new Map()} = {}) {
     localStorage: {getItem: () => guest ? null : 'token-A', removeItem() {}, setItem() {}},
     sessionStorage: {getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key)},
     window: {KAMBO_CONFIG: {apiBase: ''}, addEventListener() {}},
-    document: {hidden: false, activeElement: {tagName: 'BODY'}, addEventListener() {}, querySelector: selector => selector === '.modal' && remote.modal ? {} : null},
+    document: {hidden: false, activeElement: {tagName: 'BODY'}, addEventListener() {}, querySelectorAll: () => [], getElementById: () => null, querySelector: selector => selector === '#app' ? root : selector === '.modal' && remote.modal ? {} : null},
     initAdmin() {}, renderAdmin() {}, renderStaffLogin() {}, handleAdminClick() {}, handleAdminSubmit() {},
     setInterval: fn => {context.poll = fn;}, setTimeout: fn => queueMicrotask(fn),
     recordRender: () => renderCount++,
@@ -30,7 +31,7 @@ function fixture({guest = false, storage = new Map()} = {}) {
     const token = options.headers?.Authorization;
     const id = token === 'Bearer token-B' ? 2 : 1;
     const user = {id, name: `구매자${id}`, role: 'buyer', score: 0, dice_balance: remote.approved ? 1 : 2, rewards_claimed: 0};
-    if (path === '/api/config') return response({demo: false, reward_step: 30});
+    if (path === '/api/config') return response({demo: false, reward_step: 7});
     if (path === '/api/products') return response({products: [{id: 1, stock: remote.stock}]});
     if (path === '/api/auth/me') return response({user});
     if (path === '/api/orders') return response({orders: [{id: 1, status: remote.approved ? 'approved' : 'pending', quantity: 1}]});
@@ -43,9 +44,9 @@ function fixture({guest = false, storage = new Map()} = {}) {
     return context.fetchOverride ? context.fetchOverride(path, options) : context.normalFetch(path, options);
   };
   vm.createContext(context);
-  vm.runInContext(source + '\nrender = recordRender; toast = () => {}; modal = () => {};', context);
+  vm.runInContext(source + '\nconst renderPage = render; render = recordRender; toast = () => {}; modal = () => {};', context);
   return {
-    context, remote, storage, requests, response,
+    context, remote, storage, requests, response, root,
     run: script => vm.runInContext(script, context),
     get renders() {return renderCount;},
   };
@@ -62,6 +63,46 @@ test('polling renders changed stock and leaderboard, including guest stock', asy
     if (!guest) assert.equal(f.run('state.leaderboard.leaders[0].score'), 20);
     assert.equal(f.renders, 1);
   }
+});
+
+test('buyers sign in before seeing purchase or event content', async () => {
+  const f = fixture({guest: true});
+  await f.run('refresh();');
+  f.run('renderPage()');
+  assert.match(f.root.innerHTML, /id="buyer-auth"/);
+  assert.doesNotMatch(f.root.innerHTML, /class="product-list"|class="dice-stage|class="primary-nav"/);
+});
+
+test('purchase and event have separate content and only two main menus', async () => {
+  const f = fixture();
+  await f.run('refresh()');
+  f.run('renderPage()');
+  assert.match(f.root.innerHTML, /aria-label="현판 빵 목록"/);
+  assert.doesNotMatch(f.root.innerHTML, /현재 점수|랜덤 빵 뽑기|주사위 1개 굴리기/);
+  const nav = f.root.innerHTML.match(/<nav class="primary-nav"[^>]*>(.*?)<\/nav>/s)[1];
+  assert.equal((nav.match(/<button/g) || []).length, 2);
+  f.run("state.route='dice'; renderPage()");
+  assert.match(f.root.innerHTML, /주사위 1개 굴리기/);
+  assert.match(f.root.innerHTML, /현재 점수/);
+  assert.doesNotMatch(f.root.innerHTML, /현판 빵 목록|구매 요청하기/);
+});
+
+test('reaching the score target opens the bread draw without claiming it automatically', async () => {
+  const f = fixture();
+  await f.run('refresh()');
+  f.run("state.config.reward_step=7; state.route='dice'");
+  let prompt='';
+  f.context.captureModal = html => {prompt=html;};
+  f.run('modal = captureModal');
+  f.context.fetchOverride = async (path, options) => {
+    if(path==='/api/dice/roll') return f.response({value: 3, score: 8, dice_balance: 1});
+    if(path==='/api/auth/me') return f.response({user:{id:1,name:'구매자1',role:'buyer',score:8,dice_balance:1,rewards_claimed:0}});
+    return f.context.normalFetch(path, options);
+  };
+  await f.run('rollDice()');
+  assert.match(prompt, /7점 달성/);
+  assert.match(prompt, /data-action="claim-reward"/);
+  assert.equal(f.requests.filter(r=>r.path==='/api/rewards/claim').length,0);
 });
 
 test('a change received during a modal renders after closing it', async () => {

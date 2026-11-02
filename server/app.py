@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from .db import Database
 
 ROOT = Path(__file__).resolve().parents[1]
-REWARD_STEP = 30
+REWARD_STEP = 7
 PUBLIC_USER_FIELDS = ("id", "name", "role", "score", "dice_balance", "rewards_claimed")
 PRODUCTS = [
     (1, "소금빵", "짭조름한 소금과 고소한 버터의 만남", 2500, 48, 0, 8, "시그니처", "salt-bread"),

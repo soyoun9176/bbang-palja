@@ -389,7 +389,7 @@ class APIIntegrationTests(unittest.TestCase):
         self.assertEqual(self.me(token)["dice_balance"], 30)
         status, _ = self.call("POST", "/api/rewards/claim", {"request_id": request_id()}, token)
         self.assertEqual(status, 409)
-        while self.me(token)["score"] < 30:
+        while self.me(token)["score"] < 7:
             self.ok("POST", "/api/dice/roll", {"request_id": request_id()}, token)
 
         # A single eligible product makes the weighted draw deterministic.
@@ -406,7 +406,7 @@ class APIIntegrationTests(unittest.TestCase):
         repeated = self.ok("POST", "/api/rewards/claim", {"request_id": identity}, token)
         self.assertEqual(reward, repeated)
         self.assertEqual(reward["reward"]["product_id"], self.product_id)
-        self.assertEqual(reward["reward"]["threshold"], 30)
+        self.assertEqual(reward["reward"]["threshold"], 7)
         self.assertEqual(self.product()["reward_stock"], 0)
         self.assertEqual(self.me(token)["rewards_claimed"], 1)
         self.assertEqual(len(self.ok("GET", "/api/rewards", token=token)["rewards"]), 1)
