@@ -86,7 +86,7 @@ python3 -m pip install -r requirements-postgres.txt
 DATABASE_URL='postgresql://user:password@localhost:5432/kambo' python3 -m server
 ```
 
-운영 이전의 설정·백업·출처 분리는 [배포 문서](docs/DEPLOYMENT.md)를 참고하세요. 이 저장소는 remote 없이 로컬에서 관리하도록 구성했습니다.
+운영 이전의 설정·백업·출처 분리는 [배포 문서](docs/DEPLOYMENT.md)를 참고하세요. 프론트엔드와 API는 한 저장소에서 관리하며, Cloudflare Pages와 Oracle로 나누어 배포할 수 있습니다.
 
 ## 현재 범위와 다음 결정
 
