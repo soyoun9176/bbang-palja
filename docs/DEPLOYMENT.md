@@ -1,6 +1,6 @@
 # 배포 준비
 
-현재 파일은 로컬 테스트와 향후 배포 준비를 위한 구성입니다. Oracle이나 Cloudflare에 실제 리소스를 생성하거나 배포하지 않습니다.
+프론트엔드는 Cloudflare Pages 프로젝트 `bbang-palja`에 Git 연동으로 배포합니다. 공개 주소는 https://bbang-palja.pages.dev 입니다. Oracle API는 별도로 배포하고 연결해야 하며, 현재 `frontend/config.js`에는 운영 API 주소가 설정되어 있지 않습니다.
 
 ## 환경 변수
 
@@ -48,7 +48,19 @@ Python의 내장 HTTP 서버는 프로토타입 실행용입니다. 외부 공�
 
 ## Cloudflare Pages 프론트엔드
 
-프론트엔드는 별도 빌드가 없습니다. Git remote 연결 대신 Pages의 정적 파일 직접 업로드 방식으로도 시작할 수 있습니다. 업로드 대상은 `frontend/` 폴더의 내용입니다. Git 연동을 나중에 사용하면 빌드 명령은 비워 두고 출력 디렉터리는 `frontend`로 지정합니다.
+프론트엔드는 별도 빌드가 없습니다. GitHub의 `soyoun9176/bbang-palja` 저장소를 Pages에 연결했으며, 설정은 다음과 같습니다.
+
+| 항목 | 설정 |
+| --- | --- |
+| 운영 브랜치 | `main`, 자동 배포 활성화 |
+| 프레임워크 | `None` |
+| 루트 디렉터리 | 저장소 최상위, 입력란은 비움 |
+| 빌드 명령 | 비움 |
+| 출력 디렉터리 | `frontend` |
+| 빌드 감시 경로 | `frontend/*` |
+| 미리보기 자동 배포 | 비활성화; 테스트 API 준비 후 별도로 연결 |
+
+`frontend/` 변경이 포함된 커밋이 `main`에 올라가면 프론트엔드를 자동 배포합니다. 백엔드만 변경한 경우 Pages 배포는 실행하지 않습니다. 정적 파일 배포가 성공해도 API 연결 전에는 앱에 연결 오류가 표시됩니다.
 
 `frontend/config.js`에서 실제 API의 HTTPS 주소를 설정합니다.
 
@@ -60,7 +72,7 @@ window.KAMBO_CONFIG = {
 
 이 설정은 브라우저에 공개됩니다. API 주소만 넣고 DB URL이나 담당자 비밀번호를 넣지 않습니다. API 서버의 `ALLOWED_ORIGINS`에는 Pages의 **정확한 출처**를 넣습니다. 경로나 마지막 `/` 없이 `https://프로젝트.pages.dev` 형태입니다. 별도 미리보기 도메인을 사용할 경우 해당 출처도 지정해야 합니다.
 
-`/admin` 진입은 정적 호스팅의 파일·라우팅 규칙을 확인합니다. Pages 배포 후 구매자 페이지와 담당자 페이지를 각각 직접 새로고침하고 API 호출·로그인·CORS를 확인합니다. HTTPS 프론트엔드는 HTTPS API에 연결해야 합니다.
+`frontend/_redirects`의 `/admin / 200` 규칙은 주소를 유지하면서 담당자 화면에 루트 HTML을 제공합니다. 대상을 `/index.html`로 지정하면 Pages의 기본 URL 정규화로 `/`에 이동하여 담당자 경로를 잃을 수 있습니다. Pages 배포 후 구매자 페이지와 담당자 페이지를 각각 직접 새로고침하고 API 호출·로그인·CORS를 확인합니다. HTTPS 프론트엔드는 HTTPS API에 연결해야 합니다.
 
 ## 데이터 보존과 리허설
 
