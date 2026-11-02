@@ -40,13 +40,13 @@ function shell(content) {
     ${state.user?`<button class="profile-button" data-action="profile">${esc(state.user.name)}${isAdmin?' · 담당자':''} ${icon('chevron')}</button>`:isAdmin?'<span class="muted">담당자 로그인</span>':''}</header>
     ${state.user?`<nav class="primary-nav" aria-label="${isAdmin?'담당자 메뉴':'주요 메뉴'}">${(isAdmin?staffNav:buyerNav).map(x=>navButton(x)).join('')}</nav>`:''}
     ${staffStockBar()}<main class="main">${content}</main>
-    ${!isAdmin&&state.user&&state.route==='shop'&&cartCount()?`<button class="mobile-cart" data-action="open-cart">선택한 빵 ${cartCount()}개 <strong>${money(cartTotal())}원 · 구매하기 ${icon('arrow')}</strong></button>`:''}
+    ${!isAdmin&&state.user&&state.route==='shop'&&cartCount()?`<button class="mobile-cart" data-action="open-cart">선택 수량 ${cartCount()} <strong>${money(cartTotal())}원 · 구매하기 ${icon('arrow')}</strong></button>`:''}
   </div>`;
 }
 function pageHeading(title,desc='') { return `<div class="page-heading"><div><h1>${title}</h1>${desc?`<p>${desc}</p>`:''}</div></div>`; }
 function subnav(items) { return `<nav class="subnav" aria-label="${['dice','ranking'].includes(state.route)?'이벤트 메뉴':'구매 메뉴'}">${items.map(([route,label])=>`<button class="${state.route===route?'active':''}" data-action="navigate" data-route="${route}" ${state.route===route?'aria-current="page"':''}>${label}</button>`).join('')}</nav>`; }
 function purchaseHeading() { return `${pageHeading('빵 구매','예판 수령 또는 현판 구매를 선택해 주세요.')}${subnav([['shop','현판 구매'],['pickup','예판 수령'],['orders','내 주문']])}`; }
-function eventHeading() { return `${pageHeading('이벤트 참여','최고의 연금술사 · 구매한 빵 1개당 주사위 1개')}${subnav([['dice','주사위 · 빵 뽑기'],['ranking','점수 순위']])}`; }
+function eventHeading() { return `${pageHeading('이벤트 참여','최고의 연금술사 · 구매 승인 후 주사위 지급')}${subnav([['dice','주사위 · 빵 뽑기'],['ranking','점수 순위']])}`; }
 function prototypeNotice() { return window.KAMBO_CONFIG?.prototype||state.config.demo?'<p class="prototype-note">가안 테스트 · 샘플 데이터입니다.</p>':''; }
 function cartCount(){return Object.values(state.cart).reduce((s,v)=>s+v,0);}
 function cartTotal(){return state.products.reduce((s,p)=>s+p.price*(state.cart[p.id]||0),0);}
@@ -54,14 +54,14 @@ function productImage(product){const name=String(product.image||'salt-bread').re
 
 function renderBasket() {
   const entries=state.products.filter(p=>state.cart[p.id]);
-  return `<section class="basket"><h2>선택한 빵</h2>${entries.length?`<div class="basket-items">${entries.map(p=>`<div class="basket-item"><div><strong>${esc(p.name)} × ${state.cart[p.id]}</strong><span>${money(p.price*state.cart[p.id])}원</span></div><button class="icon-button" data-action="remove-cart" data-id="${p.id}" aria-label="${esc(p.name)} 선택 취소">${icon('x')}</button></div>`).join('')}</div>`:'<p class="muted">구매할 빵의 수량을 선택해 주세요.</p>'}
-  <div class="basket-total"><span>총 ${cartCount()}개</span><strong>${money(cartTotal())}원</strong></div>
+  return `<section class="basket"><h2>선택한 빵</h2>${entries.length?`<div class="basket-items">${entries.map(p=>`<div class="basket-item"><div><strong>${esc(p.name)} × ${state.cart[p.id]}${p.unit||'개'}</strong><span>${money(p.price*state.cart[p.id])}원</span></div><button class="icon-button" data-action="remove-cart" data-id="${p.id}" aria-label="${esc(p.name)} 선택 취소">${icon('x')}</button></div>`).join('')}</div>`:'<p class="muted">구매할 빵의 수량을 선택해 주세요.</p>'}
+  <div class="basket-total"><span>선택 수량 ${cartCount()}</span><strong>${money(cartTotal())}원</strong></div>
   <button class="primary-button full" data-action="checkout" ${!entries.length?'disabled':''}>구매 요청하기</button>
   <p class="form-hint">담당자에게 입금 내역을 보여주고 승인을 받아주세요.</p></section>`;
 }
 function renderShop() {
   return `${purchaseHeading()}<div class="shop-layout"><section class="product-list" aria-label="현판 빵 목록">${state.products.map(p=>`<article class="product-row">
-    <img src="${productImage(p)}" alt=""><div class="product-info"><h2>${esc(p.name)}</h2><strong>${money(p.price)}원</strong><small>${p.stock?`구매 가능 ${p.stock}개`:'품절'}</small></div>
+    <img src="${productImage(p)}" alt=""><div class="product-info"><h2>${esc(p.subtitle||p.name)}</h2><span class="menu-real-name">${esc(p.name)}</span><strong>${money(p.price)}원</strong><small>${p.stock?`구매 가능 ${p.stock}${p.unit||'개'}`:'품절'}</small></div>
     <div class="product-count"><button class="quantity-button" data-action="cart-minus" data-id="${p.id}" ${!state.cart[p.id]?'disabled':''} aria-label="${esc(p.name)} 수량 줄이기">${icon('minus')}</button><span aria-label="${esc(p.name)} 선택 수량">${state.cart[p.id]||0}</span><button class="quantity-button" data-action="cart-plus" data-id="${p.id}" ${(state.cart[p.id]||0)>=p.stock?'disabled':''} aria-label="${esc(p.name)} 수량 늘리기">${icon('plus')}</button></div>
     </article>`).join('')}</section><aside class="desktop-basket">${renderBasket()}</aside></div>`;
 }
@@ -111,7 +111,7 @@ function buyerAuthForm(mode='login') {
 function renderBuyerLogin() { return `<section class="login-card content-card"><h1>이름과 비밀번호를 입력해 주세요.</h1><p class="form-hint">처음이라면 계정을 만들어 주세요.</p>${buyerAuthForm(state.authMode)}</section>`; }
 function openAuth(mode='login') { modal(`<h2>로그인</h2>${buyerAuthForm(mode)}`); }
 
-async function checkout(button){if(!cartCount())return;if(!state.user){openAuth();return;}const items=Object.entries(state.cart).map(([product_id,quantity])=>({product_id:Number(product_id),quantity}));const op=operation('checkout',items);button.disabled=true;try{const {order}=await api('/api/orders',{method:'POST',body:{items,request_id:op.id}});state.cart={};op.done();if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);await refreshAfterAction();state.route='orders';history.replaceState(null,'','#orders');render();modal(`<div class="order-success"><div class="success-icon">${icon('check')}</div><h2>빵 구매 요청을 보냈어요!</h2><p>담당자에게 주문을 보여 주고<br>안내받은 계좌로 입금해 주세요.</p><div class="success-box">주문 #${String(order.id).padStart(3,'0')} · 총 ${order.quantity}개<strong>${money(order.total)}원</strong>확인 후 주사위 ${order.quantity}개가 지급돼요.</div><button class="primary-button full" data-action="close-modal">내 주문 확인하기 ${icon('arrow')}</button></div>`);}catch(error){if(error.status>=400&&error.status<500)op.done();button.disabled=false;toast(error.message,'error');await refresh().catch(()=>{});render();}}
+async function checkout(button){if(!cartCount())return;if(!state.user){openAuth();return;}const items=Object.entries(state.cart).map(([product_id,quantity])=>({product_id:Number(product_id),quantity}));const op=operation('checkout',items);button.disabled=true;try{const {order}=await api('/api/orders',{method:'POST',body:{items,request_id:op.id}});state.cart={};op.done();if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);await refreshAfterAction();state.route='orders';history.replaceState(null,'','#orders');render();modal(`<div class="order-success"><div class="success-icon">${icon('check')}</div><h2>빵 구매 요청을 보냈어요!</h2><p>담당자에게 주문을 보여 주고<br>안내받은 계좌로 입금해 주세요.</p><div class="success-box">주문 #${String(order.id).padStart(3,'0')} · 선택 수량 ${order.quantity}<strong>${money(order.total)}원</strong>확인 후 주사위 ${order.quantity}개가 지급돼요.</div><button class="primary-button full" data-action="close-modal">내 주문 확인하기 ${icon('arrow')}</button></div>`);}catch(error){if(error.status>=400&&error.status<500)op.done();button.disabled=false;toast(error.message,'error');await refresh().catch(()=>{});render();}}
 function openRewardDraw() {
   const target=(state.user.rewards_claimed+1)*(state.config.reward_step||7);
   modal(`<div class="draw-prompt"><span class="draw-icon">${icon('bread')}</span><h2>${target}점 달성!</h2><p>랜덤 빵 1개를 뽑을 수 있어요.</p><button class="primary-button full" data-action="claim-reward">빵 뽑기</button></div>`);
@@ -127,7 +127,7 @@ async function rollDice() {
     if(before<target&&state.user.score>=target)openRewardDraw();
   } catch(error) { if(error.status>=400&&error.status<500)op.done();state.rolling=false;render();toast(error.message,'error'); }
 }
-async function claimReward(button){button.disabled=true;const op=operation('reward');try{const {reward,user}=await api('/api/rewards/claim',{method:'POST',body:{request_id:op.id}});state.user=user;op.done();await refreshAfterAction();render();const p=state.products.find(p=>p.id===reward.product_id);modal(`<div class="order-success"><span class="label-kicker">랜덤 빵 당첨</span><div class="reward-reveal">${p?`<img src="${productImage(p)}" alt="${esc(reward.product_name)}" style="width:220px;height:150px;object-fit:contain;margin:auto">`:'🎁'}</div><h2>${esc(reward.product_name)}, 당첨!</h2><p>${reward.threshold}점 달성을 축하해요.<br>담당자에게 이 화면을 보여 주고 선물을 받아 가세요.</p><p class="form-hint">선물 기록 #${reward.id} · 담당자 화면에도 기록됐어요.</p><button class="primary-button full" data-action="close-modal">확인</button></div>`);}catch(error){if(error.status>=400&&error.status<500)op.done();button.disabled=false;toast(error.message,'error');}}
+async function claimReward(button){button.disabled=true;const op=operation('reward');try{const {reward,user}=await api('/api/rewards/claim',{method:'POST',body:{request_id:op.id}});state.user=user;op.done();await refreshAfterAction();render();const p=state.products.find(p=>p.id===reward.product_id);modal(`<div class="order-success"><span class="label-kicker">랜덤 빵 당첨</span><div class="reward-reveal">${p?`<img src="${productImage(p)}" alt="${esc(reward.product_name)}" style="width:220px;height:150px;object-fit:contain;margin:auto">`:'🎁'}</div><h2>${esc(p?.subtitle||reward.product_name)}, 당첨!</h2>${p?`<p class="menu-real-name">${esc(reward.product_name)}</p>`:''}<p>${reward.threshold}점 달성을 축하해요.<br>담당자에게 이 화면을 보여 주고 선물을 받아 가세요.</p><p class="form-hint">선물 기록 #${reward.id} · 담당자 화면에도 기록됐어요.</p><button class="primary-button full" data-action="close-modal">확인</button></div>`);}catch(error){if(error.status>=400&&error.status<500)op.done();button.disabled=false;toast(error.message,'error');}}
 document.addEventListener('click',async event=>{const el=event.target.closest('[data-action]');if(!el)return;const action=el.dataset.action;try{
 if(action==='navigate'){state.route=el.dataset.route;location.hash=state.route;render();window.scrollTo({top:0,behavior:'instant'});}
 else if(action==='login')isAdmin?document.querySelector('#staff-login input')?.focus():openAuth();

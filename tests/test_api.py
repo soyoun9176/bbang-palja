@@ -15,6 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -412,6 +413,74 @@ class APIIntegrationTests(unittest.TestCase):
         self.assertEqual(len(self.ok("GET", "/api/rewards", token=token)["rewards"]), 1)
         status, _ = self.call("POST", "/api/rewards/claim", {"request_id": request_id()}, token)
         self.assertEqual(status, 409)
+
+    def test_menu_prices_and_donut_set_grants_one_die_per_set(self):
+        menu = self.ok('GET', '/api/products')['products']
+        expected = {
+            '플레인 휘낭시에': 2800, '초코 휘낭시에': 3000,
+            '카라멜 휘낭시에': 3000, '무화과 휘낭시에': 3400,
+            '로투스 브라우니 치즈케이크': 3800, '레몬 다쿠아즈': 3500,
+            '얼그레이 다쿠아즈': 3500, '글레이즈드 도넛 5개 세트': 2000,
+            '보늬밤 마들렌': 2800, '에그타르트': 2800, '치즈타르트': 2800,
+        }
+        self.assertEqual({p['name']: p['price'] for p in menu}, expected)
+        donut = next(p for p in menu if p['name'] == '글레이즈드 도넛 5개 세트')
+        self.assertEqual(donut['unit'], '세트')
+        self.assertEqual(donut['subtitle'], '구슬')
+        if donut['stock'] != 3:
+            self.ok('POST', '/api/staff/inventory',
+                    {'product_id': donut['id'], 'bucket': 'stock', 'delta': 3-donut['stock'],
+                     'reason': '도넛 세트 단위 검증'}, self.staff_token)
+        token, user = self.buyer()
+        order = self.ok('POST', '/api/orders',
+                        {'items': [{'product_id': donut['id'], 'quantity': 2}],
+                         'request_id': request_id()}, token)['order']
+        self.assertEqual((order['quantity'], order['total']), (2, 4000))
+        self.ok('POST', f"/api/staff/orders/{order['id']}/approve", {}, self.staff_token)
+        self.assertEqual(self.me(token)['dice_balance'], 2)
+        after = self.ok('GET', '/api/products')['products']
+        self.assertEqual(next(p for p in after if p['id'] == donut['id'])['stock'], 1)
+
+
+class CatalogMigrationTests(unittest.TestCase):
+    def test_new_menu_keeps_legacy_orders_and_reservations_without_refilling_stock(self):
+        from server.app import Application, APIError, hash_pin, normalize_items, order_data, reservation_data
+        from server.catalog import sync_catalog
+        from server.db import Database
+        with tempfile.TemporaryDirectory(prefix='kambo-catalog-test-') as directory:
+            environment = dict(os.environ)
+            environment.pop('DATABASE_URL', None)
+            environment.update(DB_PATH=str(Path(directory)/'legacy.db'), APP_ENV='production',
+                               DEMO_SEED='0', STAFF_PASSWORD='test-staff-password')
+            with patch.dict(os.environ, environment, clear=True):
+                db = Database(ROOT)
+                db.initialize()
+                with db.transaction(write=True) as tx:
+                    tx.execute("INSERT INTO products VALUES (1,'이전 시연 빵','이전 설명',2500,9,2,4,'이전','salt-bread')")
+                    buyer = tx.insert("INSERT INTO users (name,role,password_hash,score,created_at) VALUES ('기존구매자','buyer',?,7,'2026-11-01')", (hash_pin('1234'),))
+                    order = tx.insert("INSERT INTO orders (user_id,customer_name,type,status,total,quantity,created_at) VALUES (?,'기존구매자','walkin','pending',2500,1,'2026-11-01')", (buyer,))
+                    tx.execute("INSERT INTO order_items (order_id,product_id,name,quantity,price) VALUES (?,1,'이전 시연 빵',1,2500)", (order,))
+                    reservation = tx.insert("INSERT INTO reservations (name,phone,created_at) VALUES ('기존구매자','01000000000','2026-11-01')")
+                    tx.execute('INSERT INTO reservation_items (reservation_id,product_id,quantity,price) VALUES (?,1,2,2500)', (reservation,))
+                app = Application()
+                menu = app.handle('GET', '/api/products', {}, {}, None)['products']
+                self.assertEqual(len(menu), 11)
+                self.assertNotIn(1, [p['id'] for p in menu])
+                with db.transaction(write=True) as tx:
+                    self.assertEqual(order_data(tx, order)['items'][0]['name'], '이전 시연 빵')
+                    old_reservation = tx.one('SELECT * FROM reservations WHERE id=?', (reservation,))
+                    self.assertEqual(reservation_data(tx, old_reservation)['total'], 5000)
+                    self.assertEqual(tx.one('SELECT stock,reward_stock FROM products WHERE id=1'), {'stock':9,'reward_stock':4})
+                    with self.assertRaises(APIError):
+                        normalize_items(tx, [{'product_id':1,'quantity':1}])
+                    tx.execute('UPDATE products SET stock=5 WHERE id=101')
+                    sync_catalog(tx, demo=True)
+                    self.assertEqual(tx.one('SELECT stock FROM products WHERE id=101')['stock'], 5)
+                login = app.handle('POST', '/api/auth/login', {}, {'name':'기존구매자','pin':'1234'}, None)
+                # Historical reward stock cannot be drawn from the current menu.
+                with self.assertRaises(APIError) as error:
+                    app.handle('POST', '/api/rewards/claim', {}, {'request_id':request_id()}, 'Bearer '+login['token'])
+                self.assertEqual(error.exception.status, 409)
 
 
 class FreshDatabaseConfigurationTests(unittest.TestCase):

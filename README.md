@@ -4,6 +4,8 @@
 
 공개 가안은 [구매자 화면](https://bbang-palja.pages.dev/)과 [담당자 화면](https://bbang-palja.pages.dev/admin)에서 확인합니다. 시연용 데이터이며 실제 결제는 처리하지 않습니다. Oracle API·Quick Tunnel 실행과 주소 변경 시 수동 복구 방법은 [운영 매뉴얼](docs/QUICK_TUNNEL_RUNBOOK.md)에 정리했습니다. 가안 담당자 비밀번호는 저장소에 넣지 않습니다.
 
+메뉴명·연금술 컨셉·확정 가격·도넛 세트 단위는 [메뉴 문서](docs/MENU.md)에 정리했습니다.
+
 ## 바로 실행
 
 Python 3.10 이상이 필요합니다. 프로젝트 폴더에서 실행합니다.

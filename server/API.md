@@ -8,7 +8,7 @@ All requests and responses use JSON. Send `Authorization: Bearer <token>` after 
 - `POST /api/auth/register` or `/api/auth/login` body `{name,pin}` → `{token,user}`. PIN is exactly four numeric digits. Register rejects an existing name.
 - `POST /api/staff/login` body `{name,password}` → `{token,user}`.
 - `GET /api/auth/me` → `{user}`. `POST /api/auth/logout` → `{ok:true}`.
-- `GET /api/products` → `{products:[{id,name,subtitle,price,stock,preorder_stock,reward_stock,category,image}]}`.
+- `GET /api/products` → `{products:[{id,name,subtitle,price,stock,preorder_stock,reward_stock,category,image,unit}]}`.
 - `GET /api/orders` → `{orders:[order]}` for current buyer.
 - `POST /api/orders` body `{items:[{product_id,quantity}],request_id}` → `{order}`. Reserves walk-in stock immediately.
 - `GET /api/preorders/lookup?name=김소연&phone=01012345678` → `{reservation:{id,name,phone,items,total,status}}`. Only the logged-in buyer's own name may be queried.
@@ -19,6 +19,8 @@ All requests and responses use JSON. Send `Authorization: Bearer <token>` after 
 - `GET /api/rewards` → `{rewards:[reward]}`.
 
 `user={id,name,role,score,dice_balance,rewards_claimed}`. `order={id,type,status,customer_name,user_id,items,total,quantity,created_at,approved_at,cancelled_at}`. Order types: `walkin`, `preorder`, `manual`. Status: `pending`, `approved`, `cancelled`. `items=[{product_id,name,quantity,price}]`.
+
+The current menu and prices are documented in [docs/MENU.md](../docs/MENU.md). `name` is the actual product/flavor; `subtitle` is the alchemy concept. `unit` is `개` or `세트`. One donut set contains five donuts, costs 2,000 KRW, consumes one inventory unit, and grants one die upon approval.
 
 ## Staff
 

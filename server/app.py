@@ -15,18 +15,11 @@ import traceback
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from .db import Database
+from .catalog import PRODUCT_IDS, PRODUCT_UNITS, sync_catalog
 
 ROOT = Path(__file__).resolve().parents[1]
 REWARD_STEP = 7
 PUBLIC_USER_FIELDS = ("id", "name", "role", "score", "dice_balance", "rewards_claimed")
-PRODUCTS = [
-    (1, "소금빵", "짭조름한 소금과 고소한 버터의 만남", 2500, 48, 0, 8, "시그니처", "salt-bread"),
-    (2, "휘낭시에", "겉은 바삭, 속은 촉촉한 작은 행복", 2200, 60, 0, 10, "구움과자", "financier"),
-    (3, "크루아상", "결마다 가득 채운 프랑스산 버터", 3500, 30, 0, 6, "페이스트리", "croissant"),
-    (4, "까눌레", "카라멜 껍질 속 달콤한 바닐라", 2800, 36, 0, 6, "구움과자", "canele"),
-    (5, "멜론빵", "바삭한 쿠키 이불을 덮은 폭신한 빵", 3000, 24, 0, 5, "달콤한 빵", "melon"),
-    (6, "초코 브라우니", "진한 초콜릿으로 채우는 오후", 3200, 32, 0, 5, "구움과자", "chocolate"),
-]
 
 
 def now():
@@ -99,7 +92,9 @@ def user_by_id(tx, user_id, buyer=False):
 
 
 def products(tx):
-    return tx.all("SELECT * FROM products ORDER BY id")
+    placeholders = ','.join('?' for _ in PRODUCT_IDS)
+    rows = tx.all(f"SELECT * FROM products WHERE id IN ({placeholders}) ORDER BY id", PRODUCT_IDS)
+    return [{**row, "unit": PRODUCT_UNITS.get(row["id"], "개")} for row in rows]
 
 
 def milk_stock(tx):
@@ -139,7 +134,7 @@ def normalize_items(tx, raw):
     result = []
     for product_id, count in sorted(quantities.items()):
         product = tx.one("SELECT * FROM products WHERE id = ?", (product_id,))
-        check(product is not None, "판매 중인 빵을 찾을 수 없습니다.", 404)
+        check(product is not None and product_id in PRODUCT_IDS, "판매 중인 빵을 찾을 수 없습니다.", 404)
         result.append({"product_id": product_id, "name": product["name"], "quantity": count, "price": product["price"]})
     return result
 
@@ -207,10 +202,7 @@ class Application:
 
     def seed(self):
         with self.db.transaction(write=True) as tx:
-            if not tx.one("SELECT id FROM products LIMIT 1"):
-                for product in PRODUCTS:
-                    initial = product if self.demo else (*product[:4], 0, 0, 0, *product[7:])
-                    tx.execute("INSERT INTO products (id,name,subtitle,price,stock,preorder_stock,reward_stock,category,image) VALUES (?,?,?,?,?,?,?,?,?)", initial)
+            sync_catalog(tx, demo=self.demo)
             if not tx.one("SELECT key FROM settings WHERE key = 'milk_stock'"):
                 tx.execute("INSERT INTO settings (key,value) VALUES ('milk_stock',?)", ("40" if self.demo else "0",))
             if self.demo and not tx.one("SELECT id FROM schedule LIMIT 1"):
@@ -225,9 +217,9 @@ class Application:
                 existing = tx.one("SELECT id FROM users WHERE name = ? AND role = 'buyer'", (name,))
                 ids[name] = existing["id"] if existing else tx.insert("INSERT INTO users (name,role,password_hash,score,dice_balance,created_at) VALUES (?,'buyer',?,?,?,?)", (name, pin_hash, score, dice, stamp))
             if not tx.one("SELECT id FROM reservations WHERE name = ? AND phone = ?", ("김소연", "01012345678")):
-                self.import_reservations(tx, [{"name": "김소연", "phone": "01012345678", "items": [{"product_id": 1, "quantity": 2}, {"product_id": 2, "quantity": 1}]}], "데모 준비")
+                self.import_reservations(tx, [{"name": "김소연", "phone": "01012345678", "items": [{"product_id": 101, "quantity": 2}, {"product_id": 102, "quantity": 1}]}], "데모 준비")
             buyer = user_by_id(tx, ids["최민준"])
-            insert_order(tx, buyer, normalize_items(tx, [{"product_id": 3, "quantity": 1}, {"product_id": 4, "quantity": 2}]), "walkin", "데모 준비")
+            insert_order(tx, buyer, normalize_items(tx, [{"product_id": 105, "quantity": 1}, {"product_id": 106, "quantity": 2}]), "walkin", "데모 준비")
             tx.insert("INSERT INTO memos (content,author,created_at) VALUES (?,?,?)", ("오픈 준비 완료! 현판은 입금과 빵 전달을 모두 확인한 뒤 승인해 주세요. 예판은 이름과 예약 빵을 한 번 더 확인해 주세요.", "오픈팀", stamp))
             tx.execute("INSERT INTO settings (key,value) VALUES ('demo_seeded','1')")
 
@@ -369,7 +361,7 @@ class Application:
                     current = user_by_id(tx, user["id"])
                     threshold = (current["rewards_claimed"] + 1) * REWARD_STEP
                     check(current["score"] >= threshold, f"다음 빵 뽑기는 {threshold}점부터 가능해요.", 409)
-                    available = tx.all("SELECT * FROM products WHERE reward_stock > 0 ORDER BY id")
+                    available = [product for product in products(tx) if product["reward_stock"] > 0]
                     total = sum(product["reward_stock"] for product in available)
                     check(total > 0, "이벤트 빵이 모두 소진되었습니다. 담당자에게 문의해 주세요.", 409)
                     ticket = secrets.randbelow(total)

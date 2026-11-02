@@ -157,3 +157,19 @@ sudo systemctl restart bbang-palja-api
 Pages는 `main`의 `frontend/` 변경에 자동 배포됩니다. `ops/` 변경만으로 API 서버가 자동 배포되지는 않습니다. 로컬 `localhost`·`127.0.0.1`에서는 `config.js`가 같은 출처 API를 사용하므로 평소처럼 `python3 -m server`로 개발할 수 있습니다.
 
 Quick Tunnel은 [공식적으로 테스트·개발용](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)이며, 재생성 시 주소 변경·가동 보장 없음·동시 처리 중인 요청 200개 제한이 있습니다. 200개는 사용자 수가 아니라 아직 응답이 끝나지 않은 요청 수입니다. 행사 전 예상 인원으로 확인하고, 주소가 바뀌면 이 매뉴얼로 복구합니다.
+
+## 시연용 메뉴 교체
+
+메뉴·가격·단위는 [메뉴 문서](MENU.md)와 `server/catalog.py`를 기준으로 합니다. 기존 시연 상품 기록은 보존하고 새 상품은 다른 번호로 추가합니다. 아래 절차는 가안 SQLite DB만 허용하며 DB를 먼저 백업합니다. API만 잠시 중지하고 터널은 유지합니다.
+
+```bash
+cd /home/ubuntu/projects/bbang-palja
+git pull --ff-only origin main
+sudo python3 ops/install-oracle.py --sync-code-only
+sudo systemctl stop bbang-palja-api
+sudo python3 ops/update-prototype-menu.py
+sudo systemctl start bbang-palja-api
+curl -fsS http://127.0.0.1:8000/api/health
+```
+
+갱신 스크립트가 실패해도 오류를 확인한 뒤 API를 다시 시작합니다. 새로 추가한 품목만 시연 재고를 넣고 기존 품목의 재고·주문·예약·계정은 보존합니다. 운영 DB에는 이 가안 스크립트를 사용하지 않습니다.
