@@ -73,6 +73,12 @@ Pages의 주소는 바뀌지 않습니다. CORS의 허용 출처 역시 Pages �
 
 GitHub SSH 인증이 거부되면 Mac에서 `ssh-add --apple-use-keychain ~/.ssh/github_personal`로 개인 키를 등록한 뒤 push합니다. 서버에는 GitHub 개인키를 복사하지 않습니다.
 
+## 예전에 열어둔 브라우저에서만 화면이 이상할 때
+
+이전 배포의 JS가 남아 있으면 API 연결 오류가 보일 수 있습니다. 먼저 페이지를 새로고침합니다. 예전 `/admin` 리다이렉트가 브라우저에 저장되어 담당자 주소가 구매자 화면으로 바뀐다면 `/admin?check=현재커밋`처럼 새 쿼리를 붙여 접속하거나 시크릿 창에서 확인합니다. 예: `https://bbang-palja.pages.dev/admin?check=b87e173`.
+
+이 증상만으로 API나 터널을 재시작하지 않습니다. 새 창에서도 실패하면 `/api/health`, 현재 터널 주소, Pages 배포 성공 여부를 위 순서로 확인합니다.
+
 ## 재시작과 종료
 
 API만 문제가 있으면 API만 재시작합니다. 이 작업은 Quick Tunnel 서비스를 재시작하지 않으므로 보통 터널 주소를 유지합니다.
