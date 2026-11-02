@@ -1,5 +1,8 @@
 """Event menu. Stable IDs keep previous prototype orders and reservations intact."""
 
+MILK_PRODUCT_ID = 112
+MILK_PRICE = 2000
+
 # id, real name, concept name, KRW, demo walk-in, reserved, unused legacy event bucket, category, icon
 PRODUCTS = [
     (101, '플레인 휘낭시에', '바람의 정수', 2800, 20, 0, 0, '휘낭시에', 'wind'),
@@ -13,9 +16,18 @@ PRODUCTS = [
     (109, '보늬밤 마들렌', '신성한 나무의 열매', 2800, 20, 0, 0, '마들렌', 'sacred-fruit'),
     (110, '에그타르트', '황금이 들어있는 용광로', 2800, 20, 0, 0, '타르트', 'furnace'),
     (111, '치즈타르트', '황금이 들어있는 용광로', 2800, 20, 0, 0, '타르트', 'furnace'),
+    (MILK_PRODUCT_ID, '우유', '', MILK_PRICE, 0, 0, 0, '음료', 'milk'),
 ]
 PRODUCT_IDS = tuple(product[0] for product in PRODUCTS)
 PRODUCT_UNITS = {108: '세트'}
+# Add real menu photos here after placing files in frontend/assets/photos/.
+# Example: 101: '/assets/photos/plain-financier.webp'
+PRODUCT_PHOTOS = {}
+REWARD_PRODUCT_IDS = tuple(product_id for product_id in PRODUCT_IDS if product_id != MILK_PRODUCT_ID)
+
+
+def dice_quantity(items):
+    return sum(item['quantity'] for item in items if item['product_id'] != MILK_PRODUCT_ID)
 
 
 def sync_catalog(tx, demo=False):

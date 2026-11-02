@@ -421,7 +421,7 @@ class APIIntegrationTests(unittest.TestCase):
             '카라멜 휘낭시에': 3000, '무화과 휘낭시에': 3400,
             '로투스 브라우니 치즈케이크': 3800, '레몬 다쿠아즈': 3500,
             '얼그레이 다쿠아즈': 3500, '글레이즈드 도넛 5개 세트': 2000,
-            '보늬밤 마들렌': 2800, '에그타르트': 2800, '치즈타르트': 2800,
+            '보늬밤 마들렌': 2800, '에그타르트': 2800, '치즈타르트': 2800, '우유': 2000,
         }
         self.assertEqual({p['name']: p['price'] for p in menu}, expected)
         donut = next(p for p in menu if p['name'] == '글레이즈드 도넛 5개 세트')
@@ -464,7 +464,7 @@ class CatalogMigrationTests(unittest.TestCase):
                     tx.execute('INSERT INTO reservation_items (reservation_id,product_id,quantity,price) VALUES (?,1,2,2500)', (reservation,))
                 app = Application()
                 menu = app.handle('GET', '/api/products', {}, {}, None)['products']
-                self.assertEqual(len(menu), 11)
+                self.assertEqual(len(menu), 12)
                 self.assertNotIn(1, [p['id'] for p in menu])
                 with db.transaction(write=True) as tx:
                     self.assertEqual(order_data(tx, order)['items'][0]['name'], '이전 시연 빵')

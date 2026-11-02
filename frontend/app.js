@@ -28,7 +28,7 @@ function navButton([route,img,label]) {
 function staffStockBar() {
   if(!isAdmin||!state.user||!state.staffData)return '';
   const pending=state.staffData.orders.filter(o=>o.status==='pending'&&o.type==='preorder');
-  return `<section class="staff-stock-bar" aria-label="현재 빵 재고"><strong>현재 재고</strong><div>${state.products.map(p=>{
+  return `<section class="staff-stock-bar" aria-label="현재 품목 재고"><strong>현재 재고</strong><div>${state.products.map(p=>{
     const held=pending.reduce((sum,o)=>sum+o.items.filter(i=>i.product_id===p.id).reduce((n,i)=>n+i.quantity,0),0);
     return `<span><b>${esc(p.name)}</b> 현판 ${p.stock} · 예판 ${p.preorder_stock+held}</span>`;
   }).join('')}</div></section>`;
@@ -45,27 +45,30 @@ function shell(content) {
 }
 function pageHeading(title,desc='') { return `<div class="page-heading"><div><h1>${title}</h1>${desc?`<p>${desc}</p>`:''}</div></div>`; }
 function subnav(items) { return `<nav class="subnav" aria-label="${['dice','ranking'].includes(state.route)?'이벤트 메뉴':'구매 메뉴'}">${items.map(([route,label])=>`<button class="${state.route===route?'active':''}" data-action="navigate" data-route="${route}" ${state.route===route?'aria-current="page"':''}>${label}</button>`).join('')}</nav>`; }
-function purchaseHeading() { return `${pageHeading('빵 구매','예판 수령 또는 현판 구매를 선택해 주세요.')}${subnav([['shop','현판 구매'],['pickup','예판 수령'],['orders','주문 내역']])}`; }
+function purchaseHeading() { return `${pageHeading('빵 구매','예약한 빵 수령 또는 현장 구매를 선택해 주세요.')}${subnav([['shop','현장 구매'],['pickup','예약한 빵 수령'],['orders','주문 내역']])}`; }
 function eventHeading() { return `${pageHeading('이벤트 참여','최고의 연금술사는 누구?')}${subnav([['ranking','점수 순위'],['dice','주사위 굴리기']])}`; }
 function prototypeNotice() { return window.KAMBO_CONFIG?.prototype||state.config.demo?'<p class="prototype-note">가안 테스트 · 샘플 데이터입니다.</p>':''; }
 function cartCount(){return Object.values(state.cart).reduce((s,v)=>s+v,0);}
 function cartTotal(){return state.products.reduce((s,p)=>s+p.price*(state.cart[p.id]||0),0);}
 function productImage(product){const name=String(product.image||'salt-bread').replace(/[^a-z-]/g,'');return `/assets/${name}.svg`;}
+function productPhoto(product){return `<div class="product-photo"><span class="photo-placeholder" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M3 3h18v18H3V3Zm0 14 6-6 4 4 3-3 5 5M8 8h.01"/></svg></span>${product.photo?`<img src="${esc(product.photo)}" alt="${esc(product.name)} 사진" loading="lazy" width="72" height="72">`:''}</div>`;}
 
 function renderBasket() {
   const entries=state.products.filter(p=>state.cart[p.id]);
-  return `<section class="basket"><h2>선택한 빵</h2>${entries.length?`<div class="basket-items">${entries.map(p=>`<div class="basket-item"><div><strong>${esc(p.name)} × ${state.cart[p.id]}${p.unit||'개'}</strong><span>${money(p.price*state.cart[p.id])}원</span></div><button class="icon-button" data-action="remove-cart" data-id="${p.id}" aria-label="${esc(p.name)} 선택 취소">${icon('x')}</button></div>`).join('')}</div>`:'<p class="muted">구매할 빵의 수량을 선택해 주세요.</p>'}
+  return `<section class="basket"><h2>선택한 품목</h2>${entries.length?`<div class="basket-items">${entries.map(p=>`<div class="basket-item"><div><strong>${esc(p.name)} × ${state.cart[p.id]}${p.unit||'개'}</strong><span>${money(p.price*state.cart[p.id])}원</span></div><button class="icon-button" data-action="remove-cart" data-id="${p.id}" aria-label="${esc(p.name)} 선택 취소">${icon('x')}</button></div>`).join('')}</div>`:'<p class="muted">구매할 품목의 수량을 선택해 주세요.</p>'}
   <div class="basket-total"><span>선택 수량 ${cartCount()}</span><strong>${money(cartTotal())}원</strong></div>
   <button class="primary-button full" data-action="checkout" ${!entries.length?'disabled':''}>구매 요청하기</button>
   <p class="form-hint">담당자에게 입금 내역을 보여주고 승인을 받아주세요.</p></section>`;
 }
 function renderShop() {
   return `${purchaseHeading()}<div class="shop-layout"><section class="product-list" aria-label="현판 빵 목록">${state.products.map(p=>`<article class="product-row ${p.stock<=0?'sold-out':''}" ${p.stock<=0?'aria-disabled="true"':''}>
-    <div class="product-info"><h2>${esc(p.name)}</h2>${p.subtitle?`<span class="menu-concept">${esc(p.subtitle)}</span>`:''}<div class="product-price"><strong>${money(p.price)}원</strong>${p.stock<=0?'<span class="sold-out-label">품절</span>':''}</div></div>
+    ${productPhoto(p)}
+    <div class="product-info"><h2>${esc(p.name)}</h2>${p.subtitle?`<span class="menu-concept">${esc(p.subtitle)}</span>`:''}<div class="product-price"><strong>${money(p.price)}원</strong>${p.dice_per_unit===0?'<span class="menu-concept">주사위 미지급</span>':''}${p.stock<=0?'<span class="sold-out-label">품절</span>':''}</div></div>
     <div class="product-count"><button class="quantity-button" data-action="cart-minus" data-id="${p.id}" ${p.stock<=0||!state.cart[p.id]?'disabled':''} aria-label="${esc(p.name)} 수량 줄이기">${icon('minus')}</button><span aria-label="${esc(p.name)} 선택 수량">${state.cart[p.id]||0}</span><button class="quantity-button" data-action="cart-plus" data-id="${p.id}" ${p.stock<=0||(state.cart[p.id]||0)>=p.stock?'disabled':''} aria-label="${esc(p.name)} 수량 늘리기">${icon('plus')}</button></div>
     </article>`).join('')}</section><aside class="desktop-basket">${renderBasket()}</aside></div>`;
 }
 function authRequired() { return renderBuyerLogin(); }
+function orderDice(order){return order.dice_quantity??order.quantity;}
 function orderLines(order){return `<div class="order-lines">${order.items.map(i=>`<div class="order-line"><span>${esc(i.name)} <span>× ${i.quantity}</span></span><span>${money(i.price*i.quantity)}원</span></div>`).join('')}</div>`;}
 function orderStatus(status){return `<span class="status ${status}">${icon(status==='approved'?'check':status==='cancelled'?'x':'clock')}${{pending:'담당자 확인 중',approved:'수령 완료',cancelled:'취소 완료'}[status]||status}</span>`;}
 function renderPickup() {
@@ -73,8 +76,8 @@ function renderPickup() {
   ${state.reservation?`<div class="reservation-result"><h3>${esc(state.reservation.name)} 님의 예약</h3>${orderLines(state.reservation)}<div class="basket-total"><span>예약 금액</span><strong>${money(state.reservation.total)}원</strong></div><button class="primary-button full" data-action="claim-preorder" data-id="${state.reservation.id}">담당자에게 수령 요청</button><p class="form-hint">담당자가 예약한 빵을 전달하고 승인하면 완료됩니다.</p></div>`:''}</section>`;
 }
 function renderOrders() {
-  return `${purchaseHeading()}<div class="narrow">${state.orders.length?state.orders.map(o=>`<article class="order-card"><div class="order-top"><strong>${{walkin:'현판 구매',preorder:'예판 수령',manual:'수기 판매'}[o.type]} #${String(o.id).padStart(3,'0')}</strong>${orderStatus(o.status)}</div>${orderLines(o)}<div class="order-bottom"><span>${time(o.created_at)}</span><strong>${money(o.total)}원</strong></div>
-  ${o.status==='pending'?`<p class="callout">${o.type==='preorder'?'담당자에게 예약 내역을 보여주고 빵을 받아주세요.':'담당자에게 주문과 입금 내역을 보여주세요.'} 승인 대기 중입니다.</p>`:o.status==='approved'?`<div class="callout"><span>구매 완료 · 주사위 ${o.quantity}개 지급</span><button class="text-button" data-action="navigate" data-route="ranking">이벤트 참여하기 ${icon('arrow')}</button></div>`:''}</article>`).join(''):'<div class="empty-state"><h2>주문 내역이 없습니다.</h2><button class="primary-button" data-action="navigate" data-route="shop">현판 구매하기</button></div>'}</div>`;
+  return `${purchaseHeading()}<div class="narrow">${state.orders.length?state.orders.map(o=>`<article class="order-card"><div class="order-top"><strong>${{walkin:'현장 구매',preorder:'예약한 빵 수령',manual:'수기 판매'}[o.type]} #${String(o.id).padStart(3,'0')}</strong>${orderStatus(o.status)}</div>${orderLines(o)}<div class="order-bottom"><span>${time(o.created_at)}</span><strong>${money(o.total)}원</strong></div>
+  ${o.status==='pending'?`<p class="callout">${o.type==='preorder'?'담당자에게 예약 내역을 보여주고 빵을 받아주세요.':'담당자에게 주문과 입금 내역을 보여주세요.'} 승인 대기 중입니다.</p>`:o.status==='approved'?`<div class="callout"><span>구매 완료 · ${orderDice(o)?`주사위 ${orderDice(o)}개 지급`:'우유는 주사위 미지급'}</span><button class="text-button" data-action="navigate" data-route="ranking">이벤트 참여하기 ${icon('arrow')}</button></div>`:''}</article>`).join(''):'<div class="empty-state"><h2>주문 내역이 없습니다.</h2><button class="primary-button" data-action="navigate" data-route="shop">현장 구매하기</button></div>'}</div>`;
 }
 const dieDots={1:[5],2:[1,9],3:[1,5,9],4:[1,3,7,9],5:[1,3,5,7,9],6:[1,3,4,6,7,9]};
 function die(value=5){return `<div class="big-dice" aria-label="주사위 ${value}">${Array.from({length:9},(_,i)=>`<i class="${dieDots[value].includes(i+1)?'dot':''}"></i>`).join('')}</div>`;}
@@ -87,7 +90,8 @@ function eventProgress(user=state.user) {
   const level=Math.min(characterTiers.length-1,claimed),target=(claimed+1)*step;
   return {step,claimed,level,target,remaining:Math.max(0,target-user.score),eligible:user.score>=target};
 }
-function characterPortrait(level,className='') {
+function characterPortrait(level,className='',earnedLevel=eventProgress().level) {
+  if(level===0||level>earnedLevel)return `<div class="alchemist character-unknown ${className}" role="img" aria-label="아직 얻지 못한 캐릭터">?</div>`;
   return `<img class="alchemist ${className}" src="/assets/alchemist-${level}.svg" alt="${characterTiers[level].name}" width="160" height="160">`;
 }
 function diceAction({roll=false}={}) {
@@ -141,12 +145,12 @@ function buyerAuthForm(mode='login') {
 function renderBuyerLogin() { return `<section class="login-card content-card"><h1>이름과 비밀번호를 입력해 주세요.</h1><p class="form-hint">처음이라면 계정을 만들어 주세요.</p>${buyerAuthForm(state.authMode)}</section>`; }
 function openAuth(mode='login') { modal(`<h2>로그인</h2>${buyerAuthForm(mode)}`); }
 
-async function checkout(button){if(!cartCount())return;if(!state.user){openAuth();return;}const items=Object.entries(state.cart).map(([product_id,quantity])=>({product_id:Number(product_id),quantity}));const op=operation('checkout',items);button.disabled=true;try{const {order}=await api('/api/orders',{method:'POST',body:{items,request_id:op.id}});state.cart={};op.done();if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);await refreshAfterAction();state.route='orders';history.replaceState(null,'','#orders');render();modal(`<div class="order-success"><div class="success-icon">${icon('check')}</div><h2>빵 구매 요청을 보냈어요!</h2><p>담당자에게 주문을 보여 주고<br>안내받은 계좌로 입금해 주세요.</p><div class="success-box">주문 #${String(order.id).padStart(3,'0')} · 선택 수량 ${order.quantity}<strong>${money(order.total)}원</strong>확인 후 주사위 ${order.quantity}개가 지급돼요.</div><button class="primary-button full" data-action="close-modal">주문 내역 확인하기 ${icon('arrow')}</button></div>`);}catch(error){if(error.status>=400&&error.status<500)op.done();button.disabled=false;toast(error.message,'error');await refresh().catch(()=>{});render();}}
+async function checkout(button){if(!cartCount())return;if(!state.user){openAuth();return;}const items=Object.entries(state.cart).map(([product_id,quantity])=>({product_id:Number(product_id),quantity}));const op=operation('checkout',items);button.disabled=true;try{const {order}=await api('/api/orders',{method:'POST',body:{items,request_id:op.id}});state.cart={};op.done();if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);await refreshAfterAction();state.route='orders';history.replaceState(null,'','#orders');render();modal(`<div class="order-success"><div class="success-icon">${icon('check')}</div><h2>빵 구매 요청을 보냈어요!</h2><p>담당자에게 주문을 보여 주고<br>안내받은 계좌로 입금해 주세요.</p><div class="success-box">주문 #${String(order.id).padStart(3,'0')} · 선택 수량 ${order.quantity}<strong>${money(order.total)}원</strong>${orderDice(order)?`확인 후 주사위 ${orderDice(order)}개가 지급돼요.`:'우유 구매에는 주사위가 지급되지 않아요.'}</div><button class="primary-button full" data-action="close-modal">주문 내역 확인하기 ${icon('arrow')}</button></div>`);}catch(error){if(error.status>=400&&error.status<500)op.done();button.disabled=false;toast(error.message,'error');await refresh().catch(()=>{});render();}}
 function openLevelUp() {
   const {level,target,eligible}=eventProgress();
   if(!eligible)return;
   const nextLevel=Math.min(5,level+1);
-  modal(`<div class="draw-prompt">${characterPortrait(nextLevel,'level-preview')}<span class="label-kicker">${level<5?'다음 연금술사':'최고 레벨 달성'}</span><h2>${target}점 달성!</h2><p>${level<5?`${characterTiers[nextLevel].name}로 레벨업하고<br>`:''}랜덤 빵 1개를 받아요.</p><button class="primary-button full" data-action="claim-reward">${level<5?'레벨업하고 빵 받기':'빵 보상 받기'}</button></div>`);
+  modal(`<div class="draw-prompt">${characterPortrait(nextLevel,'level-preview')}<span class="label-kicker">${level<5?'다음 연금술사':'최고 레벨 달성'}</span><h2>${target}점 달성!</h2><p>${level<5?'새 캐릭터로 레벨업하고<br>':''}랜덤 빵 1개를 받아요.</p><button class="primary-button full" data-action="claim-reward">${level<5?'레벨업하고 빵 받기':'빵 보상 받기'}</button></div>`);
 }
 async function rollDice() {
   if(state.rolling||state.leveling||!state.user?.dice_balance)return;
@@ -168,12 +172,13 @@ async function claimReward(button) {
     state.leveling=false;render();
     const p=state.products.find(p=>p.id===reward.product_id),level=eventProgress(user).level;
     const upgraded=user.rewards_claimed<=5;
-    modal(`<div class="order-success level-up-result"><span class="label-kicker">${upgraded?'LEVEL UP!':'랜덤 빵 당첨'}</span>${characterPortrait(level,'level-preview')}<h2>${upgraded?`Lv. ${level} ${characterTiers[level].name}`:'전설의 연금술은 계속!'}</h2><div class="bread-prize">${p?`<img src="${productImage(p)}" alt="" width="76" height="64">`:icon('bread')}<div><span>함께 받은 랜덤 빵</span><strong>${esc(reward.product_name)}</strong>${p?.subtitle?`<small>${esc(p.subtitle)}</small>`:''}</div></div><p>${reward.threshold}점 달성을 축하해요.<br>담당자에게 이 화면을 보여 주고 빵을 받아 가세요.</p><p class="form-hint">당첨 #${reward.id} · 담당자 화면에도 기록됐어요.</p><button class="primary-button full" data-action="close-modal">확인</button></div>`);
+    modal(`<div class="order-success level-up-result"><span class="label-kicker">${upgraded?'LEVEL UP!':'랜덤 빵 당첨'}</span>${characterPortrait(level,'level-preview',level)}<h2>${upgraded?`Lv. ${level} ${characterTiers[level].name}`:'전설의 연금술은 계속!'}</h2><div class="bread-prize">${p?`<img src="${productImage(p)}" alt="" width="76" height="64">`:icon('bread')}<div><span>함께 받은 랜덤 빵</span><strong>${esc(reward.product_name)}</strong>${p?.subtitle?`<small>${esc(p.subtitle)}</small>`:''}</div></div><p>${reward.threshold}점 달성을 축하해요.<br>담당자에게 이 화면을 보여 주고 빵을 받아 가세요.</p><p class="form-hint">당첨 #${reward.id} · 담당자 화면에도 기록됐어요.</p><button class="primary-button full" data-action="close-modal">확인</button></div>`);
   } catch(error) {
     if(error.status>=400&&error.status<500)op.done();
     state.leveling=false;button.disabled=false;toast(error.message,'error');
   }
 }
+document.addEventListener('error',event=>{if(event.target.matches?.('.product-photo img'))event.target.remove();},true);
 document.addEventListener('click',async event=>{const el=event.target.closest('[data-action]');if(!el)return;const action=el.dataset.action;try{
 if(action==='navigate'){state.route=el.dataset.route;location.hash=state.route;render();window.scrollTo({top:0,behavior:'instant'});}
 else if(action==='login')isAdmin?document.querySelector('#staff-login input')?.focus():openAuth();
@@ -196,6 +201,6 @@ window.addEventListener('hashchange',()=>{state.route=location.hash.slice(1)||(i
 let polling=false,pendingRender=false;
 function snapshot(){return JSON.stringify([state.user,state.products,state.orders,state.staffData,state.leaderboard,state.rewards]);}
 function safeToRender(){return !document.querySelector('.modal')&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)&&!state.rolling&&!state.leveling;}
-setInterval(async()=>{if(polling||state.rolling||state.leveling||document.hidden)return;polling=true;try{const before=snapshot();const oldOrders=isAdmin?state.staffData?.orders||[]:state.orders;await refresh();const newOrders=isAdmin?state.staffData?.orders||[]:state.orders;if(isAdmin){const fresh=newOrders.filter(o=>o.status==='pending'&&!oldOrders.some(old=>old.id===o.id));if(fresh.length)toast(`${fresh[0].customer_name} 님의 새 주문이 도착했어요.`);}else{const newlyApproved=newOrders.find(o=>o.status==='approved'&&oldOrders.find(old=>old.id===o.id&&old.status==='pending'));if(newlyApproved)toast(`주문이 승인됐어요. 주사위 ${newlyApproved.quantity}개가 도착했어요!`);}if(before!==snapshot())pendingRender=true;if(pendingRender&&safeToRender()){render();pendingRender=false;}}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;render();toast('다시 로그인해 주세요.','error');}}finally{polling=false;}},4000);
+setInterval(async()=>{if(polling||state.rolling||state.leveling||document.hidden)return;polling=true;try{const before=snapshot();const oldOrders=isAdmin?state.staffData?.orders||[]:state.orders;await refresh();const newOrders=isAdmin?state.staffData?.orders||[]:state.orders;if(isAdmin){const fresh=newOrders.filter(o=>o.status==='pending'&&!oldOrders.some(old=>old.id===o.id));if(fresh.length)toast(`${fresh[0].customer_name} 님의 새 주문이 도착했어요.`);}else{const newlyApproved=newOrders.find(o=>o.status==='approved'&&oldOrders.find(old=>old.id===o.id&&old.status==='pending'));if(newlyApproved)toast(`주문이 승인됐어요. ${orderDice(newlyApproved)?`주사위 ${orderDice(newlyApproved)}개가 도착했어요!`:'우유 구매에는 주사위가 지급되지 않아요.'}`);}if(before!==snapshot())pendingRender=true;if(pendingRender&&safeToRender()){render();pendingRender=false;}}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;render();toast('다시 로그인해 주세요.','error');}}finally{polling=false;}},4000);
 async function boot(){try{await refresh();render();}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;await refresh();render();}else document.querySelector('#app').innerHTML=`<div class="connection-error">${brand()}<h1>빵집에 연결하고 있어요</h1><p>잠시 후 다시 연결해 주세요.<br>${esc(error.message)}</p><button class="primary-button" data-action="retry">다시 연결하기 ${icon('arrow')}</button></div>`;}}
 boot();

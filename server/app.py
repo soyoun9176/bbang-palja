@@ -15,7 +15,7 @@ import traceback
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from .db import Database
-from .catalog import PRODUCT_IDS, PRODUCT_UNITS, sync_catalog
+from .catalog import PRODUCT_IDS, PRODUCT_UNITS, PRODUCT_PHOTOS, MILK_PRODUCT_ID, REWARD_PRODUCT_IDS, dice_quantity, sync_catalog
 
 ROOT = Path(__file__).resolve().parents[1]
 REWARD_STEP = 10
@@ -98,11 +98,25 @@ def user_by_id(tx, user_id, buyer=False):
 def products(tx):
     placeholders = ','.join('?' for _ in PRODUCT_IDS)
     rows = tx.all(f"SELECT * FROM products WHERE id IN ({placeholders}) ORDER BY id", PRODUCT_IDS)
-    return [{**row, "unit": PRODUCT_UNITS.get(row["id"], "개")} for row in rows]
+    return [{**row, "unit": PRODUCT_UNITS.get(row["id"], "개"), "photo": PRODUCT_PHOTOS.get(row["id"], ""),
+             "dice_per_unit": 0 if row["id"] == MILK_PRODUCT_ID else 1,
+             "reward_eligible": row["id"] in REWARD_PRODUCT_IDS} for row in rows]
 
 
 def milk_stock(tx):
-    return int(tx.one("SELECT value FROM settings WHERE key = 'milk_stock'")["value"])
+    return tx.one("SELECT stock FROM products WHERE id = ?", (MILK_PRODUCT_ID,))["stock"]
+
+
+def merge_legacy_milk_stock(tx):
+    legacy = tx.one("SELECT value FROM settings WHERE key = 'milk_stock'")
+    count = int(legacy['value']) if legacy else 0
+    if count:
+        tx.execute('UPDATE products SET stock = stock + ? WHERE id = ?', (count,MILK_PRODUCT_ID))
+        tx.execute("UPDATE settings SET value = '0' WHERE key = 'milk_stock'")
+        milk = tx.one('SELECT * FROM products WHERE id = ?', (MILK_PRODUCT_ID,))
+        reason = '별도 우유 재고를 일반 품목 재고로 통합'
+        inventory_log(tx, milk, 'milk', -count, reason, '시스템')
+        inventory_log(tx, milk, 'stock', count, reason, '시스템')
 
 
 def inventory_log(tx, product, bucket, delta, reason, actor):
@@ -123,11 +137,8 @@ def merge_legacy_reward_stock(tx):
 
 def change_inventory(tx, product_id, bucket, delta, reason, actor):
     if bucket == "milk":
-        count = milk_stock(tx)
-        check(count + delta >= 0, "우유 재고가 부족합니다.", 409)
-        tx.execute("UPDATE settings SET value = ? WHERE key = 'milk_stock'", (str(count + delta),))
-        inventory_log(tx, None, bucket, delta, reason, actor)
-        return
+        # Compatibility for old clients; all milk now uses the product stock.
+        product_id, bucket = MILK_PRODUCT_ID, 'stock'
     check(bucket in ("stock", "preorder_stock"), "잘못된 재고 구분입니다.")
     product = tx.one("SELECT * FROM products WHERE id = ?", (product_id,))
     check(product is not None, "빵을 찾을 수 없습니다.", 404)
@@ -138,10 +149,10 @@ def change_inventory(tx, product_id, bucket, delta, reason, actor):
 
 
 def normalize_items(tx, raw):
-    check(isinstance(raw, list) and 1 <= len(raw) <= 30, "구매할 빵을 1종 이상 선택해 주세요.")
+    check(isinstance(raw, list) and 1 <= len(raw) <= 30, "구매할 품목을 1종 이상 선택해 주세요.")
     quantities = {}
     for item in raw:
-        check(isinstance(item, dict), "빵 선택 정보가 올바르지 않습니다.")
+        check(isinstance(item, dict), "품목 선택 정보가 올바르지 않습니다.")
         product_id = integer(item.get("product_id"), "빵 번호", maximum=1_000_000)
         count = integer(item.get("quantity"), "빵 수량", maximum=100)
         quantities[product_id] = quantities.get(product_id, 0) + count
@@ -149,7 +160,7 @@ def normalize_items(tx, raw):
     result = []
     for product_id, count in sorted(quantities.items()):
         product = tx.one("SELECT * FROM products WHERE id = ?", (product_id,))
-        check(product is not None and product_id in PRODUCT_IDS, "판매 중인 빵을 찾을 수 없습니다.", 404)
+        check(product is not None and product_id in PRODUCT_IDS, "판매 중인 품목을 찾을 수 없습니다.", 404)
         result.append({"product_id": product_id, "name": product["name"], "quantity": count, "price": product["price"]})
     return result
 
@@ -158,6 +169,7 @@ def order_data(tx, order_id):
     order = tx.one("SELECT * FROM orders WHERE id = ?", (order_id,))
     check(order is not None, "주문을 찾을 수 없습니다.", 404)
     order["items"] = tx.all("SELECT product_id, name, quantity, price FROM order_items WHERE order_id = ? ORDER BY id", (order_id,))
+    order["dice_quantity"] = dice_quantity(order["items"])
     return order
 
 
@@ -166,11 +178,40 @@ def all_orders(tx, user_id=None):
     return [order_data(tx, row["id"]) for row in rows]
 
 
+def manual_buyer(tx, body, reservation_name=None):
+    if body.get('user_id') is not None:
+        buyer = user_by_id(tx, integer(body.get('user_id'), '구매자 번호', maximum=1_000_000), buyer=True)
+    else:
+        name = reservation_name if reservation_name is not None else person_name(body.get('name'))
+        pin = pin_value(body.get('pin'))
+        buyer = tx.one("SELECT * FROM users WHERE name = ? AND role = 'buyer'", (name,))
+        if buyer is None:
+            buyer_id = tx.insert("INSERT INTO users (name,role,password_hash,created_at) VALUES (?,'buyer',?,?)", (name, hash_pin(pin), now()))
+            buyer = user_by_id(tx, buyer_id)
+        else:
+            check(verify_pin(pin, buyer['password_hash']), '같은 이름의 계정이 있습니다. 기존 비밀번호를 입력하거나 구매자를 선택해 주세요.', 409)
+    if reservation_name is not None:
+        check(buyer['name'] == reservation_name, '예약자와 같은 이름의 구매자 계정으로 처리해 주세요.', 409)
+    return buyer
+
+
+def approve_order(tx, order):
+    if order['status'] == 'approved':
+        return order
+    check(order['status'] == 'pending', '이미 처리된 주문입니다. 현재 상태를 확인해 주세요.', 409)
+    tx.execute("UPDATE orders SET status = 'approved', approved_at = ? WHERE id = ?", (now(),order['id']))
+    tx.execute('UPDATE users SET dice_balance = dice_balance + ? WHERE id = ?', (order['dice_quantity'],order['user_id']))
+    if order['reservation_id']:
+        tx.execute("UPDATE reservations SET status = 'approved' WHERE id = ?", (order['reservation_id'],))
+    return order_data(tx, order['id'])
+
+
 def insert_order(tx, buyer, items, order_type, actor, approved=False, reservation_id=None):
     bucket = "preorder_stock" if order_type == "preorder" else "stock"
     stamp = now()
     for item in items:
-        change_inventory(tx, item["product_id"], bucket, -item["quantity"], "예판 수령 요청" if order_type == "preorder" else "현판 주문 접수", actor)
+        reason = ('예약 수기 수령' if approved else '예판 수령 요청') if order_type == 'preorder' else '현판 주문 접수'
+        change_inventory(tx, item["product_id"], bucket, -item["quantity"], reason, actor)
     order_id = tx.insert("INSERT INTO orders (user_id,customer_name,type,status,reservation_id,total,quantity,created_at,approved_at) VALUES (?,?,?,?,?,?,?,?,?)",
                          (buyer["id"], buyer["name"], order_type, "approved" if approved else "pending", reservation_id,
                           sum(i["price"] * i["quantity"] for i in items), sum(i["quantity"] for i in items), stamp, stamp if approved else None))
@@ -178,7 +219,7 @@ def insert_order(tx, buyer, items, order_type, actor, approved=False, reservatio
         tx.insert("INSERT INTO order_items (order_id,product_id,name,quantity,price) VALUES (?,?,?,?,?)",
                   (order_id, item["product_id"], item["name"], item["quantity"], item["price"]))
     if approved:
-        tx.execute("UPDATE users SET dice_balance = dice_balance + ? WHERE id = ?", (sum(i["quantity"] for i in items), buyer["id"]))
+        tx.execute("UPDATE users SET dice_balance = dice_balance + ? WHERE id = ?", (dice_quantity(items), buyer["id"]))
     return order_data(tx, order_id)
 
 
@@ -186,6 +227,13 @@ def reservation_data(tx, reservation):
     result = {key: reservation[key] for key in ("id", "name", "phone", "status")}
     result["items"] = tx.all("SELECT ri.product_id,p.name,ri.quantity,ri.price FROM reservation_items ri JOIN products p ON p.id = ri.product_id WHERE reservation_id = ? ORDER BY ri.id", (reservation["id"],))
     result["total"] = sum(item["price"] * item["quantity"] for item in result["items"])
+    return result
+
+
+def staff_reservation_data(tx, reservation):
+    result = reservation_data(tx, reservation)
+    result['dice_quantity'] = dice_quantity(result['items'])
+    result['order'] = order_data(tx,reservation['order_id']) if reservation['order_id'] else None
     return result
 
 
@@ -223,6 +271,7 @@ class Application:
             merge_legacy_reward_stock(tx)
             if not tx.one("SELECT key FROM settings WHERE key = 'milk_stock'"):
                 tx.execute("INSERT INTO settings (key,value) VALUES ('milk_stock',?)", ("40" if self.demo else "0",))
+            merge_legacy_milk_stock(tx)
             if self.demo and not tx.one("SELECT id FROM schedule LIMIT 1"):
                 for name, time, role in [("오픈팀", "11:00–13:00", "판매 · 포장"), ("오후팀", "13:00–15:00", "판매 · 이벤트"), ("마감팀", "15:00–17:00", "판매 · 재고 마감")]:
                     tx.insert("INSERT INTO schedule (name,time,role) VALUES (?,?,?)", (name, time, role))
@@ -379,7 +428,7 @@ class Application:
                     current = user_by_id(tx, user["id"])
                     threshold = (current["rewards_claimed"] + 1) * REWARD_STEP
                     check(current["score"] >= threshold, f"다음 빵 뽑기는 {threshold}점부터 가능해요.", 409)
-                    available = [product for product in products(tx) if product["stock"] > 0]
+                    available = [product for product in products(tx) if product["stock"] > 0 and product["reward_eligible"]]
                     total = sum(product["stock"] ** 2 for product in available)
                     check(total > 0, "현판 빵 재고가 모두 소진되었습니다. 담당자에게 문의해 주세요.", 409)
                     ticket = secrets.randbelow(total)
@@ -399,7 +448,8 @@ class Application:
     def handle_staff(self, method, path, body, user):
         if method == "GET" and path == "/api/staff/dashboard":
             with self.db.transaction() as tx:
-                stats = tx.one("SELECT COALESCE(SUM(CASE WHEN status = 'approved' THEN total ELSE 0 END),0) AS revenue, COALESCE(SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END),0) AS approved_orders, COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END),0) AS pending_orders, COALESCE(SUM(CASE WHEN status = 'approved' THEN quantity ELSE 0 END),0) AS bread_sold FROM orders")
+                stats = tx.one("SELECT COALESCE(SUM(CASE WHEN status = 'approved' THEN total ELSE 0 END),0) AS revenue, COALESCE(SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END),0) AS approved_orders, COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END),0) AS pending_orders FROM orders")
+                stats["bread_sold"] = tx.one("SELECT COALESCE(SUM(i.quantity),0) AS count FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.status='approved' AND i.product_id != ?", (MILK_PRODUCT_ID,))["count"]
                 stats["milk_stock"] = milk_stock(tx)
                 return {"orders": all_orders(tx), "products": products(tx), "stats": stats,
                         "users": [public_user(row) for row in tx.all("SELECT * FROM users WHERE role = 'buyer' ORDER BY name,id")],
@@ -417,10 +467,7 @@ class Application:
                     return {"order": order}
                 check(order["status"] == "pending", "이미 처리된 주문입니다. 현재 상태를 확인해 주세요.", 409)
                 if desired == "approved":
-                    tx.execute("UPDATE orders SET status = 'approved', approved_at = ? WHERE id = ?", (now(), order["id"]))
-                    tx.execute("UPDATE users SET dice_balance = dice_balance + ? WHERE id = ?", (order["quantity"], order["user_id"]))
-                    if order["reservation_id"]:
-                        tx.execute("UPDATE reservations SET status = 'approved' WHERE id = ?", (order["reservation_id"],))
+                    return {'order': approve_order(tx, order)}
                 else:
                     bucket = "preorder_stock" if order["type"] == "preorder" else "stock"
                     for item in order["items"]:
@@ -448,19 +495,49 @@ class Application:
                 if "request_id" in body:
                     return idempotent(tx, user, "inventory", body, adjust_inventory)
                 return adjust_inventory()
+        if method == 'POST' and path == '/api/staff/preorders/lookup':
+            name, phone = person_name(body.get('name')), phone_number(body.get('phone'))
+            with self.db.transaction() as tx:
+                reservation = tx.one('SELECT * FROM reservations WHERE name = ? AND phone = ?', (name,phone))
+                check(reservation is not None, '해당 이름과 전화번호의 예약이 없습니다.', 404)
+                return {'reservation': staff_reservation_data(tx,reservation)}
+        pickup_match = re.fullmatch(r'/api/staff/preorders/([0-9]+)/complete',path)
+        if method == 'POST' and pickup_match:
+            with self.db.transaction(write=True) as tx:
+                def complete_preorder():
+                    name, phone = person_name(body.get('name')), phone_number(body.get('phone'))
+                    reservation = tx.one('SELECT * FROM reservations WHERE id = ? AND name = ? AND phone = ?',
+                                         (int(pickup_match.group(1)),name,phone))
+                    check(reservation is not None, '예약자 이름과 전화번호를 다시 확인해 주세요.', 404)
+                    if reservation['order_id']:
+                        order = order_data(tx,reservation['order_id'])
+                        check(order['type'] == 'preorder' and order['reservation_id'] == reservation['id'],
+                              '예약에 연결된 주문을 확인할 수 없습니다.', 409)
+                        buyer = user_by_id(tx,order['user_id'],buyer=True)
+                        check(buyer['name'] == reservation['name'], '예약자와 주문 계정이 다릅니다.', 409)
+                        if body.get('user_id') is not None:
+                            check(integer(body.get('user_id'),'구매자 번호',maximum=1_000_000) == buyer['id'],
+                                  '이미 접수된 예약의 구매자 계정과 다릅니다.', 409)
+                        already_completed = order['status'] == 'approved'
+                        order = approve_order(tx,order)
+                    else:
+                        check(reservation['status'] == 'reserved', '예약 상태를 다시 확인해 주세요.', 409)
+                        buyer = manual_buyer(tx,body,reservation_name=reservation['name'])
+                        items = reservation_data(tx,reservation)['items']
+                        check(bool(items), '예약된 품목이 없습니다.', 409)
+                        order = insert_order(tx,buyer,items,'preorder',user['name'],approved=True,
+                                             reservation_id=reservation['id'])
+                        tx.execute("UPDATE reservations SET status = 'approved', user_id = ?, order_id = ? WHERE id = ?",
+                                   (buyer['id'],order['id'],reservation['id']))
+                        already_completed = False
+                    current = tx.one('SELECT * FROM reservations WHERE id = ?', (reservation['id'],))
+                    return {'order':order,'user':public_user(user_by_id(tx,buyer['id'])),
+                            'reservation':staff_reservation_data(tx,current),'already_completed':already_completed}
+                return idempotent(tx,user,'manual-preorder',body,complete_preorder)
         if method == "POST" and path == "/api/staff/manual-sale":
             with self.db.transaction(write=True) as tx:
                 def manual_sale():
-                    if body.get("user_id") is not None:
-                        buyer = user_by_id(tx, integer(body.get("user_id"), "구매자 번호", maximum=1_000_000), buyer=True)
-                    else:
-                        name, pin = person_name(body.get("name")), pin_value(body.get("pin"))
-                        buyer = tx.one("SELECT * FROM users WHERE name = ? AND role = 'buyer'", (name,))
-                        if buyer is None:
-                            buyer_id = tx.insert("INSERT INTO users (name,role,password_hash,created_at) VALUES (?,'buyer',?,?)", (name, hash_pin(pin), now()))
-                            buyer = user_by_id(tx, buyer_id)
-                        else:
-                            check(verify_pin(pin, buyer["password_hash"]), "같은 이름의 계정이 있습니다. 기존 비밀번호를 입력하거나 구매자를 선택해 주세요.", 409)
+                    buyer = manual_buyer(tx, body)
                     order = insert_order(tx, buyer, normalize_items(tx, body.get("items")), "manual", user["name"], approved=True)
                     return {"order": order, "user": public_user(user_by_id(tx, buyer["id"]))}
                 return idempotent(tx, user, "manual-sale", body, manual_sale)
@@ -468,10 +545,11 @@ class Application:
             with self.db.transaction(write=True) as tx:
                 def instagram():
                     buyer = user_by_id(tx, integer(body.get("user_id"), "구매자 번호", maximum=1_000_000), buyer=True)
-                    count = integer(body.get("milk_quantity", 1), "우유 수량", maximum=5)
-                    dice = integer(body.get("dice", 1), "주사위 수량", maximum=10)
+                    count = integer(body.get("milk_quantity", 1), "우유 수량", minimum=0, maximum=5)
+                    dice = integer(body.get("dice", 1), "주사위 수량", minimum=0, maximum=10)
                     check(not tx.one("SELECT id FROM events WHERE user_id = ? AND type = 'instagram'", (buyer["id"],)), "이미 인스타 이벤트에 참여한 구매자입니다.", 409)
-                    change_inventory(tx, None, "milk", -count, f"{buyer['name']} 인스타 이벤트", user["name"])
+                    if count:
+                        change_inventory(tx, None, "milk", -count, f"{buyer['name']} 인스타 이벤트", user["name"])
                     tx.execute("UPDATE users SET dice_balance = dice_balance + ? WHERE id = ?", (dice, buyer["id"]))
                     event_id = tx.insert("INSERT INTO events (user_id,customer_name,type,milk_quantity,dice,created_at) VALUES (?,?,'instagram',?,?,?)", (buyer["id"], buyer["name"], count, dice, now()))
                     return {"event": tx.one("SELECT * FROM events WHERE id = ?", (event_id,)), "user": public_user(user_by_id(tx, buyer["id"])), "milk_stock": milk_stock(tx)}
