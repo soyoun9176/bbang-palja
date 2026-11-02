@@ -1,0 +1,28 @@
+[Unit]
+Description=Bbang Palja prototype API
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+WorkingDirectory=/opt/bbang-palja/app
+EnvironmentFile=/etc/bbang-palja/api.env
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+StateDirectory=bbang-palja
+StateDirectoryMode=0700
+ExecStart=/usr/bin/python3 -m server
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=20s
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+MemoryMax=512M
+CPUQuota=100%
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

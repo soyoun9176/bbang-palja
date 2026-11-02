@@ -1,0 +1,21 @@
+[Unit]
+Description=Bbang Palja temporary public API tunnel
+Wants=network-online.target bbang-palja-api.service
+After=network-online.target bbang-palja-api.service
+
+[Service]
+Type=simple
+DynamicUser=yes
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate tunnel --url http://127.0.0.1:8000 --metrics 127.0.0.1:20001
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+MemoryMax=256M
+CPUWeight=20
+
+[Install]
+WantedBy=multi-user.target

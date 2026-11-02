@@ -1,3 +1,8 @@
-// Cloudflare Pages에서 별도 API 서버를 사용할 때 이 주소를 변경하세요.
-// 예: window.KAMBO_CONFIG = { apiBase: 'https://api.example.com' };
-window.KAMBO_CONFIG = { apiBase: '' };
+// Public API address only. Never add passwords or DB credentials here.
+window.KAMBO_CONFIG = {
+  "apiBase": "https://gore-descending-purse-universe.trycloudflare.com",
+  "prototype": true
+};
+if (['localhost', '127.0.0.1', '::1', '[::1]'].includes(window.location.hostname)) {
+  window.KAMBO_CONFIG.apiBase = '';
+}

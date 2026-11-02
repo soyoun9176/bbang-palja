@@ -1,6 +1,6 @@
 # 배포 준비
 
-프론트엔드는 Cloudflare Pages 프로젝트 `bbang-palja`에 Git 연동으로 배포합니다. 공개 주소는 https://bbang-palja.pages.dev 입니다. Oracle API는 별도로 배포하고 연결해야 하며, 현재 `frontend/config.js`에는 운영 API 주소가 설정되어 있지 않습니다.
+프론트엔드는 Cloudflare Pages 프로젝트 `bbang-palja`에 Git 연동으로 배포합니다. 공개 주소는 https://bbang-palja.pages.dev 입니다. 가안 API는 Oracle의 전용 systemd 서비스와 Quick Tunnel로 연결합니다. 주소 변경·재시작·백업·실제 행사 전환 절차는 [Quick Tunnel 운영 매뉴얼](QUICK_TUNNEL_RUNBOOK.md)에 정리했습니다.
 
 ## 환경 변수
 
@@ -28,9 +28,11 @@
 
 ## Oracle 서버의 API
 
-운영에서는 TLS를 처리하는 Nginx나 Caddy 등의 리버스 프록시 뒤에서 API를 실행합니다. 외부 요청은 HTTPS 443번으로 받고 Python 서버는 내부 주소 `127.0.0.1:8000` 또는 컨테이너 내부에서 받습니다. 서버 재시작과 로그 관리는 systemd 또는 컨테이너 재시작 정책으로 구성합니다.
+현재 가안에서는 Quick Tunnel이 외부 HTTPS를 처리하고, API는 `127.0.0.1:8000`에서만 받습니다. 서버의 인바운드 80·443·8000 포트는 열지 않습니다. API와 터널은 별도 systemd 서비스이므로 API만 재시작해도 터널 프로세스는 유지됩니다. API 상태와 비밀번호는 코드 체크아웃 밖에 보관합니다.
 
-필요 설정의 형태는 다음과 같습니다. 실제 비밀값을 넣고 프록시·방화벽·인증서 구성 후 사용합니다.
+장기 운영으로 변경한다면 Nginx·Caddy 등의 프록시 또는 고정 터널 구성을 검토합니다. 아래는 별도 운영 DB를 준비할 때 참고할 환경 변수 예시입니다.
+
+실제 비밀값은 서버의 보호된 환경 변수 파일에 저장하며 저장소에는 넣지 않습니다.
 
 ```dotenv
 APP_ENV=production
@@ -42,7 +44,7 @@ DATABASE_URL=postgresql://<계정>:<비밀번호>@<DB호스트>:5432/kambo
 ALLOWED_ORIGINS=https://<프로젝트>.pages.dev,https://<실제프론트도메인>
 ```
 
-담당자 비밀번호와 운영 계정 정보는 HTTPS 환경에서만 전달합니다. PostgreSQL은 API 서버에서만 접근 가능하게 방화벽을 설정합니다. 방화벽 포트와 공개 도메인은 기존 Oracle 서버 구성에 맞춰 결정해야 합니다.
+담당자 비밀번호와 운영 계정 정보는 HTTPS 환경에서만 전달합니다. PostgreSQL을 선택하면 API 서버에서만 접근 가능하게 설정합니다. 현재 가안은 SQLite를 사용하며 별도 DB 포트를 공개하지 않습니다.
 
 Python의 내장 HTTP 서버는 프로토타입 실행용입니다. 외부 공개 전에는 요청 크기 제한·타임아웃·속도 제한을 프록시에 설정하고, 운영용 앱 서버 구성과 오류 모니터링을 검토합니다. 4자리 PIN 로그인은 추측 시도 제한이 특히 필요합니다.
 
@@ -60,14 +62,12 @@ Python의 내장 HTTP 서버는 프로토타입 실행용입니다. 외부 공�
 | 빌드 감시 경로 | `frontend/*` |
 | 미리보기 자동 배포 | 비활성화; 테스트 API 준비 후 별도로 연결 |
 
-`frontend/` 변경이 포함된 커밋이 `main`에 올라가면 프론트엔드를 자동 배포합니다. 백엔드만 변경한 경우 Pages 배포는 실행하지 않습니다. 정적 파일 배포가 성공해도 API 연결 전에는 앱에 연결 오류가 표시됩니다.
+`frontend/` 변경이 포함된 커밋이 `main`에 올라가면 프론트엔드를 자동 배포합니다. 백엔드만 변경한 경우 Pages 배포는 실행하지 않습니다. `frontend/config.js`의 Quick Tunnel 주소와 실제 터널 주소가 다르면 연결 오류가 발생합니다.
 
-`frontend/config.js`에서 실제 API의 HTTPS 주소를 설정합니다.
+`ops/set-api-url.py`로 실제 API의 HTTPS 주소를 설정합니다. 가안에서는 `prototype: true`로 테스트 안내를 표시합니다. 이 플래그는 인증 권한과 무관합니다.
 
-```javascript
-window.KAMBO_CONFIG = {
-  apiBase: 'https://api.example.com'
-};
+```bash
+python3 ops/set-api-url.py https://현재주소.trycloudflare.com
 ```
 
 이 설정은 브라우저에 공개됩니다. API 주소만 넣고 DB URL이나 담당자 비밀번호를 넣지 않습니다. API 서버의 `ALLOWED_ORIGINS`에는 Pages의 **정확한 출처**를 넣습니다. 경로나 마지막 `/` 없이 `https://프로젝트.pages.dev` 형태입니다. 별도 미리보기 도메인을 사용할 경우 해당 출처도 지정해야 합니다.
