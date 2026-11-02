@@ -131,7 +131,11 @@ def activate(release, sha):
             raise RuntimeError('Refusing to replace an unmanaged application.')
         subprocess.run(['systemctl','stop',SERVICE], check=True, timeout=30)
         previous = RELEASES / ('bootstrap-'+stamp())
-        CURRENT.rename(previous)
+        try:
+            CURRENT.rename(previous)
+        except Exception:
+            restart_api()
+            raise
     try:
         switch_release(release)
         restart_api()
@@ -170,7 +174,7 @@ def deploy(retry=False):
         return
     RELEASES.mkdir(mode=0o755, parents=True, exist_ok=True)
     release = RELEASES/sha
-    if CURRENT.is_symlink() and CURRENT.resolve() == release:
+    if CURRENT.is_symlink() and CURRENT.resolve() == release.resolve():
         wait_healthy(sha)
         save_state({'deployed_sha':sha,'last_success':stamp(),'recovered':True})
         print('Recovered deployment state: '+sha, flush=True)

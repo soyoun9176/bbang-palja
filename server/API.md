@@ -4,6 +4,8 @@ All requests and responses use JSON. Send `Authorization: Bearer <token>` after 
 
 ## Public and buyer
 
+- `GET /api/health` → `{ok:true,commit?}`. Deployed releases report their exact Git commit; local development omits `commit`.
+
 - `GET /api/config` → `{demo, reward_step:10, staff_password_hint?}`. Password hint exists only in local demo.
 - `POST /api/auth/register` or `/api/auth/login` body `{name,pin}` → `{token,user}`. PIN is exactly four numeric digits. Register rejects an existing name.
 - `POST /api/staff/login` body `{name,password}` → `{token,user}`.

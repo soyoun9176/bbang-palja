@@ -21,7 +21,7 @@ Oracle timer (every 3 min) → main + CI success → unprivileged tests
 - Release: `/opt/bbang-palja/releases/<40자리 SHA>`; `/opt/bbang-palja/app` 링크가 현재 버전을 가리킵니다. 기존 폴더는 최초 전환 때 `bootstrap-<시각>`으로 보존합니다.
 - DB: `/etc/bbang-palja/api.env`의 기존 `DB_PATH`를 유지합니다. 배포 전 SQLite 온라인 백업과 `integrity_check`를 실행하며 `/var/backups/bbang-palja/before-deploy-*.sqlite3`에 root 전용으로 저장합니다. 기존 계정·주문·재고·담당자 비밀번호를 초기화하지 않습니다.
 - Pages: 빌드 `python3 ops/pages-build.py`, 출력 `dist`, 감시 경로 `*`, 운영 브랜치 `main`. 검사 후 Quick Tunnel API의 `/api/health.commit`이 `CF_PAGES_COMMIT_SHA`와 같아질 때까지 최대 9분 기다립니다. 확인하지 못하면 기존 프론트 배포를 유지합니다.
-- 빌드된 JS·CSS·공개 config는 내용 해시가 붙은 `/build/` 파일을 사용합니다. HTML과 `version.json`은 `no-store`로 응답하고, 관리자 JS import도 함께 버전 처리합니다. 배포마다 수동으로 쿼리 버전을 수정하지 않습니다.
+- 빌드된 JS·CSS·공개 config는 내용 해시가 붙은 `/build/` 파일을 사용합니다. HTML(`/`, `/admin`, `/admin/`)과 `version.json`은 `no-store`로 응답하고, 관리자 JS import도 함께 버전 처리합니다. 배포마다 수동으로 쿼리 버전을 수정하지 않습니다.
 - Quick Tunnel은 API 코드 배포 시 재시작하지 않습니다. 터널 주소 변경은 기존 [수동 복구 절차](QUICK_TUNNEL_RUNBOOK.md)를 따릅니다.
 
 평소에는 몇 분 내 반영됩니다. GitHub/Cloudflare 대기열이나 장애가 있으면 늦어질 수 있습니다. 새 기능과 API를 서로 호환되게 유지해야 하며, API를 먼저 갱신하는 짧은 구간에도 이전 프론트가 열려 있을 수 있습니다.

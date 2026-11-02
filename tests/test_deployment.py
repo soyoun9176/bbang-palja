@@ -40,6 +40,38 @@ class DeploymentTests(unittest.TestCase):
                 tar.addfile(extra)
         return buffer.getvalue()
 
+    def test_unsuccessful_ci_keeps_running_release_and_does_not_backup_or_switch(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder)
+            with patch.object(deploy,'STATE',state), \
+                    patch.object(deploy,'get_json',side_effect=[{'sha':'a'*40},{'workflow_runs':[]}]), \
+                    patch.object(deploy,'activate') as activate, \
+                    patch.object(deploy,'backup_database') as backup:
+                deploy.deploy()
+            activate.assert_not_called()
+            backup.assert_not_called()
+            self.assertFalse((state/'state.json').exists())
+
+    def test_active_release_is_not_deleted_when_recovering_after_state_write_interruption(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base=Path(folder)
+            sha='a'*40
+            release=base/sha
+            release.mkdir()
+            current=base/'app'
+            current.symlink_to(release)
+            valid={'id':10,'head_sha':sha,'event':'push','head_branch':'main',
+                   'head_repository':{'full_name':deploy.REPOSITORY},'status':'completed','conclusion':'success'}
+            with patch.multiple(deploy,STATE=base,CURRENT=current,RELEASES=base), \
+                    patch.object(deploy,'get_json',side_effect=[{'sha':sha},{'workflow_runs':[valid]}]), \
+                    patch.object(deploy,'wait_healthy') as healthy, \
+                    patch.object(deploy.shutil,'rmtree') as remove:
+                deploy.deploy()
+            healthy.assert_called_once_with(sha)
+            remove.assert_not_called()
+            self.assertTrue(release.is_dir())
+            self.assertEqual(json.loads((base/'state.json').read_text())['deployed_sha'],sha)
+
     def test_release_archive_rejects_traversal_links_and_special_files(self):
         with tempfile.TemporaryDirectory() as folder:
             base=Path(folder)
@@ -105,7 +137,7 @@ class DeploymentTests(unittest.TestCase):
             self.assertNotIn("'./admin.js'",app)
             self.assertRegex(app,r'/build/admin\.[a-f0-9]{16}\.js')
             self.assertFalse((output/'app.js').exists())
-            self.assertEqual((output/'_redirects').read_text().strip(),'/admin / 200')
+            self.assertEqual((output/'_redirects').read_text().strip(),'/admin / 200\n/admin/ / 200')
             self.assertIn('Cache-Control: no-store',(output/'_headers').read_text())
             self.assertFalse((output/'server').exists())
             frontend.build(output,commit='a'*40)

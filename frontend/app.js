@@ -36,7 +36,7 @@ function staffStockBar() {
 function shell(content) {
   const eventPage=!isAdmin&&['dice','ranking'].includes(state.route);
   return `<div class="shell ${isAdmin?'admin':eventPage?'event-space':'purchase-space'} ${state.user?'signed-in':''}">
-    <header class="app-header"><a href="${isAdmin?'/admin':'/'}" aria-label="캄보딜라이트 홈">${brand()}</a>
+    <header class="app-header"><a href="${isAdmin?'/admin/':'/'}" aria-label="캄보딜라이트 홈">${brand()}</a>
     ${state.user?`<button class="profile-button" data-action="profile">${esc(state.user.name)}${isAdmin?' · 담당자':''} ${icon('chevron')}</button>`:isAdmin?'<span class="muted">담당자 로그인</span>':''}</header>
     ${state.user?`<nav class="primary-nav" aria-label="${isAdmin?'담당자 메뉴':'주요 메뉴'}">${(isAdmin?staffNav:buyerNav).map(x=>navButton(x)).join('')}</nav>`:''}
     ${staffStockBar()}<main class="main">${content}</main>

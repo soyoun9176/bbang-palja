@@ -2,7 +2,7 @@
 
 캄보딜라이트 빵 판매를 위한 로컬 실행형 프로토타입입니다. 모바일의 빵 구매와 이벤트 참여를 분리하고, 노트북 담당자 화면을 제공합니다. Python 표준 라이브러리와 SQLite만으로 시작할 수 있고, PostgreSQL 연결도 지원합니다.
 
-공개 가안은 [구매자 화면](https://bbang-palja.pages.dev/)과 [담당자 화면](https://bbang-palja.pages.dev/admin)에서 확인합니다. 시연용 데이터이며 실제 결제는 처리하지 않습니다. Oracle API·Quick Tunnel 실행과 주소 변경 시 수동 복구 방법은 [운영 매뉴얼](docs/QUICK_TUNNEL_RUNBOOK.md)에 정리했습니다. 가안 담당자 비밀번호는 저장소에 넣지 않습니다.
+공개 가안은 [구매자 화면](https://bbang-palja.pages.dev/)과 [담당자 화면](https://bbang-palja.pages.dev/admin/)에서 확인합니다. 시연용 데이터이며 실제 결제는 처리하지 않습니다. Oracle API·Quick Tunnel 실행과 주소 변경 시 수동 복구 방법은 [운영 매뉴얼](docs/QUICK_TUNNEL_RUNBOOK.md)에 정리했습니다. 가안 담당자 비밀번호는 저장소에 넣지 않습니다.
 
 로컬에서 변경을 묶어 확인한 후 `main`에 push하면 테스트 → Oracle 백업·배포 → Pages 공개가 자동으로 이어집니다. [배포 파이프라인과 복구 방법](docs/CI_CD.md)을 참고하세요.
 

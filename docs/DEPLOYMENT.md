@@ -72,7 +72,7 @@ python3 ops/set-api-url.py https://현재주소.trycloudflare.com
 
 이 설정은 브라우저에 공개됩니다. API 주소만 넣고 DB URL이나 담당자 비밀번호를 넣지 않습니다. API 서버의 `ALLOWED_ORIGINS`에는 Pages의 **정확한 출처**를 넣습니다. 경로나 마지막 `/` 없이 `https://프로젝트.pages.dev` 형태입니다. 별도 미리보기 도메인을 사용할 경우 해당 출처도 지정해야 합니다.
 
-`frontend/_redirects`의 `/admin / 200` 규칙은 주소를 유지하면서 담당자 화면에 루트 HTML을 제공합니다. 대상을 `/index.html`로 지정하면 Pages의 기본 URL 정규화로 `/`에 이동하여 담당자 경로를 잃을 수 있습니다. Pages 배포 후 구매자 페이지와 담당자 페이지를 각각 직접 새로고침하고 API 호출·로그인·CORS를 확인합니다. HTTPS 프론트엔드는 HTTPS API에 연결해야 합니다.
+`frontend/_redirects`의 `/admin / 200`, `/admin/ / 200` 규칙은 주소를 유지하면서 담당자 화면에 루트 HTML을 제공합니다. 기본 담당자 진입 링크는 `/admin/`으로 통일해 초기 배포 때 브라우저에 저장된 `/admin` 이동 캐시와 구분합니다. 대상을 `/index.html`로 지정하면 Pages의 기본 URL 정규화로 `/`에 이동하여 담당자 경로를 잃을 수 있습니다. Pages 배포 후 구매자 페이지와 담당자 페이지를 각각 직접 새로고침하고 API 호출·로그인·CORS를 확인합니다. HTTPS 프론트엔드는 HTTPS API에 연결해야 합니다.
 
 ## 데이터 보존과 리허설
 

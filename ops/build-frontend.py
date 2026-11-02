@@ -51,6 +51,8 @@ def build(output, commit=None):
   Cache-Control: no-store
 /admin
   Cache-Control: no-store
+/admin/
+  Cache-Control: no-store
 /index.html
   Cache-Control: no-store
 /version.json
