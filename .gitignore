@@ -18,3 +18,4 @@ data/
 htmlcov/
 .pytest_cache/
 *.log
+dist/

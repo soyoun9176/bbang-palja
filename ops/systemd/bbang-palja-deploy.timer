@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for verified Bbang Palja release every three minutes
+
+[Timer]
+OnBootSec=90s
+OnUnitInactiveSec=3min
+AccuracySec=10s
+Persistent=yes
+Unit=bbang-palja-deploy.service
+
+[Install]
+WantedBy=timers.target

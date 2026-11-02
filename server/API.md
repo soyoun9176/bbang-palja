@@ -4,7 +4,7 @@ All requests and responses use JSON. Send `Authorization: Bearer <token>` after 
 
 ## Public and buyer
 
-- `GET /api/config` → `{demo, reward_step:7, staff_password_hint?}`. Password hint exists only in local demo.
+- `GET /api/config` → `{demo, reward_step:10, staff_password_hint?}`. Password hint exists only in local demo.
 - `POST /api/auth/register` or `/api/auth/login` body `{name,pin}` → `{token,user}`. PIN is exactly four numeric digits. Register rejects an existing name.
 - `POST /api/staff/login` body `{name,password}` → `{token,user}`.
 - `GET /api/auth/me` → `{user}`. `POST /api/auth/logout` → `{ok:true}`.
@@ -15,10 +15,13 @@ All requests and responses use JSON. Send `Authorization: Bearer <token>` after 
 - `POST /api/preorders/:id/claim` body `{request_id}` → `{order}`. Requires that buyer's successful name/phone lookup within the last 24 hours. Existing claim returns its order, including across retries.
 - `POST /api/dice/roll` body `{request_id}` → `{value,score,dice_balance}`. Die result is 1–6.
 - `GET /api/leaderboard` → `{leaders:[entry],neighbors:[entry],me:entry,total_participants}`. `entry={rank,id,name,score,is_me}`. Leaders are top three; neighbors contain self and up to two users on each side.
-- `POST /api/rewards/claim` body `{request_id}` → `{reward:{id,product_name,product_id,threshold,created_at},user}`. One bread for each 7 score points; weighted by current reward inventory.
+- `POST /api/rewards/claim` body `{request_id}` → `{reward:{id,product_name,product_id,threshold,created_at},user}`. One bread for each 10 score points; weighted by the square of each available walk-in stock count (`stock² / Σstock²`). A win deducts one unit from `stock` in the same transaction as the draw. Pending-order stock and preorder stock are excluded.
+  A successful claim increments `rewards_claimed` and earns `level=min(5,rewards_claimed)` in the same transaction. Score alone does not level up. Level caps at five (50 points), while bread continues every ten points thereafter. No available stock returns 409 without consuming a claim or advancing level. Previous reward records/counts remain intact; the next threshold is `(rewards_claimed+1)*10`.
 - `GET /api/rewards` → `{rewards:[reward]}`.
 
-`user={id,name,role,score,dice_balance,rewards_claimed}`. `order={id,type,status,customer_name,user_id,items,total,quantity,created_at,approved_at,cancelled_at}`. Order types: `walkin`, `preorder`, `manual`. Status: `pending`, `approved`, `cancelled`. `items=[{product_id,name,quantity,price}]`.
+`user={id,name,role,score,dice_balance,rewards_claimed,level}`. `order={id,type,status,customer_name,user_id,items,total,quantity,created_at,approved_at,cancelled_at}`. Order types: `walkin`, `preorder`, `manual`. Status: `pending`, `approved`, `cancelled`. `items=[{product_id,name,quantity,price}]`.
+
+`reward_stock` in product responses is a deprecated compatibility field fixed at zero after startup migration. Any old separate stock is moved to `stock` once, with inventory logs; staff writes to `reward_stock` are rejected.
 
 The current menu and prices are documented in [docs/MENU.md](../docs/MENU.md). `name` is the actual product/flavor; `subtitle` is the alchemy concept. `unit` is `개` or `세트`. One donut set contains five donuts, costs 2,000 KRW, consumes one inventory unit, and grants one die upon approval.
 
@@ -26,7 +29,7 @@ The current menu and prices are documented in [docs/MENU.md](../docs/MENU.md). `
 
 - `GET /api/staff/dashboard` → `{orders,products,stats:{revenue,approved_orders,pending_orders,bread_sold,milk_stock},users,inventory_logs,events,memos,schedule,rewards}`. Newest orders and logs first. Staff-only account list contains buyer users only. Rewards include `customer_name` for handing out event bread.
 - `POST /api/staff/orders/:id/approve` or `/cancel` body `{}` → `{order}`. Repeated identical transition is a no-op; approved orders cannot cancel, cancelled orders cannot approve. Approval grants quantity dice. Cancellation restores reserved inventory exactly once.
-- `POST /api/staff/inventory` body `{product_id,bucket,delta,reason,request_id?}` → `{products,milk_stock}`. Supplying `request_id` makes retries safe and rejects different input with the same ID. Bucket is `stock`, `preorder_stock`, `reward_stock`, or `milk`; milk ignores product_id. Delta must be nonzero integer. Result cannot be negative; unclaimed reservations' allocated bread cannot be removed from `preorder_stock`.
+- `POST /api/staff/inventory` body `{product_id,bucket,delta,reason,request_id?}` → `{products,milk_stock}`. Supplying `request_id` makes retries safe and rejects different input with the same ID. Bucket is `stock` (shared by walk-in sales and rewards), `preorder_stock`, or `milk`; milk ignores product_id. Delta must be nonzero integer. Result cannot be negative; unclaimed reservations' allocated bread cannot be removed from `preorder_stock`.
 - `POST /api/staff/manual-sale` body `{user_id,items:[{product_id,quantity}],request_id}` → `{order,user}`. Instead of `user_id`, `{name,pin}` can create a buyer account for someone without a phone; an existing name requires that buyer's PIN. Immediate approval, inventory decrement, dice grant.
 - `POST /api/staff/instagram` body `{user_id,milk_quantity:1,dice:1,request_id}` → `{event,user,milk_stock}`. Instagram bonus once per buyer.
 - `POST /api/staff/memos` body `{content}` → `{memo}`.

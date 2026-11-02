@@ -18,7 +18,8 @@ from .db import Database
 from .catalog import PRODUCT_IDS, PRODUCT_UNITS, sync_catalog
 
 ROOT = Path(__file__).resolve().parents[1]
-REWARD_STEP = 7
+REWARD_STEP = 10
+MAX_CHARACTER_LEVEL = 5
 PUBLIC_USER_FIELDS = ("id", "name", "role", "score", "dice_balance", "rewards_claimed")
 
 
@@ -82,7 +83,10 @@ def verify_pin(pin, encoded):
 
 
 def public_user(row):
-    return {key: row[key] for key in PUBLIC_USER_FIELDS}
+    user = {key: row[key] for key in PUBLIC_USER_FIELDS}
+    # A level is earned together with a bread reward, never by score alone.
+    user["level"] = min(MAX_CHARACTER_LEVEL, row["rewards_claimed"])
+    return user
 
 
 def user_by_id(tx, user_id, buyer=False):
@@ -106,6 +110,17 @@ def inventory_log(tx, product, bucket, delta, reason, actor):
               (product["id"] if product else None, product["name"] if product else "우유", bucket, delta, reason, actor, now()))
 
 
+def merge_legacy_reward_stock(tx):
+    """Close the old event bucket once per remaining unit, preserving totals."""
+    for product in tx.all("SELECT * FROM products WHERE reward_stock > 0 ORDER BY id"):
+        quantity = product["reward_stock"]
+        tx.execute("UPDATE products SET stock = stock + ?, reward_stock = 0 WHERE id = ?",
+                   (quantity, product["id"]))
+        reason = "별도 이벤트 재고를 현판 재고에 통합"
+        inventory_log(tx, product, "reward_stock", -quantity, reason, "시스템")
+        inventory_log(tx, product, "stock", quantity, reason, "시스템")
+
+
 def change_inventory(tx, product_id, bucket, delta, reason, actor):
     if bucket == "milk":
         count = milk_stock(tx)
@@ -113,7 +128,7 @@ def change_inventory(tx, product_id, bucket, delta, reason, actor):
         tx.execute("UPDATE settings SET value = ? WHERE key = 'milk_stock'", (str(count + delta),))
         inventory_log(tx, None, bucket, delta, reason, actor)
         return
-    check(bucket in ("stock", "preorder_stock", "reward_stock"), "잘못된 재고 구분입니다.")
+    check(bucket in ("stock", "preorder_stock"), "잘못된 재고 구분입니다.")
     product = tx.one("SELECT * FROM products WHERE id = ?", (product_id,))
     check(product is not None, "빵을 찾을 수 없습니다.", 404)
     check(product[bucket] + delta >= 0, f"{product['name']} 재고가 부족합니다.", 409)
@@ -189,6 +204,8 @@ def idempotent(tx, user, scope, body, operation):
 
 class Application:
     def __init__(self):
+        release_file = ROOT / 'release.json'
+        self.release = {'commit': json.loads(release_file.read_text())['commit']} if release_file.exists() else {}
         self.production = os.environ.get("APP_ENV", "local").lower() == "production"
         self.staff_password = os.environ.get("STAFF_PASSWORD", "butter2026")
         if self.production and (self.staff_password == "butter2026" or len(self.staff_password) < 12):
@@ -203,6 +220,7 @@ class Application:
     def seed(self):
         with self.db.transaction(write=True) as tx:
             sync_catalog(tx, demo=self.demo)
+            merge_legacy_reward_stock(tx)
             if not tx.one("SELECT key FROM settings WHERE key = 'milk_stock'"):
                 tx.execute("INSERT INTO settings (key,value) VALUES ('milk_stock',?)", ("40" if self.demo else "0",))
             if self.demo and not tx.one("SELECT id FROM schedule LIMIT 1"):
@@ -262,7 +280,7 @@ class Application:
 
     def handle(self, method, path, query, body, authorization):
         if method == "GET" and path == "/api/health":
-            return {"ok": True}
+            return {"ok": True, **self.release}
         if method == "GET" and path == "/api/config":
             result = {"demo": self.demo, "reward_step": REWARD_STEP}
             if self.demo:
@@ -361,16 +379,16 @@ class Application:
                     current = user_by_id(tx, user["id"])
                     threshold = (current["rewards_claimed"] + 1) * REWARD_STEP
                     check(current["score"] >= threshold, f"다음 빵 뽑기는 {threshold}점부터 가능해요.", 409)
-                    available = [product for product in products(tx) if product["reward_stock"] > 0]
-                    total = sum(product["reward_stock"] for product in available)
-                    check(total > 0, "이벤트 빵이 모두 소진되었습니다. 담당자에게 문의해 주세요.", 409)
+                    available = [product for product in products(tx) if product["stock"] > 0]
+                    total = sum(product["stock"] ** 2 for product in available)
+                    check(total > 0, "현판 빵 재고가 모두 소진되었습니다. 담당자에게 문의해 주세요.", 409)
                     ticket = secrets.randbelow(total)
                     for product in available:
-                        ticket -= product["reward_stock"]
+                        ticket -= product["stock"] ** 2
                         if ticket < 0:
                             selected = product
                             break
-                    change_inventory(tx, selected["id"], "reward_stock", -1, f"{current['name']} {threshold}점 이벤트 당첨", current["name"])
+                    change_inventory(tx, selected["id"], "stock", -1, f"{current['name']} {threshold}점 이벤트 당첨", current["name"])
                     reward_id = tx.insert("INSERT INTO rewards (user_id,product_id,product_name,threshold,created_at) VALUES (?,?,?,?,?)", (user["id"], selected["id"], selected["name"], threshold, now()))
                     tx.execute("UPDATE users SET rewards_claimed = rewards_claimed + 1 WHERE id = ?", (user["id"],))
                     result = tx.one("SELECT id,product_id,product_name,threshold,created_at FROM rewards WHERE id = ?", (reward_id,))
@@ -415,7 +433,7 @@ class Application:
             with self.db.transaction(write=True) as tx:
                 def adjust_inventory():
                     bucket = body.get("bucket")
-                    check(bucket in ("stock", "preorder_stock", "reward_stock", "milk"), "재고 구분이 올바르지 않습니다.")
+                    check(bucket in ("stock", "preorder_stock", "milk"), "재고 구분이 올바르지 않습니다. 이벤트는 현판 재고를 사용합니다.")
                     delta = integer(body.get("delta"), "재고 수정량", minimum=-10_000, maximum=10_000)
                     check(delta != 0, "재고 수정량은 0이 될 수 없습니다.")
                     reason = string(body.get("reason"), "수정 사유", maximum=200)

@@ -390,25 +390,25 @@ class APIIntegrationTests(unittest.TestCase):
         self.assertEqual(self.me(token)["dice_balance"], 30)
         status, _ = self.call("POST", "/api/rewards/claim", {"request_id": request_id()}, token)
         self.assertEqual(status, 409)
-        while self.me(token)["score"] < 7:
+        while self.me(token)["score"] < 10:
             self.ok("POST", "/api/dice/roll", {"request_id": request_id()}, token)
 
         # A single eligible product makes the weighted draw deterministic.
         products = self.ok("GET", "/api/products")["products"]
         for product in products:
             target = 1 if product["id"] == self.product_id else 0
-            delta = target - product["reward_stock"]
+            delta = target - product["stock"]
             if delta:
                 self.ok("POST", "/api/staff/inventory",
-                        {"product_id": product["id"], "bucket": "reward_stock",
-                         "delta": delta, "reason": "자동 검증용 보상 재고"}, self.staff_token)
+                        {"product_id": product["id"], "bucket": "stock",
+                         "delta": delta, "reason": "자동 검증용 공용 재고"}, self.staff_token)
         identity = request_id()
         reward = self.ok("POST", "/api/rewards/claim", {"request_id": identity}, token)
         repeated = self.ok("POST", "/api/rewards/claim", {"request_id": identity}, token)
         self.assertEqual(reward, repeated)
         self.assertEqual(reward["reward"]["product_id"], self.product_id)
-        self.assertEqual(reward["reward"]["threshold"], 7)
-        self.assertEqual(self.product()["reward_stock"], 0)
+        self.assertEqual(reward["reward"]["threshold"], 10)
+        self.assertEqual(self.product()["stock"], 0)
         self.assertEqual(self.me(token)["rewards_claimed"], 1)
         self.assertEqual(len(self.ok("GET", "/api/rewards", token=token)["rewards"]), 1)
         status, _ = self.call("POST", "/api/rewards/claim", {"request_id": request_id()}, token)
@@ -470,14 +470,15 @@ class CatalogMigrationTests(unittest.TestCase):
                     self.assertEqual(order_data(tx, order)['items'][0]['name'], '이전 시연 빵')
                     old_reservation = tx.one('SELECT * FROM reservations WHERE id=?', (reservation,))
                     self.assertEqual(reservation_data(tx, old_reservation)['total'], 5000)
-                    self.assertEqual(tx.one('SELECT stock,reward_stock FROM products WHERE id=1'), {'stock':9,'reward_stock':4})
+                    self.assertEqual(tx.one('SELECT stock,reward_stock FROM products WHERE id=1'), {'stock':13,'reward_stock':0})
                     with self.assertRaises(APIError):
                         normalize_items(tx, [{'product_id':1,'quantity':1}])
                     tx.execute('UPDATE products SET stock=5 WHERE id=101')
                     sync_catalog(tx, demo=True)
                     self.assertEqual(tx.one('SELECT stock FROM products WHERE id=101')['stock'], 5)
+                    tx.execute('UPDATE products SET stock=0 WHERE id=101')
                 login = app.handle('POST', '/api/auth/login', {}, {'name':'기존구매자','pin':'1234'}, None)
-                # Historical reward stock cannot be drawn from the current menu.
+                # Historical products remain outside the current menu, even after stock is merged.
                 with self.assertRaises(APIError) as error:
                     app.handle('POST', '/api/rewards/claim', {}, {'request_id':request_id()}, 'Bearer '+login['token'])
                 self.assertEqual(error.exception.status, 409)

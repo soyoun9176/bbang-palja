@@ -94,16 +94,16 @@ sudo systemctl restart bbang-palja-quick-tunnel
 sudo python3 ops/quick-tunnel-url.py
 ```
 
-행사 종료 후 공개 접속만 중단하려면 Quick Tunnel을 중지합니다. 다시 시작하면 새 주소를 확인합니다.
+행사 종료 후 공개 접속만 중단하려면 자동 배포 타이머와 Quick Tunnel을 중지합니다. 다시 시작하면 새 주소를 확인합니다.
 
 ```bash
-sudo systemctl stop bbang-palja-quick-tunnel
+sudo systemctl stop bbang-palja-deploy.timer bbang-palja-quick-tunnel
 ```
 
 행사가 끝나 더 이상 자동 시작하지 않으려면 **이 프로젝트의 두 서비스만** 중지·비활성화합니다. 이 명령은 DB를 삭제하지 않습니다.
 
 ```bash
-sudo systemctl disable --now bbang-palja-quick-tunnel bbang-palja-api
+sudo systemctl disable --now bbang-palja-deploy.timer bbang-palja-quick-tunnel bbang-palja-api
 ```
 
 ## DB 백업
@@ -145,16 +145,16 @@ PY
 
 최초 가안 설치는 공식 ARM64 `cloudflared` 설치 후 서버 레포에서 `sudo python3 ops/install-oracle.py --prototype`으로 재현할 수 있습니다. 기존 가안 DB와 비밀번호가 있으면 보존합니다. 운영 DB가 설정된 경우 가안 설치를 거부합니다.
 
-API 코드를 갱신할 때는 레포를 pull한 뒤 코드만 복사하고 API만 재시작합니다. DB·비밀번호·터널 프로세스는 유지합니다.
+코드 갱신은 [자동 배포 파이프라인](CI_CD.md)을 사용합니다. `main` push 후 검증된 커밋만 반영하며 DB·비밀번호·터널 프로세스는 유지합니다. 아래 명령은 서버의 참고용 체크아웃 갱신과 배포 즉시 확인용입니다.
 
 ```bash
 cd /home/ubuntu/projects/bbang-palja
 git pull --ff-only origin main
-sudo python3 ops/install-oracle.py --sync-code-only
-sudo systemctl restart bbang-palja-api
+sudo systemctl start bbang-palja-deploy.service
+sudo journalctl -u bbang-palja-deploy -n 80 --no-pager
 ```
 
-Pages는 `main`의 `frontend/` 변경에 자동 배포됩니다. `ops/` 변경만으로 API 서버가 자동 배포되지는 않습니다. 로컬 `localhost`·`127.0.0.1`에서는 `config.js`가 같은 출처 API를 사용하므로 평소처럼 `python3 -m server`로 개발할 수 있습니다.
+Pages와 Oracle은 `main` 커밋을 기준으로 자동 배포됩니다. 자동 배포 제어기 자체(`ops/deploy.py`, systemd 템플릿)는 자동 교체하지 않으며 관리자가 검토 후 `sudo python3 ops/install-autodeploy.py`로 갱신합니다. 활성 release 폴더에 `--sync-code-only`로 덮어쓰지 않습니다. 로컬 `localhost`·`127.0.0.1`에서는 `config.js`가 같은 출처 API를 사용하므로 평소처럼 `python3 -m server`로 개발할 수 있습니다.
 
 Quick Tunnel은 [공식적으로 테스트·개발용](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)이며, 재생성 시 주소 변경·가동 보장 없음·동시 처리 중인 요청 200개 제한이 있습니다. 200개는 사용자 수가 아니라 아직 응답이 끝나지 않은 요청 수입니다. 행사 전 예상 인원으로 확인하고, 주소가 바뀌면 이 매뉴얼로 복구합니다.
 
@@ -165,11 +165,19 @@ Quick Tunnel은 [공식적으로 테스트·개발용](https://developers.cloudf
 ```bash
 cd /home/ubuntu/projects/bbang-palja
 git pull --ff-only origin main
-sudo python3 ops/install-oracle.py --sync-code-only
+# 아래 메뉴 시딩 작업을 할 동안 자동 배포를 잠시 멈춥니다.
+sudo systemctl stop bbang-palja-deploy.timer
 sudo systemctl stop bbang-palja-api
 sudo python3 ops/update-prototype-menu.py
 sudo systemctl start bbang-palja-api
+sudo systemctl start bbang-palja-deploy.timer
 curl -fsS http://127.0.0.1:8000/api/health
 ```
 
 갱신 스크립트가 실패해도 오류를 확인한 뒤 API를 다시 시작합니다. 새로 추가한 품목만 시연 재고를 넣고 기존 품목의 재고·주문·예약·계정은 보존합니다. 운영 DB에는 이 가안 스크립트를 사용하지 않습니다.
+
+## 공용 재고 전환 시 확인 사항
+
+이벤트 빵은 현판 재고에서 차감합니다. 다음 묶음 배포 전에 위의 SQLite 백업 절차를 실행합니다. 새 API를 처음 시작하면 남아 있는 별도 `reward_stock`을 `stock`에 합치고 0으로 닫으며, 이동 내역을 기록합니다. 예판 재고·계정·점수·주문·당첨 기록은 유지합니다. 재시작해도 재고를 다시 합치지 않습니다.
+
+담당자 화면은 별도 이벤트 재고 입력을 제거한 프론트와 함께 배포합니다. 이전 화면이 `reward_stock` 수정을 요청하면 API는 이를 거절하므로 담당자는 새로고침해야 합니다. 배포 후 현판 주문과 이벤트 당첨이 같은 재고를 차감하는지 확인합니다.

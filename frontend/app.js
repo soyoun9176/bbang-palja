@@ -2,7 +2,7 @@ import {initAdmin, renderAdmin, renderStaffLogin, handleAdminClick, handleAdminS
 
 const isAdmin = /^\/admin(?:\/|$)/.test(location.pathname);
 const tokenKey = `kambo.${isAdmin ? 'staff' : 'buyer'}.token`;
-const state = {isAdmin,token:localStorage.getItem(tokenKey),user:null,config:{},products:[],orders:[],rewards:[],leaderboard:null,staffData:null,route:location.hash.slice(1)||(isAdmin?'queue':'shop'),cart:{},reservation:null,authMode:'login',rolling:false,lastRoll:null};
+const state = {isAdmin,token:localStorage.getItem(tokenKey),user:null,config:{},products:[],orders:[],rewards:[],leaderboard:null,staffData:null,route:location.hash.slice(1)||(isAdmin?'queue':'shop'),cart:{},reservation:null,authMode:'login',rolling:false,leveling:false,lastRoll:null};
 const paths={shop:'M3 10h18M5 10v10h14V10M3 10l2-6h14l2 6M9 20v-6h6v6M2 10c0 3 4 3 4 0 0 3 4 3 4 0 0 3 4 3 4 0 0 3 4 3 4 0 0 3 4 3 4 0',bag:'M5 7h14l1 14H4L5 7ZM8 8V6a4 4 0 0 1 8 0v2',dice:'M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3ZM8 8h.01M16 8h.01M12 12h.01M8 16h.01M16 16h.01',trophy:'M8 3h8v7a4 4 0 0 1-8 0V3ZM8 5H4v3a4 4 0 0 0 4 4m8-7h4v3a4 4 0 0 1-4 4M12 14v6M8 21h8',clock:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM12 7v5l3 2',arrow:'M4 12h15m-5-5 5 5-5 5',plus:'M12 5v14M5 12h14',minus:'M5 12h14',x:'m6 6 12 12M18 6 6 18',check:'m5 12 4 4L19 6',info:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM12 11v6M12 7h.01',bread:'M5 11C-1 4 9 0 12 5c5-6 15 1 7 6v9H5v-9ZM9 11v4m6-4v4',user:'M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM4 21v-2a8 8 0 0 1 16 0v2',users:'M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM2 21v-2a7 7 0 0 1 14 0v2M17 4a4 4 0 0 1 0 7m2 4a6 6 0 0 1 3 5',shield:'m12 2 8 3v6c0 6-8 11-8 11S4 17 4 11V5l8-3ZM8 11l3 3 5-6',box:'m3 7 9-4 9 4v11l-9 4-9-4V7Zm0 0 9 4 9-4M12 11v11M7 5l9 4',note:'M5 3h14v13l-5 5H5V3Zm9 18v-5h5M8 8h8M8 12h5',calendar:'M4 5h16v16H4V5ZM8 3v4m8-4v4M4 10h16M8 14h2m4 0h2m-8 3h2',spark:'m12 2 2.5 7.5L22 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5L12 2Z',logout:'M9 3H4v18h5m4-15 6 6-6 6m-5-6h11',chevron:'m9 5 7 7-7 7',heart:'M12 21 3 12C-2 6 6 0 12 6c6-6 14 0 9 6l-9 9Z',search:'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm5 12 6 6',milk:'M9 3h6v4l3 4v10H6V11l3-4V3Zm0 4h6M6 12h12',upload:'M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6',edit:'m15 4 5 5M4 20l5-1L21 7l-5-5L4 14v6Z'};
 function icon(name){return `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name]||paths.bread}"/></svg>`}
 function esc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -18,7 +18,7 @@ function modal(content,{wide=false}={}){previousFocus=document.activeElement;doc
 function closeModal(){document.querySelector('#modal-root').innerHTML='';document.body.style.overflow='';previousFocus?.focus?.();}
 function submitButton(form,busy,label){const button=form.querySelector('[type=submit]');if(!button)return;button.disabled=busy;if(!button.dataset.label)button.dataset.label=button.innerHTML;button.innerHTML=busy?'<span class="spinner"></span> 처리하고 있어요':label||button.dataset.label;}
 function brand(){return `<span class="brand"><span class="brand-icon">${icon('bread')}</span><span><strong>캄보딜라이트</strong><small>KAMBO DELIGHT</small></span></span>`;}
-const buyerNav=[['shop','bag','빵 구매'],['dice','dice','이벤트 참여']];
+const buyerNav=[['shop','bag','빵 구매'],['ranking','trophy','이벤트 참여']];
 const staffNav=[['queue','clock','주문 확인'],['sales','edit','수기 판매'],['inventory','box','재고'],['events','spark','인스타 이벤트'],['notes','note','인수인계']];
 function navButton([route,img,label]) {
   const active=isAdmin?state.route===route:route==='shop'?['shop','pickup','orders'].includes(state.route):['dice','ranking'].includes(state.route);
@@ -45,8 +45,8 @@ function shell(content) {
 }
 function pageHeading(title,desc='') { return `<div class="page-heading"><div><h1>${title}</h1>${desc?`<p>${desc}</p>`:''}</div></div>`; }
 function subnav(items) { return `<nav class="subnav" aria-label="${['dice','ranking'].includes(state.route)?'이벤트 메뉴':'구매 메뉴'}">${items.map(([route,label])=>`<button class="${state.route===route?'active':''}" data-action="navigate" data-route="${route}" ${state.route===route?'aria-current="page"':''}>${label}</button>`).join('')}</nav>`; }
-function purchaseHeading() { return `${pageHeading('빵 구매','예판 수령 또는 현판 구매를 선택해 주세요.')}${subnav([['shop','현판 구매'],['pickup','예판 수령'],['orders','내 주문']])}`; }
-function eventHeading() { return `${pageHeading('이벤트 참여','최고의 연금술사 · 구매 승인 후 주사위 지급')}${subnav([['dice','주사위 · 빵 뽑기'],['ranking','점수 순위']])}`; }
+function purchaseHeading() { return `${pageHeading('빵 구매','예판 수령 또는 현판 구매를 선택해 주세요.')}${subnav([['shop','현판 구매'],['pickup','예판 수령'],['orders','주문 내역']])}`; }
+function eventHeading() { return `${pageHeading('이벤트 참여','최고의 연금술사는 누구?')}${subnav([['ranking','점수 순위'],['dice','주사위 굴리기']])}`; }
 function prototypeNotice() { return window.KAMBO_CONFIG?.prototype||state.config.demo?'<p class="prototype-note">가안 테스트 · 샘플 데이터입니다.</p>':''; }
 function cartCount(){return Object.values(state.cart).reduce((s,v)=>s+v,0);}
 function cartTotal(){return state.products.reduce((s,p)=>s+p.price*(state.cart[p.id]||0),0);}
@@ -60,9 +60,9 @@ function renderBasket() {
   <p class="form-hint">담당자에게 입금 내역을 보여주고 승인을 받아주세요.</p></section>`;
 }
 function renderShop() {
-  return `${purchaseHeading()}<div class="shop-layout"><section class="product-list" aria-label="현판 빵 목록">${state.products.map(p=>`<article class="product-row">
-    <img src="${productImage(p)}" alt=""><div class="product-info"><h2>${esc(p.subtitle||p.name)}</h2><span class="menu-real-name">${esc(p.name)}</span><strong>${money(p.price)}원</strong><small>${p.stock?`구매 가능 ${p.stock}${p.unit||'개'}`:'품절'}</small></div>
-    <div class="product-count"><button class="quantity-button" data-action="cart-minus" data-id="${p.id}" ${!state.cart[p.id]?'disabled':''} aria-label="${esc(p.name)} 수량 줄이기">${icon('minus')}</button><span aria-label="${esc(p.name)} 선택 수량">${state.cart[p.id]||0}</span><button class="quantity-button" data-action="cart-plus" data-id="${p.id}" ${(state.cart[p.id]||0)>=p.stock?'disabled':''} aria-label="${esc(p.name)} 수량 늘리기">${icon('plus')}</button></div>
+  return `${purchaseHeading()}<div class="shop-layout"><section class="product-list" aria-label="현판 빵 목록">${state.products.map(p=>`<article class="product-row ${p.stock<=0?'sold-out':''}" ${p.stock<=0?'aria-disabled="true"':''}>
+    <div class="product-info"><h2>${esc(p.name)}</h2>${p.subtitle?`<span class="menu-concept">${esc(p.subtitle)}</span>`:''}<div class="product-price"><strong>${money(p.price)}원</strong>${p.stock<=0?'<span class="sold-out-label">품절</span>':''}</div></div>
+    <div class="product-count"><button class="quantity-button" data-action="cart-minus" data-id="${p.id}" ${p.stock<=0||!state.cart[p.id]?'disabled':''} aria-label="${esc(p.name)} 수량 줄이기">${icon('minus')}</button><span aria-label="${esc(p.name)} 선택 수량">${state.cart[p.id]||0}</span><button class="quantity-button" data-action="cart-plus" data-id="${p.id}" ${p.stock<=0||(state.cart[p.id]||0)>=p.stock?'disabled':''} aria-label="${esc(p.name)} 수량 늘리기">${icon('plus')}</button></div>
     </article>`).join('')}</section><aside class="desktop-basket">${renderBasket()}</aside></div>`;
 }
 function authRequired() { return renderBuyerLogin(); }
@@ -74,22 +74,52 @@ function renderPickup() {
 }
 function renderOrders() {
   return `${purchaseHeading()}<div class="narrow">${state.orders.length?state.orders.map(o=>`<article class="order-card"><div class="order-top"><strong>${{walkin:'현판 구매',preorder:'예판 수령',manual:'수기 판매'}[o.type]} #${String(o.id).padStart(3,'0')}</strong>${orderStatus(o.status)}</div>${orderLines(o)}<div class="order-bottom"><span>${time(o.created_at)}</span><strong>${money(o.total)}원</strong></div>
-  ${o.status==='pending'?`<p class="callout">${o.type==='preorder'?'담당자에게 예약 내역을 보여주고 빵을 받아주세요.':'담당자에게 주문과 입금 내역을 보여주세요.'} 승인 대기 중입니다.</p>`:o.status==='approved'?`<div class="callout"><span>구매 완료 · 주사위 ${o.quantity}개 지급</span><button class="text-button" data-action="navigate" data-route="dice">이벤트 참여하기 ${icon('arrow')}</button></div>`:''}</article>`).join(''):'<div class="empty-state"><h2>주문 내역이 없습니다.</h2><button class="primary-button" data-action="navigate" data-route="shop">현판 구매하기</button></div>'}</div>`;
+  ${o.status==='pending'?`<p class="callout">${o.type==='preorder'?'담당자에게 예약 내역을 보여주고 빵을 받아주세요.':'담당자에게 주문과 입금 내역을 보여주세요.'} 승인 대기 중입니다.</p>`:o.status==='approved'?`<div class="callout"><span>구매 완료 · 주사위 ${o.quantity}개 지급</span><button class="text-button" data-action="navigate" data-route="ranking">이벤트 참여하기 ${icon('arrow')}</button></div>`:''}</article>`).join(''):'<div class="empty-state"><h2>주문 내역이 없습니다.</h2><button class="primary-button" data-action="navigate" data-route="shop">현판 구매하기</button></div>'}</div>`;
 }
 const dieDots={1:[5],2:[1,9],3:[1,5,9],4:[1,3,7,9],5:[1,3,5,7,9],6:[1,3,4,6,7,9]};
 function die(value=5){return `<div class="big-dice" aria-label="주사위 ${value}">${Array.from({length:9},(_,i)=>`<i class="${dieDots[value].includes(i+1)?'dot':''}"></i>`).join('')}</div>`;}
+const characterTiers = [
+  {name:'연금술 수련생'}, {name:'견습 연금술사'}, {name:'원소 연금술사'},
+  {name:'황금 연금술사'}, {name:'별빛 현자'}, {name:'전설의 대연금술사'},
+];
+function eventProgress(user=state.user) {
+  const step=state.config.reward_step||10,claimed=user.rewards_claimed||0;
+  const level=Math.min(characterTiers.length-1,claimed),target=(claimed+1)*step;
+  return {step,claimed,level,target,remaining:Math.max(0,target-user.score),eligible:user.score>=target};
+}
+function characterPortrait(level,className='') {
+  return `<img class="alchemist ${className}" src="/assets/alchemist-${level}.svg" alt="${characterTiers[level].name}" width="160" height="160">`;
+}
+function diceAction({roll=false}={}) {
+  if(!state.user.dice_balance)return `<button class="primary-button purchase-cta full" data-action="navigate" data-route="shop">${icon('bag')}빵 구매하고 주사위 얻기</button>`;
+  return `<button class="primary-button full" data-action="${roll?'roll-dice':'navigate'}" ${roll?'':'data-route="dice"'} ${state.rolling||state.leveling?'disabled':''}>${icon('dice')}${state.rolling?'굴리는 중…':roll?'주사위 1개 굴리기':`주사위 굴리기 · ${state.user.dice_balance}개`}</button>`;
+}
+function renderLevelCard() {
+  const {step,level,target,remaining,eligible}=eventProgress();
+  const progress=Math.min(step,Math.max(0,state.user.score-target+step));
+  return `<section class="level-card content-card" aria-label="내 연금술사 성장">
+    <div class="character-summary">${characterPortrait(level)}<div><span class="level-badge">Lv. ${level}</span><h2>${characterTiers[level].name}</h2><p>현재 점수 <strong>${money(state.user.score)}점</strong></p></div></div>
+    <p class="level-message" aria-live="polite">${eligible?`${target}점 달성! ${level<5?'레벨업하고 빵을 받아요.':'랜덤 빵을 받아요.'}`:`${remaining}점 더 모으면 랜덤 빵 증정!`}</p>
+    <div class="progress" role="progressbar" aria-label="다음 빵 보상까지" aria-valuemin="0" aria-valuemax="${step}" aria-valuenow="${progress}"><span style="width:${progress/step*100}%"></span></div>
+    ${eligible?`<button class="primary-button full level-up-button" data-action="claim-reward" ${state.leveling?'disabled':''}>${icon('spark')}${state.leveling?'빵을 뽑고 있어요…':level<5?'레벨업하고 빵 받기':'빵 보상 받기'}</button>`:''}
+    <ol class="level-milestones" aria-label="10점마다 연금술사 성장">${characterTiers.slice(1).map((tier,i)=>{const stage=i+1;return `<li class="${stage<=level?'unlocked':stage===level+1&&eligible?'ready':'locked'}" ${stage===level?'aria-current="step"':''}>${characterPortrait(stage)}<span>${stage*step}점</span></li>`;}).join('')}</ol>
+    <p class="level-caption">10점마다 랜덤 빵 1개 · 캐릭터는 50점까지 성장</p>
+  </section>`;
+}
+function renderRewardHistory() {
+  return state.rewards.length?`<details id="buyer-reward-history" class="content-card reward-history"><summary>당첨된 빵 · ${state.rewards.length}개</summary>${state.rewards.map(r=>`<div class="reward-item"><strong>${esc(r.product_name)}</strong><span>${r.threshold}점 · 당첨 #${r.id}</span></div>`).join('')}<p class="form-hint">담당자에게 당첨 기록을 보여주고 받아가세요.</p></details>`:'';
+}
 function renderDice() {
-  const u=state.user,step=state.config.reward_step||7,target=(u.rewards_claimed+1)*step,eligible=u.score>=target;
+  const u=state.user;
   return `${eventHeading()}<section class="event-stats" aria-label="내 이벤트 현황"><div><span>현재 점수</span><strong>${money(u.score)}<small>점</small></strong></div><div><span>남은 주사위</span><strong>${u.dice_balance}<small>개</small></strong></div></section>
-  <div class="dice-layout"><section class="dice-stage ${state.rolling?'rolling':''}"><h2>주사위 굴리기</h2><div class="dice-visual">${die(state.lastRoll||1)}</div><p class="dice-result" aria-live="polite">${state.rolling?'굴리는 중…':state.lastRoll?`결과 ${state.lastRoll} · +${state.lastRoll}점`:'나온 숫자만큼 점수가 쌓입니다.'}</p><button class="primary-button full" data-action="roll-dice" ${!u.dice_balance||state.rolling?'disabled':''}>${state.rolling?'굴리는 중…':'주사위 1개 굴리기'}</button>${!u.dice_balance?'<p class="form-hint">빵 구매 승인 후 주사위가 지급됩니다.</p>':''}</section>
-  <section class="reward-card"><h2>랜덤 빵 뽑기</h2><p>${step}점마다 빵 1개를 뽑을 수 있어요.</p><div class="reward-target">${eligible?'뽑기 가능':`${target}점까지 ${target-u.score}점 남았습니다.`}</div><div class="progress" role="progressbar" aria-label="다음 빵 뽑기까지" aria-valuemin="0" aria-valuemax="${step}" aria-valuenow="${Math.min(step,Math.max(0,u.score-u.rewards_claimed*step))}"><span style="width:${Math.min(100,Math.max(0,(u.score-u.rewards_claimed*step)/step*100))}%"></span></div><button class="secondary-button full" data-action="open-reward" ${!eligible?'disabled':''}>빵 뽑기</button></section></div>
-  ${state.rewards.length?`<section class="content-card reward-history"><h2>당첨된 빵</h2>${state.rewards.map(r=>`<div class="reward-item"><strong>${esc(r.product_name)}</strong><span>${r.threshold}점 · 당첨 #${r.id}</span></div>`).join('')}<p class="form-hint">담당자에게 당첨 기록을 보여주고 받아가세요.</p></section>`:''}`;
+  <div class="dice-layout"><section class="dice-stage ${state.rolling?'rolling':''}"><h2>주사위 굴리기</h2><div class="dice-visual">${die(state.lastRoll||1)}</div><p class="dice-result" aria-live="polite">${state.rolling?'굴리는 중…':state.lastRoll?`결과 ${state.lastRoll} · +${state.lastRoll}점`:'나온 숫자만큼 점수가 쌓입니다.'}</p>${diceAction({roll:true})}${!u.dice_balance?'<p class="form-hint">빵 구매 승인 후 주사위가 지급됩니다.</p>':''}</section>
+  ${renderLevelCard()}</div>${renderRewardHistory()}`;
 }
 function renderRanking() {
   const board=state.leaderboard;
   if(!board)return `${eventHeading()}<p>순위를 불러오는 중입니다.</p>`;
-  return `${eventHeading()}<section class="content-card"><h2>최고의 연금술사 TOP 3</h2><p class="form-hint">양일 누적 점수로 최종 1·2·3등을 선정합니다.</p><ol class="leaders">${board.leaders.map(p=>`<li class="${p.is_me?'me':''}"><span class="rank-number">${p.rank}위</span><strong>${esc(p.name)}${p.is_me?' (나)':''}</strong><b>${money(p.score)}점</b></li>`).join('')}</ol></section>
-  <section class="content-card ranking-neighbors"><h2>내 주변 순위</h2>${board.neighbors.map(p=>`<div class="rank-row ${p.is_me?'me':''}"><span>${p.rank}위</span><strong>${esc(p.name)}${p.is_me?' (나)':''}</strong><b>${money(p.score)}점</b></div>`).join('')}<p class="form-hint">내 순위 ${board.me?.rank||'-'}위 · 총 ${board.total_participants}명 참여</p></section>`;
+  return `${eventHeading()}<div class="event-action">${diceAction()}</div><div class="ranking-layout"><section class="content-card"><h2>최고의 연금술사 TOP 3</h2><p class="form-hint">양일 누적 점수로 최종 1·2·3등을 선정합니다.</p><ol class="leaders">${board.leaders.map(p=>`<li class="${p.is_me?'me':''}"><span class="rank-number">${p.rank}위</span><strong>${esc(p.name)}${p.is_me?' (나)':''}</strong><b>${money(p.score)}점</b></li>`).join('')}</ol></section>
+  ${renderLevelCard()}</div><section class="content-card ranking-neighbors"><h2>내 주변 순위</h2>${board.neighbors.map(p=>`<div class="rank-row ${p.is_me?'me':''}"><span>${p.rank}위</span><strong>${esc(p.name)}${p.is_me?' (나)':''}</strong><b>${money(p.score)}점</b></div>`).join('')}<p class="form-hint">내 순위 ${board.me?.rank||'-'}위 · 총 ${board.total_participants}명 참여</p></section>${renderRewardHistory()}`;
 }
 function render() {
   let content;
@@ -111,23 +141,39 @@ function buyerAuthForm(mode='login') {
 function renderBuyerLogin() { return `<section class="login-card content-card"><h1>이름과 비밀번호를 입력해 주세요.</h1><p class="form-hint">처음이라면 계정을 만들어 주세요.</p>${buyerAuthForm(state.authMode)}</section>`; }
 function openAuth(mode='login') { modal(`<h2>로그인</h2>${buyerAuthForm(mode)}`); }
 
-async function checkout(button){if(!cartCount())return;if(!state.user){openAuth();return;}const items=Object.entries(state.cart).map(([product_id,quantity])=>({product_id:Number(product_id),quantity}));const op=operation('checkout',items);button.disabled=true;try{const {order}=await api('/api/orders',{method:'POST',body:{items,request_id:op.id}});state.cart={};op.done();if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);await refreshAfterAction();state.route='orders';history.replaceState(null,'','#orders');render();modal(`<div class="order-success"><div class="success-icon">${icon('check')}</div><h2>빵 구매 요청을 보냈어요!</h2><p>담당자에게 주문을 보여 주고<br>안내받은 계좌로 입금해 주세요.</p><div class="success-box">주문 #${String(order.id).padStart(3,'0')} · 선택 수량 ${order.quantity}<strong>${money(order.total)}원</strong>확인 후 주사위 ${order.quantity}개가 지급돼요.</div><button class="primary-button full" data-action="close-modal">내 주문 확인하기 ${icon('arrow')}</button></div>`);}catch(error){if(error.status>=400&&error.status<500)op.done();button.disabled=false;toast(error.message,'error');await refresh().catch(()=>{});render();}}
-function openRewardDraw() {
-  const target=(state.user.rewards_claimed+1)*(state.config.reward_step||7);
-  modal(`<div class="draw-prompt"><span class="draw-icon">${icon('bread')}</span><h2>${target}점 달성!</h2><p>랜덤 빵 1개를 뽑을 수 있어요.</p><button class="primary-button full" data-action="claim-reward">빵 뽑기</button></div>`);
+async function checkout(button){if(!cartCount())return;if(!state.user){openAuth();return;}const items=Object.entries(state.cart).map(([product_id,quantity])=>({product_id:Number(product_id),quantity}));const op=operation('checkout',items);button.disabled=true;try{const {order}=await api('/api/orders',{method:'POST',body:{items,request_id:op.id}});state.cart={};op.done();if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);await refreshAfterAction();state.route='orders';history.replaceState(null,'','#orders');render();modal(`<div class="order-success"><div class="success-icon">${icon('check')}</div><h2>빵 구매 요청을 보냈어요!</h2><p>담당자에게 주문을 보여 주고<br>안내받은 계좌로 입금해 주세요.</p><div class="success-box">주문 #${String(order.id).padStart(3,'0')} · 선택 수량 ${order.quantity}<strong>${money(order.total)}원</strong>확인 후 주사위 ${order.quantity}개가 지급돼요.</div><button class="primary-button full" data-action="close-modal">주문 내역 확인하기 ${icon('arrow')}</button></div>`);}catch(error){if(error.status>=400&&error.status<500)op.done();button.disabled=false;toast(error.message,'error');await refresh().catch(()=>{});render();}}
+function openLevelUp() {
+  const {level,target,eligible}=eventProgress();
+  if(!eligible)return;
+  const nextLevel=Math.min(5,level+1);
+  modal(`<div class="draw-prompt">${characterPortrait(nextLevel,'level-preview')}<span class="label-kicker">${level<5?'다음 연금술사':'최고 레벨 달성'}</span><h2>${target}점 달성!</h2><p>${level<5?`${characterTiers[nextLevel].name}로 레벨업하고<br>`:''}랜덤 빵 1개를 받아요.</p><button class="primary-button full" data-action="claim-reward">${level<5?'레벨업하고 빵 받기':'빵 보상 받기'}</button></div>`);
 }
 async function rollDice() {
-  if(state.rolling||!state.user?.dice_balance)return;
-  const target=(state.user.rewards_claimed+1)*(state.config.reward_step||7),before=state.user.score;
+  if(state.rolling||state.leveling||!state.user?.dice_balance)return;
+  const {target}=eventProgress(),before=state.user.score;
   state.rolling=true;render();const op=operation('dice');
   try {
     const [result]=await Promise.all([api('/api/dice/roll',{method:'POST',body:{request_id:op.id}}),new Promise(r=>setTimeout(r,850))]);
     state.lastRoll=result.value;state.user.score=result.score;state.user.dice_balance=result.dice_balance;op.done();state.rolling=false;
     await refreshAfterAction();render();
-    if(before<target&&state.user.score>=target)openRewardDraw();
+    if(before<target&&state.user.score>=target)openLevelUp();
   } catch(error) { if(error.status>=400&&error.status<500)op.done();state.rolling=false;render();toast(error.message,'error'); }
 }
-async function claimReward(button){button.disabled=true;const op=operation('reward');try{const {reward,user}=await api('/api/rewards/claim',{method:'POST',body:{request_id:op.id}});state.user=user;op.done();await refreshAfterAction();render();const p=state.products.find(p=>p.id===reward.product_id);modal(`<div class="order-success"><span class="label-kicker">랜덤 빵 당첨</span><div class="reward-reveal">${p?`<img src="${productImage(p)}" alt="${esc(reward.product_name)}" style="width:220px;height:150px;object-fit:contain;margin:auto">`:'🎁'}</div><h2>${esc(p?.subtitle||reward.product_name)}, 당첨!</h2>${p?`<p class="menu-real-name">${esc(reward.product_name)}</p>`:''}<p>${reward.threshold}점 달성을 축하해요.<br>담당자에게 이 화면을 보여 주고 선물을 받아 가세요.</p><p class="form-hint">선물 기록 #${reward.id} · 담당자 화면에도 기록됐어요.</p><button class="primary-button full" data-action="close-modal">확인</button></div>`);}catch(error){if(error.status>=400&&error.status<500)op.done();button.disabled=false;toast(error.message,'error');}}
+async function claimReward(button) {
+  if(state.leveling||state.rolling)return;
+  state.leveling=true;button.disabled=true;const op=operation('reward');
+  try {
+    const {reward,user}=await api('/api/rewards/claim',{method:'POST',body:{request_id:op.id}});
+    state.user=user;op.done();await refreshAfterAction();
+    state.leveling=false;render();
+    const p=state.products.find(p=>p.id===reward.product_id),level=eventProgress(user).level;
+    const upgraded=user.rewards_claimed<=5;
+    modal(`<div class="order-success level-up-result"><span class="label-kicker">${upgraded?'LEVEL UP!':'랜덤 빵 당첨'}</span>${characterPortrait(level,'level-preview')}<h2>${upgraded?`Lv. ${level} ${characterTiers[level].name}`:'전설의 연금술은 계속!'}</h2><div class="bread-prize">${p?`<img src="${productImage(p)}" alt="" width="76" height="64">`:icon('bread')}<div><span>함께 받은 랜덤 빵</span><strong>${esc(reward.product_name)}</strong>${p?.subtitle?`<small>${esc(p.subtitle)}</small>`:''}</div></div><p>${reward.threshold}점 달성을 축하해요.<br>담당자에게 이 화면을 보여 주고 빵을 받아 가세요.</p><p class="form-hint">당첨 #${reward.id} · 담당자 화면에도 기록됐어요.</p><button class="primary-button full" data-action="close-modal">확인</button></div>`);
+  } catch(error) {
+    if(error.status>=400&&error.status<500)op.done();
+    state.leveling=false;button.disabled=false;toast(error.message,'error');
+  }
+}
 document.addEventListener('click',async event=>{const el=event.target.closest('[data-action]');if(!el)return;const action=el.dataset.action;try{
 if(action==='navigate'){state.route=el.dataset.route;location.hash=state.route;render();window.scrollTo({top:0,behavior:'instant'});}
 else if(action==='login')isAdmin?document.querySelector('#staff-login input')?.focus():openAuth();
@@ -140,7 +186,6 @@ else if(action==='open-cart')modal(renderBasket());
 else if(action==='checkout')await checkout(el);
 else if(action==='claim-preorder'){el.disabled=true;try{const {order}=await api(`/api/preorders/${el.dataset.id}/claim`,{method:'POST',body:{request_id:el.dataset.requestId||(el.dataset.requestId=requestId())}});if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);await refreshAfterAction();state.route='orders';location.hash='orders';render();toast(order.status==='approved'?'이미 픽업을 완료한 예약이에요.':'픽업을 요청했어요. 담당자에게 말씀해 주세요.');}catch(error){el.disabled=false;throw error;}}
 else if(action==='roll-dice')await rollDice();
-else if(action==='open-reward')openRewardDraw();
 else if(action==='claim-reward')await claimReward(el);
 else if(action==='retry')location.reload();
 else await handleAdminClick(action,el,event);
@@ -150,7 +195,7 @@ document.addEventListener('keydown',event=>{if(!document.querySelector('.modal')
 window.addEventListener('hashchange',()=>{state.route=location.hash.slice(1)||(isAdmin?'queue':'shop');render();});
 let polling=false,pendingRender=false;
 function snapshot(){return JSON.stringify([state.user,state.products,state.orders,state.staffData,state.leaderboard,state.rewards]);}
-function safeToRender(){return !document.querySelector('.modal')&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)&&!state.rolling;}
-setInterval(async()=>{if(polling||state.rolling||document.hidden)return;polling=true;try{const before=snapshot();const oldOrders=isAdmin?state.staffData?.orders||[]:state.orders;await refresh();const newOrders=isAdmin?state.staffData?.orders||[]:state.orders;if(isAdmin){const fresh=newOrders.filter(o=>o.status==='pending'&&!oldOrders.some(old=>old.id===o.id));if(fresh.length)toast(`${fresh[0].customer_name} 님의 새 주문이 도착했어요.`);}else{const newlyApproved=newOrders.find(o=>o.status==='approved'&&oldOrders.find(old=>old.id===o.id&&old.status==='pending'));if(newlyApproved)toast(`주문이 승인됐어요. 주사위 ${newlyApproved.quantity}개가 도착했어요!`);}if(before!==snapshot())pendingRender=true;if(pendingRender&&safeToRender()){render();pendingRender=false;}}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;render();toast('다시 로그인해 주세요.','error');}}finally{polling=false;}},4000);
+function safeToRender(){return !document.querySelector('.modal')&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)&&!state.rolling&&!state.leveling;}
+setInterval(async()=>{if(polling||state.rolling||state.leveling||document.hidden)return;polling=true;try{const before=snapshot();const oldOrders=isAdmin?state.staffData?.orders||[]:state.orders;await refresh();const newOrders=isAdmin?state.staffData?.orders||[]:state.orders;if(isAdmin){const fresh=newOrders.filter(o=>o.status==='pending'&&!oldOrders.some(old=>old.id===o.id));if(fresh.length)toast(`${fresh[0].customer_name} 님의 새 주문이 도착했어요.`);}else{const newlyApproved=newOrders.find(o=>o.status==='approved'&&oldOrders.find(old=>old.id===o.id&&old.status==='pending'));if(newlyApproved)toast(`주문이 승인됐어요. 주사위 ${newlyApproved.quantity}개가 도착했어요!`);}if(before!==snapshot())pendingRender=true;if(pendingRender&&safeToRender()){render();pendingRender=false;}}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;render();toast('다시 로그인해 주세요.','error');}}finally{polling=false;}},4000);
 async function boot(){try{await refresh();render();}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;await refresh();render();}else document.querySelector('#app').innerHTML=`<div class="connection-error">${brand()}<h1>빵집에 연결하고 있어요</h1><p>잠시 후 다시 연결해 주세요.<br>${esc(error.message)}</p><button class="primary-button" data-action="retry">다시 연결하기 ${icon('arrow')}</button></div>`;}}
 boot();

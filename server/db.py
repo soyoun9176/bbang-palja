@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS products (
  price INTEGER NOT NULL CHECK (price >= 0),
  stock INTEGER NOT NULL CHECK (stock >= 0),
  preorder_stock INTEGER NOT NULL DEFAULT 0 CHECK (preorder_stock >= 0),
- reward_stock INTEGER NOT NULL DEFAULT 0 CHECK (reward_stock >= 0),
+ reward_stock INTEGER NOT NULL DEFAULT 0 CHECK (reward_stock >= 0), -- legacy, merged into stock on startup
  category TEXT NOT NULL,
  image TEXT NOT NULL
 );

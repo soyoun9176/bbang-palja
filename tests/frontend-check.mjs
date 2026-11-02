@@ -31,7 +31,7 @@ function fixture({guest = false, storage = new Map()} = {}) {
     const token = options.headers?.Authorization;
     const id = token === 'Bearer token-B' ? 2 : 1;
     const user = {id, name: `구매자${id}`, role: 'buyer', score: 0, dice_balance: remote.approved ? 1 : 2, rewards_claimed: 0};
-    if (path === '/api/config') return response({demo: false, reward_step: 7});
+    if (path === '/api/config') return response({demo: false, reward_step: 10});
     if (path === '/api/products') return response({products: [{id: 1, stock: remote.stock}]});
     if (path === '/api/auth/me') return response({user});
     if (path === '/api/orders') return response({orders: [{id: 1, status: remote.approved ? 'approved' : 'pending', quantity: 1}]});
@@ -87,20 +87,20 @@ test('purchase and event have separate content and only two main menus', async (
   assert.doesNotMatch(f.root.innerHTML, /현판 빵 목록|구매 요청하기/);
 });
 
-test('reaching the score target opens the bread draw without claiming it automatically', async () => {
+test('reaching ten points opens level-up without claiming bread automatically', async () => {
   const f = fixture();
   await f.run('refresh()');
-  f.run("state.config.reward_step=7; state.route='dice'");
+  f.run("state.config.reward_step=10; state.user.score=8; state.route='dice'");
   let prompt='';
   f.context.captureModal = html => {prompt=html;};
   f.run('modal = captureModal');
   f.context.fetchOverride = async (path, options) => {
-    if(path==='/api/dice/roll') return f.response({value: 3, score: 8, dice_balance: 1});
-    if(path==='/api/auth/me') return f.response({user:{id:1,name:'구매자1',role:'buyer',score:8,dice_balance:1,rewards_claimed:0}});
+    if(path==='/api/dice/roll') return f.response({value: 3, score: 11, dice_balance: 1});
+    if(path==='/api/auth/me') return f.response({user:{id:1,name:'구매자1',role:'buyer',score:11,dice_balance:1,rewards_claimed:0}});
     return f.context.normalFetch(path, options);
   };
   await f.run('rollDice()');
-  assert.match(prompt, /7점 달성/);
+  assert.match(prompt, /10점 달성/);
   assert.match(prompt, /data-action="claim-reward"/);
   assert.equal(f.requests.filter(r=>r.path==='/api/rewards/claim').length,0);
 });
@@ -180,4 +180,71 @@ test('an expired response from an older login cannot log out the current user', 
   await olderPoll;
   assert.equal(f.run('state.token'), 'token-B');
   assert.equal(f.run('state.user.id'), 2);
+});
+
+test('event entry defaults to ranking and its action follows dice balance', async () => {
+  const f=fixture();
+  await f.run('refresh()');
+  f.run('renderPage()');
+  assert.match(f.root.innerHTML, /data-route="orders"[^>]*>주문 내역/);
+  assert.doesNotMatch(f.root.innerHTML, /내 주문/);
+  assert.match(f.run('navButton(buyerNav[1])'), /data-route="ranking"/);
+  f.run("state.route='ranking'; renderPage()");
+  assert.match(f.root.innerHTML, /최고의 연금술사 TOP 3/);
+  assert.match(f.root.innerHTML, /data-route="dice"[^>]*>.*주사위 굴리기 · 2개/);
+  assert.doesNotMatch(f.root.innerHTML, /purchase-cta/);
+  f.run('state.user.dice_balance=0; renderPage()');
+  assert.match(f.root.innerHTML, /purchase-cta full" data-action="navigate" data-route="shop"/);
+  assert.match(f.root.innerHTML, /빵 구매하고 주사위 얻기/);
+  f.run("state.route='dice'; renderPage()");
+  assert.match(f.root.innerHTML, /빵 구매하고 주사위 얻기/);
+  assert.doesNotMatch(f.root.innerHTML, /data-action="roll-dice"/);
+});
+
+test('score milestones wait for a successful bread claim before changing character', async () => {
+  const f=fixture();
+  await f.run('refresh()');
+  f.run("state.route='ranking'; state.user.score=9; renderPage()");
+  assert.match(f.root.innerHTML, /1점 더 모으면 랜덤 빵 증정!/);
+  assert.doesNotMatch(f.root.innerHTML, /data-action="claim-reward"/);
+  f.run('state.user.score=10; renderPage()');
+  assert.equal(f.run('eventProgress().level'), 0);
+  assert.match(f.root.innerHTML, /레벨업하고 빵 받기/);
+  assert.match(f.root.innerHTML, /현재 점수 <strong>10점/);
+  f.run('state.user.rewards_claimed=1; renderPage()');
+  assert.equal(f.run('eventProgress().level'), 1);
+  assert.match(f.root.innerHTML, /10점 더 모으면 랜덤 빵 증정!/);
+  f.run('state.user.score=60; state.user.rewards_claimed=5; renderPage()');
+  assert.equal(f.run('eventProgress().level'), 5);
+  assert.match(f.root.innerHTML, /빵 보상 받기/);
+  assert.doesNotMatch(f.root.innerHTML, /레벨업하고 빵 받기/);
+});
+
+test('level-up waits for one server claim and reveals character together with bread', async () => {
+  const f=fixture();
+  await f.run('refresh()');
+  f.run('state.user.score=10');
+  let release, prompt='';
+  let user={id:1,name:'구매자1',role:'buyer',score:10,dice_balance:1,rewards_claimed:0,level:0};
+  f.context.captureModal=html=>{prompt=html;};
+  f.run('modal=captureModal');
+  f.context.fetchOverride=async (path,options)=>{
+    if(path==='/api/rewards/claim')return new Promise(resolve=>{release=()=>{
+      user={...user,rewards_claimed:1,level:1};
+      resolve(f.response({user,reward:{id:1,product_id:1,product_name:'플레인 휘낭시에',threshold:10}}));
+    };});
+    if(path==='/api/auth/me')return f.response({user});
+    return f.context.normalFetch(path,options);
+  };
+  const first=f.run('claimReward({disabled:false})');
+  await f.run('claimReward({disabled:false})');
+  assert.equal(f.requests.filter(r=>r.path==='/api/rewards/claim').length,1);
+  assert.equal(f.run('eventProgress().level'),0);
+  release();
+  await first;
+  assert.equal(f.run('eventProgress().level'),1);
+  assert.match(prompt,/LEVEL UP!/);
+  assert.match(prompt,/Lv. 1 견습 연금술사/);
+  assert.match(prompt,/함께 받은 랜덤 빵/);
+  assert.match(prompt,/플레인 휘낭시에/);
 });

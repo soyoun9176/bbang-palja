@@ -1,0 +1,22 @@
+[Unit]
+Description=Deploy verified Bbang Palja main release
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/bbang-palja/deploy.py
+TimeoutStartSec=420
+UMask=0022
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/bbang-palja /var/lib/bbang-palja-deploy /var/lib/private/bbang-palja /var/backups/bbang-palja
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+MemoryMax=512M
+CPUQuota=50%
+TasksMax=128
