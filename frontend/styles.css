@@ -27,3 +27,34 @@
 .product-photo{position:relative;flex:0 0 72px;width:72px;height:72px;overflow:hidden;border:1px solid #e4e7df;border-radius:10px;background:#f3f5ef}.photo-placeholder{position:absolute;inset:0;display:grid;place-items:center;color:#b5bdb0}.photo-placeholder .icon{width:26px;height:26px}.product-photo img{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:cover}.product-row.sold-out .product-photo{filter:grayscale(1);opacity:.55}.product-count{flex-shrink:0}
 @media(max-width:800px){.product-row{gap:10px}.product-photo{flex-basis:60px;width:60px;height:60px}}
 @media(max-width:360px){.product-row{gap:8px}.product-photo{flex-basis:48px;width:48px;height:48px}.photo-placeholder .icon{width:22px;height:22px}}
+
+/* One event page: personal controls first, rankings alongside on wide screens. */
+.event-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}
+.event-personal,.event-rankings{min-width:0}
+.event-play{border-color:#ddd1ea;background:linear-gradient(145deg,#fff,#faf7fd)}
+.event-play .character-summary>.alchemist{width:88px;height:88px}
+.event-play .character-summary p strong{font-size:24px}
+.event-play .level-message{margin-top:18px}
+.event-space .event-play .level-up-button{background:#f5e4ac;border-color:#e4ce8d;color:#624a12;margin-bottom:4px}
+.inline-dice{margin-top:18px;padding:16px;background:#fff;border:1px solid #e5dced;border-radius:12px}
+.dice-control-head{display:grid;grid-template-columns:64px minmax(0,1fr);gap:14px;align-items:center;margin-bottom:14px}
+.inline-dice .dice-visual{height:64px}
+.inline-dice .big-dice{width:52px;height:52px;padding:10px;gap:4px;border-radius:11px;box-shadow:3px 4px 0 #ded3ec}
+.dice-balance{font-size:13px;margin:0;color:var(--muted)}
+.dice-balance strong{font-size:20px;color:#4f3d65;margin-left:5px}
+.dice-feedback{font-size:12px;line-height:1.6;min-height:20px;color:var(--muted);margin:4px 0 0}
+.dice-feedback.has-result{color:#65507f;font-weight:700}
+.inline-dice .primary-button{min-height:54px;font-size:15px}
+.inline-dice .purchase-cta{font-size:14px}
+.character-stages{margin-top:20px;border-top:1px solid #e5dced;padding-top:16px}
+.character-stages summary{font-size:13px;font-weight:600;cursor:pointer}
+.character-stages summary span{font-size:11px;font-weight:400;color:var(--muted);margin-left:8px}
+@media(max-width:800px){.event-layout{grid-template-columns:1fr}.event-play .character-summary>.alchemist{width:72px;height:72px}.event-play .character-summary h2{font-size:16px}.event-play .character-summary p strong{font-size:22px}}
+
+.preorder-status-panel{margin-bottom:22px}
+.preorder-status-panel>summary{width:fit-content;list-style:none;cursor:pointer}
+.preorder-status-panel>summary::-webkit-details-marker{display:none}
+.preorder-status-panel>summary>span{font-size:12px;color:var(--muted);font-weight:400}
+.preorder-status-panel[open]>summary>.icon{transform:rotate(90deg)}
+.preorder-status-content{margin-top:14px}
+.preorder-status-content .preorder-menu{min-width:240px;max-width:560px;white-space:normal;line-height:1.8}

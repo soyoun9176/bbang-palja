@@ -46,7 +46,7 @@ function shell(content) {
 function pageHeading(title,desc='') { return `<div class="page-heading"><div><h1>${title}</h1>${desc?`<p>${desc}</p>`:''}</div></div>`; }
 function subnav(items) { return `<nav class="subnav" aria-label="${['dice','ranking'].includes(state.route)?'이벤트 메뉴':'구매 메뉴'}">${items.map(([route,label])=>`<button class="${state.route===route?'active':''}" data-action="navigate" data-route="${route}" ${state.route===route?'aria-current="page"':''}>${label}</button>`).join('')}</nav>`; }
 function purchaseHeading() { return `${pageHeading('빵 구매','예약한 빵 수령 또는 현장 구매를 선택해 주세요.')}${subnav([['shop','현장 구매'],['pickup','예약한 빵 수령'],['orders','주문 내역']])}`; }
-function eventHeading() { return `${pageHeading('이벤트 참여','최고의 연금술사는 누구?')}${subnav([['ranking','점수 순위'],['dice','주사위 굴리기']])}`; }
+function eventHeading() { return pageHeading('이벤트 참여','주사위를 굴리고, 최고의 연금술사에 도전해요.'); }
 function prototypeNotice() { return window.KAMBO_CONFIG?.prototype||state.config.demo?'<p class="prototype-note">가안 테스트 · 샘플 데이터입니다.</p>':''; }
 function cartCount(){return Object.values(state.cart).reduce((s,v)=>s+v,0);}
 function cartTotal(){return state.products.reduce((s,p)=>s+p.price*(state.cart[p.id]||0),0);}
@@ -94,41 +94,45 @@ function characterPortrait(level,className='',earnedLevel=eventProgress().level)
   if(level===0||level>earnedLevel)return `<div class="alchemist character-unknown ${className}" role="img" aria-label="아직 얻지 못한 캐릭터">?</div>`;
   return `<img class="alchemist ${className}" src="/assets/alchemist-${level}.svg" alt="${characterTiers[level].name}" width="160" height="160">`;
 }
-function diceAction({roll=false}={}) {
-  if(!state.user.dice_balance)return `<button class="primary-button purchase-cta full" data-action="navigate" data-route="shop">${icon('bag')}빵 구매하고 주사위 얻기</button>`;
-  return `<button class="primary-button full" data-action="${roll?'roll-dice':'navigate'}" ${roll?'':'data-route="dice"'} ${state.rolling||state.leveling?'disabled':''}>${icon('dice')}${state.rolling?'굴리는 중…':roll?'주사위 1개 굴리기':`주사위 굴리기 · ${state.user.dice_balance}개`}</button>`;
+function diceAction() {
+  const busy=state.rolling||state.leveling;
+  if(!state.user.dice_balance)return `<button class="primary-button purchase-cta full" data-action="navigate" data-route="shop" ${busy?'disabled':''}>${icon('bag')}빵 구매하고 주사위 얻기</button>`;
+  return `<button class="primary-button full" data-action="roll-dice" ${busy?'disabled':''}>${icon('dice')}${state.rolling?'굴리는 중…':'주사위 1개 굴리기'}</button>`;
+}
+function renderDiceControl() {
+  const result=state.rolling?'주사위를 굴리고 있어요…':state.lastRoll?`결과 ${state.lastRoll} · +${state.lastRoll}점`:state.user.dice_balance?'나온 숫자만큼 점수가 쌓여요.':'빵 구매 승인 후 주사위가 지급돼요.';
+  return `<div class="inline-dice ${state.rolling?'rolling':''}" aria-label="주사위 굴리기" aria-busy="${state.rolling}">
+    <div class="dice-control-head"><div class="dice-visual" aria-hidden="true">${die(state.lastRoll||1)}</div><div><p class="dice-balance">남은 주사위 <strong>${state.user.dice_balance}개</strong></p><p class="dice-feedback ${state.lastRoll&&!state.rolling?'has-result':''}" role="status">${result}</p></div></div>
+    ${diceAction()}
+  </div>`;
 }
 function renderLevelCard() {
   const {step,level,target,remaining,eligible}=eventProgress();
   const progress=Math.min(step,Math.max(0,state.user.score-target+step));
-  return `<section class="level-card content-card" aria-label="내 연금술사 성장">
+  return `<section class="level-card content-card event-play" aria-label="내 점수와 주사위">
     <div class="character-summary">${characterPortrait(level)}<div><span class="level-badge">Lv. ${level}</span><h2>${characterTiers[level].name}</h2><p>현재 점수 <strong>${money(state.user.score)}점</strong></p></div></div>
-    <p class="level-message" aria-live="polite">${eligible?`${target}점 달성! ${level<5?'레벨업하고 빵을 받아요.':'랜덤 빵을 받아요.'}`:`${remaining}점 더 모으면 랜덤 빵 증정!`}</p>
+    <p class="level-message" aria-live="polite">${eligible?`${target}점 달성! ${level<5?'레벨업하고 빵을 받아요.':'랜덤 빵을 받아요.'}`:`${remaining}점 더 모으면 ${level<5?'레벨업!':'랜덤 빵 증정!'}`}</p>
     <div class="progress" role="progressbar" aria-label="다음 빵 보상까지" aria-valuemin="0" aria-valuemax="${step}" aria-valuenow="${progress}"><span style="width:${progress/step*100}%"></span></div>
-    ${eligible?`<button class="primary-button full level-up-button" data-action="claim-reward" ${state.leveling?'disabled':''}>${icon('spark')}${state.leveling?'빵을 뽑고 있어요…':level<5?'레벨업하고 빵 받기':'빵 보상 받기'}</button>`:''}
-    <ol class="level-milestones" aria-label="10점마다 연금술사 성장">${characterTiers.slice(1).map((tier,i)=>{const stage=i+1;return `<li class="${stage<=level?'unlocked':stage===level+1&&eligible?'ready':'locked'}" ${stage===level?'aria-current="step"':''}>${characterPortrait(stage)}<span>${stage*step}점</span></li>`;}).join('')}</ol>
-    <p class="level-caption">10점마다 랜덤 빵 1개 · 캐릭터는 50점까지 성장</p>
+    ${eligible?`<button class="primary-button full level-up-button" data-action="claim-reward" ${state.leveling||state.rolling?'disabled':''}>${icon('spark')}${state.leveling?'빵을 뽑고 있어요…':level<5?'레벨업하고 빵 받기':'빵 보상 받기'}</button>`:''}
+    ${renderDiceControl()}
+    <details id="event-character-stages" class="character-stages"><summary>캐릭터 성장 단계 <span>10점마다 랜덤 빵</span></summary><ol class="level-milestones" aria-label="10점마다 연금술사 성장">${characterTiers.slice(1).map((tier,i)=>{const stage=i+1;return `<li class="${stage<=level?'unlocked':stage===level+1&&eligible?'ready':'locked'}" ${stage===level?'aria-current="step"':''}>${characterPortrait(stage)}<span>${stage*step}점</span></li>`;}).join('')}</ol>
+    <p class="level-caption">10점마다 랜덤 빵 1개 · 캐릭터는 50점까지 성장</p></details>
   </section>`;
 }
 function renderRewardHistory() {
   return state.rewards.length?`<details id="buyer-reward-history" class="content-card reward-history"><summary>당첨된 빵 · ${state.rewards.length}개</summary>${state.rewards.map(r=>`<div class="reward-item"><strong>${esc(r.product_name)}</strong><span>${r.threshold}점 · 당첨 #${r.id}</span></div>`).join('')}<p class="form-hint">담당자에게 당첨 기록을 보여주고 받아가세요.</p></details>`:'';
 }
-function renderDice() {
-  const u=state.user;
-  return `${eventHeading()}<section class="event-stats" aria-label="내 이벤트 현황"><div><span>현재 점수</span><strong>${money(u.score)}<small>점</small></strong></div><div><span>남은 주사위</span><strong>${u.dice_balance}<small>개</small></strong></div></section>
-  <div class="dice-layout"><section class="dice-stage ${state.rolling?'rolling':''}"><h2>주사위 굴리기</h2><div class="dice-visual">${die(state.lastRoll||1)}</div><p class="dice-result" aria-live="polite">${state.rolling?'굴리는 중…':state.lastRoll?`결과 ${state.lastRoll} · +${state.lastRoll}점`:'나온 숫자만큼 점수가 쌓입니다.'}</p>${diceAction({roll:true})}${!u.dice_balance?'<p class="form-hint">빵 구매 승인 후 주사위가 지급됩니다.</p>':''}</section>
-  ${renderLevelCard()}</div>${renderRewardHistory()}`;
-}
-function renderRanking() {
+function renderEvent() {
   const board=state.leaderboard;
-  if(!board)return `${eventHeading()}<p>순위를 불러오는 중입니다.</p>`;
-  return `${eventHeading()}<div class="event-action">${diceAction()}</div><div class="ranking-layout"><section class="content-card"><h2>최고의 연금술사 TOP 3</h2><p class="form-hint">양일 누적 점수로 최종 1·2·3등을 선정합니다.</p><ol class="leaders">${board.leaders.map(p=>`<li class="${p.is_me?'me':''}"><span class="rank-number">${p.rank}위</span><strong>${esc(p.name)}${p.is_me?' (나)':''}</strong><b>${money(p.score)}점</b></li>`).join('')}</ol></section>
-  ${renderLevelCard()}</div><section class="content-card ranking-neighbors"><h2>내 주변 순위</h2>${board.neighbors.map(p=>`<div class="rank-row ${p.is_me?'me':''}"><span>${p.rank}위</span><strong>${esc(p.name)}${p.is_me?' (나)':''}</strong><b>${money(p.score)}점</b></div>`).join('')}<p class="form-hint">내 순위 ${board.me?.rank||'-'}위 · 총 ${board.total_participants}명 참여</p></section>${renderRewardHistory()}`;
+  const rankings=board?`<section class="content-card"><h2>최고의 연금술사 TOP 3</h2><p class="form-hint">양일 누적 점수로 최종 1·2·3등을 선정합니다.</p><ol class="leaders">${board.leaders.map(p=>`<li class="${p.is_me?'me':''}"><span class="rank-number">${p.rank}위</span><strong>${esc(p.name)}${p.is_me?' (나)':''}</strong><b>${money(p.score)}점</b></li>`).join('')}</ol></section>
+  <section class="content-card ranking-neighbors"><h2>내 주변 순위</h2>${board.neighbors.map(p=>`<div class="rank-row ${p.is_me?'me':''}"><span>${p.rank}위</span><strong>${esc(p.name)}${p.is_me?' (나)':''}</strong><b>${money(p.score)}점</b></div>`).join('')}<p class="form-hint">내 순위 ${board.me?.rank||'-'}위 · 총 ${board.total_participants}명 참여</p></section>`:'<section class="content-card"><h2>점수 순위</h2><p class="form-hint">순위를 불러오는 중입니다.</p></section>';
+  return `${eventHeading()}<div class="event-layout"><div class="event-personal">${renderLevelCard()}${renderRewardHistory()}</div><div class="event-rankings">${rankings}</div></div>`;
 }
 function render() {
+  if(!isAdmin&&state.route==='dice'){state.route='ranking';history.replaceState(null,'','#ranking');}
   let content;
   if(isAdmin)content=state.user?renderAdmin():renderStaffLogin();
-  else content=state.user?({shop:renderShop,pickup:renderPickup,orders:renderOrders,dice:renderDice,ranking:renderRanking}[state.route]||renderShop)():renderBuyerLogin();
+  else content=state.user?({shop:renderShop,pickup:renderPickup,orders:renderOrders,ranking:renderEvent}[state.route]||renderShop)():renderBuyerLogin();
   const expanded=[...document.querySelectorAll('#app details[open]')].map(node=>node.id).filter(Boolean);
   document.querySelector('#app').innerHTML=shell(prototypeNotice()+content);
   expanded.forEach(id=>{const node=document.getElementById(id);if(node)node.open=true;});

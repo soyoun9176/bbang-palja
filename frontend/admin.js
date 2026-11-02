@@ -6,6 +6,8 @@ let manualSaleType = 'walkin';
 let manualReservation = null;
 let manualLookup = {name:'',phone:''};
 let manualLookupVersion = 0;
+let manualPickupMode = 'existing';
+let manualPickupUser = '';
 let inputListenerAdded = false;
 const pendingRequests = new Map();
 
@@ -13,6 +15,10 @@ export function initAdmin(shared) {
   helpers = shared;
   if (!inputListenerAdded) {
     document.addEventListener('input', event => {
+      if (event.target.name==='user_id' && event.target.closest('#admin-manual-preorder-complete')) {
+        manualPickupUser = event.target.value;
+        return;
+      }
       const lookup = event.target.closest('#admin-manual-preorder-lookup');
       if (lookup) {
         if (['name','phone'].includes(event.target.name)) manualLookup[event.target.name] = event.target.value;
@@ -73,10 +79,17 @@ function heldStock(productId) {
   return pendingOrders().reduce((sum, order) => sum + (order.items || []).filter(item => item.product_id === productId).reduce((count, item) => count + item.quantity, 0), 0);
 }
 
+function preorderStatusPanel() {
+  const reservations=list('reservations');
+  const labels={reserved:'수령 대기',pending:'수령 요청 접수',approved:'수령 완료'};
+  return `<details id="inventory-preorders" class="preorder-status-panel"><summary class="secondary-button">${i('chevron')}예판 수령 현황 <span>${reservations.length}건</span></summary><div class="preorder-status-content">${reservations.length?`<div class="table-wrap"><table><thead><tr><th>이름</th><th>전화번호</th><th>메뉴</th><th>수령 상태</th></tr></thead><tbody>${reservations.map(r=>`<tr><td><strong>${escape(r.name)}</strong></td><td>${escape(String(r.phone).replace(/^(\d{3})(\d{3,4})(\d{4})$/,'$1-$2-$3'))}</td><td class="preorder-menu">${r.items.map(item=>`${escape(item.name)} ${item.quantity}${productList().find(p=>p.id===item.product_id)?.unit||'개'}`).join(', ')}</td><td><span class="status ${r.status==='approved'?'approved':'pending'}">${labels[r.status]||escape(r.status)}</span></td></tr>`).join('')}</tbody></table></div>`:'<p class="form-hint">등록된 예판이 없습니다.</p>'}</div></details>`;
+}
+
 function inventoryPage() {
   const logs=list('inventory_logs').filter(log=>inventoryBucket==='all'||log.bucket===inventoryBucket);
   return `${heading('재고','',`<button class="secondary-button" data-action="admin-import">예판 등록</button><button class="primary-button" data-action="admin-adjust">재고 수정</button>`)}
   ${help('재고 보는 방법','빵은 판매와 빵 당첨, 우유는 판매와 인스타 지급에 같은 현판 재고를 사용합니다. 예판 대기와 접수 보관 수량은 추첨에 사용하지 않습니다. 매장 예상은 현판·예판 대기·접수 보관의 합입니다. 추가 입고는 +, 차감은 −로 수정합니다.')}
+  ${preorderStatusPanel()}
   <div class="table-wrap"><table><thead><tr><th>품목</th><th>현판·이벤트 가능</th><th>예판 대기</th><th>접수 보관</th><th>매장 예상</th><th></th></tr></thead><tbody>${productList().map(p=>{
     const held=heldStock(p.id);
     return `<tr><td><strong>${escape(p.name)}</strong></td><td>${p.stock}</td><td>${p.preorder_stock}</td><td>${held}</td><td><strong>${p.stock+p.preorder_stock+held}</strong></td><td><button class="secondary-button" data-action="admin-adjust" data-product="${p.id}">수정</button></td></tr>`;
@@ -86,15 +99,25 @@ function inventoryPage() {
 
 function buyerOptions(selected='',placeholder='구매자 선택') { return `<option value="">${escape(placeholder)}</option>${list('users').map(u=>`<option value="${u.id}" ${String(selected)===String(u.id)?'selected':''}>${escape(u.name)}</option>`).join('')}`; }
 
+function manualPickupAccount(reservation, order) {
+  if (order) {
+    const name=order.customer_name || list('users').find(u=>u.id===order.user_id)?.name || reservation.name;
+    return `<input type="hidden" name="user_id" value="${order.user_id}"><p class="callout">수령 계정: ${escape(name)}<span>이미 접수한 계정에 주사위를 추가합니다.</span></p>`;
+  }
+  const sameName=list('users').some(u=>u.name===reservation.name);
+  const existing=manualPickupMode!=='new'||sameName;
+  return `<div class="admin-subtabs" role="group" aria-label="예약 수령 계정"><button class="tab-chip ${existing?'active':''}" data-action="admin-pickup-mode" data-mode="existing" type="button" aria-pressed="${existing}" ${!list('users').length?'disabled':''}>기존 계정에 추가</button><button class="tab-chip ${!existing?'active':''}" data-action="admin-pickup-mode" data-mode="new" type="button" aria-pressed="${!existing}" ${sameName?'disabled':''}>새 계정 만들기</button></div>
+    ${existing?`<div class="field"><label for="admin-pickup-user">수령할 구매자 계정</label><select id="admin-pickup-user" name="user_id" required>${buyerOptions(manualPickupUser,'수령 계정 선택')}</select><p class="form-hint">예약자와 계정을 확인해 주세요. 주사위는 선택한 계정에 추가됩니다.</p></div>`:`<p class="form-hint">${escape(reservation.name)} 님의 계정을 함께 만듭니다. 아래 비밀번호를 구매자에게 알려주세요.</p><div class="field"><label for="admin-pickup-pin">새 구매자 숫자 4자리 비밀번호</label><input id="admin-pickup-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" required autocomplete="new-password"></div>`}`;
+}
+
 function manualPreorderPage() {
   const r = manualReservation;
   let result = '';
   if (r) {
     const order = list('orders').find(o=>o.reservation_id===r.id&&o.status!=='cancelled') || r.order;
     const completed = order?.status==='approved' || r.status==='approved';
-    const buyerId = order?.user_id || list('users').find(u=>u.name===r.name)?.id;
     result = `<div id="manual-preorder-result" class="reservation-result"><div class="order-top"><h2>${escape(r.name)} 님의 예약</h2><span class="status ${completed?'approved':'pending'}">${completed?'수령 완료':order?.status==='pending'?'수령 요청 접수됨':'수령 대기'}</span></div><div class="order-lines">${r.items.map(item=>`<div class="order-line"><span>${escape(item.name)} × ${item.quantity}</span><span>${won(item.price*item.quantity)}</span></div>`).join('')}</div><div class="basket-total"><span>예약 금액</span><strong>${won(r.total)}</strong></div>
-    ${completed?`<p class="callout">이미 수령 완료한 예약입니다.${order?` 주문 #${order.id}`:''}</p>`:`<form id="admin-manual-preorder-complete"><p class="form-hint">예약된 품목을 전달한 뒤 승인해 주세요. ${r.dice_quantity?`주사위 ${r.dice_quantity}개를 지급합니다.`:'우유는 주사위를 지급하지 않습니다.'}</p>${buyerId?`<input type="hidden" name="user_id" value="${buyerId}"><p class="callout">수령 계정: ${escape(r.name)}</p>`:`<p class="form-hint">${escape(r.name)} 님의 계정을 함께 만듭니다. 아래 비밀번호를 구매자에게 알려주세요.</p><div class="field"><label for="admin-pickup-pin">새 구매자 숫자 4자리 비밀번호</label><input id="admin-pickup-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" required autocomplete="new-password"></div>`}<button class="primary-button full" type="submit">예약한 빵 전달 완료 · 승인</button></form>`}</div>`;
+    ${completed?`<p class="callout">이미 수령 완료한 예약입니다.${order?` 주문 #${order.id} · 수령 계정: ${escape(order.customer_name||list('users').find(u=>u.id===order.user_id)?.name||r.name)}`:''}</p>`:`<form id="admin-manual-preorder-complete"><p class="form-hint">예약된 품목을 전달한 뒤 승인해 주세요. ${r.dice_quantity?`주사위 ${r.dice_quantity}개를 지급합니다.`:'우유는 주사위를 지급하지 않습니다.'}</p>${manualPickupAccount(r,order)}<button class="primary-button full" type="submit">예약한 빵 전달 완료 · 승인</button></form>`}</div>`;
   }
   return `${help('예약 수령 처리 방법','예약자 이름과 전화번호로 예약을 조회합니다. 예약 내역 그대로 빵을 전달하고 승인하면 완료됩니다. 이미 접수된 수령 요청은 같은 주문으로 처리하며, 완료된 예약은 다시 지급하지 않습니다.')}<section class="content-card narrow"><form id="admin-manual-preorder-lookup"><div class="form-grid"><div class="field"><label for="admin-pickup-name">예약자 이름</label><input id="admin-pickup-name" name="name" value="${escape(manualLookup.name)}" maxlength="30" required autocomplete="off"></div><div class="field"><label for="admin-pickup-phone">예약 전화번호</label><input id="admin-pickup-phone" name="phone" type="tel" inputmode="tel" value="${escape(manualLookup.phone)}" maxlength="20" required autocomplete="off"></div></div><button class="secondary-button full" type="submit">예약 내역 조회</button></form>${result}</section>`;
 }
@@ -161,6 +184,7 @@ export async function handleAdminClick(action, element) {
     if (next !== manualSaleType) { manualSaleType = next; manualReservation = null; manualLookupVersion++; render(); }
   }
   else if (action === 'admin-customer-mode') { customerMode = element.dataset.mode; render(); }
+  else if (action === 'admin-pickup-mode') { manualPickupMode = element.dataset.mode==='new'?'new':'existing'; render(); }
   else if (action === 'admin-adjust') adjustmentModal(element.dataset.product, element.dataset.bucket);
   else if (action === 'admin-import') importModal();
   else if (action === 'admin-memo') memoModal();
@@ -247,6 +271,8 @@ export async function handleAdminSubmit(form) {
       if (version!==manualLookupVersion || manualSaleType!=='preorder') return true;
       manualReservation = response.reservation;
       manualLookup = {name:manualReservation.name,phone:manualReservation.phone};
+      manualPickupUser = String(list('users').find(u=>u.name===manualReservation.name)?.id||'');
+      manualPickupMode = list('users').length?'existing':'new';
       render();
       return true;
     } else if (form.id === 'admin-manual-preorder-complete') {

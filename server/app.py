@@ -190,8 +190,6 @@ def manual_buyer(tx, body, reservation_name=None):
             buyer = user_by_id(tx, buyer_id)
         else:
             check(verify_pin(pin, buyer['password_hash']), '같은 이름의 계정이 있습니다. 기존 비밀번호를 입력하거나 구매자를 선택해 주세요.', 409)
-    if reservation_name is not None:
-        check(buyer['name'] == reservation_name, '예약자와 같은 이름의 구매자 계정으로 처리해 주세요.', 409)
     return buyer
 
 
@@ -235,6 +233,20 @@ def staff_reservation_data(tx, reservation):
     result['dice_quantity'] = dice_quantity(result['items'])
     result['order'] = order_data(tx,reservation['order_id']) if reservation['order_id'] else None
     return result
+
+
+def all_reservations(tx):
+    reservations = tx.all('SELECT id,name,phone,status FROM reservations ORDER BY id DESC')
+    by_id = {row['id']: row for row in reservations}
+    for row in reservations:
+        row['items'] = []
+        row['total'] = 0
+    items = tx.all('SELECT ri.reservation_id,ri.product_id,p.name,ri.quantity,ri.price FROM reservation_items ri JOIN products p ON p.id=ri.product_id ORDER BY ri.id')
+    for item in items:
+        reservation = by_id[item.pop('reservation_id')]
+        reservation['items'].append(item)
+        reservation['total'] += item['quantity'] * item['price']
+    return reservations
 
 
 def idempotent(tx, user, scope, body, operation):
@@ -452,6 +464,7 @@ class Application:
                 stats["bread_sold"] = tx.one("SELECT COALESCE(SUM(i.quantity),0) AS count FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.status='approved' AND i.product_id != ?", (MILK_PRODUCT_ID,))["count"]
                 stats["milk_stock"] = milk_stock(tx)
                 return {"orders": all_orders(tx), "products": products(tx), "stats": stats,
+                        "reservations": all_reservations(tx),
                         "users": [public_user(row) for row in tx.all("SELECT * FROM users WHERE role = 'buyer' ORDER BY name,id")],
                         "inventory_logs": tx.all("SELECT * FROM inventory_logs ORDER BY id DESC LIMIT 300"),
                         "events": tx.all("SELECT * FROM events ORDER BY id DESC LIMIT 300"),
@@ -514,7 +527,6 @@ class Application:
                         check(order['type'] == 'preorder' and order['reservation_id'] == reservation['id'],
                               '예약에 연결된 주문을 확인할 수 없습니다.', 409)
                         buyer = user_by_id(tx,order['user_id'],buyer=True)
-                        check(buyer['name'] == reservation['name'], '예약자와 주문 계정이 다릅니다.', 409)
                         if body.get('user_id') is not None:
                             check(integer(body.get('user_id'),'구매자 번호',maximum=1_000_000) == buyer['id'],
                                   '이미 접수된 예약의 구매자 계정과 다릅니다.', 409)

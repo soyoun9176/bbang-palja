@@ -116,10 +116,11 @@ class ManualPreorderTests(unittest.TestCase):
         with self.app.db.transaction(write=True) as tx:tx.execute('UPDATE products SET preorder_stock=1 WHERE id=112')
         self.assertEqual(self.complete(r,{'pin':'2345'},identity)['user']['dice_balance'],2)
 
-    def test_invalid_phone_wrong_account_and_buyer_access_do_not_fulfill(self):
-        buyer=self.buyer();other=self.buyer();r=self.reserve(buyer['user']['name'])
+    def test_invalid_phone_account_pin_and_buyer_access_do_not_fulfill(self):
+        buyer=self.buyer();r=self.reserve(buyer['user']['name'])
+        staff_id=self.request('GET','/api/auth/me',token=self.staff)['user']['id']
         cases=[({'phone':'01099999999','user_id':buyer['user']['id']},404),
-               ({'user_id':other['user']['id']},409),({'pin':'9999'},409),({'pin':'123'},400)]
+               ({'user_id':staff_id},404),({'user_id':999999},404),({'pin':'9999'},409),({'pin':'123'},400)]
         for body,status in cases:
             with self.subTest(body=body),self.assertRaises(APIError) as error:self.complete(r,body)
             self.assertEqual(error.exception.status,status)
@@ -134,6 +135,79 @@ class ManualPreorderTests(unittest.TestCase):
         # A staff lookup must not grant the buyer a phone-verification record.
         with self.assertRaises(APIError) as error:self.request('POST',f"/api/preorders/{r['id']}/claim",{'request_id':uuid.uuid4().hex},buyer['token'])
         self.assertEqual(error.exception.status,403)
+
+    def test_reservation_can_add_to_a_differently_named_existing_account(self):
+        buyer=self.buyer('기존닉네임');other=self.buyer('예약자실명')
+        previous=self.request('POST','/api/staff/manual-sale',{'user_id':buyer['user']['id'],
+            'items':[{'product_id':101,'quantity':5}],'request_id':uuid.uuid4().hex},self.staff)['order']
+        with self.app.db.transaction(write=True) as tx:
+            tx.execute('UPDATE users SET score=12 WHERE id=?',(buyer['user']['id'],))
+        r=self.reserve(other['user']['name'])
+        identity=uuid.uuid4().hex
+        result=self.complete(r,{'user_id':buyer['user']['id']},identity)
+        self.assertEqual((result['order']['user_id'],result['order']['customer_name']),
+                         (buyer['user']['id'],'기존닉네임'))
+        self.assertEqual((self.me(buyer)['dice_balance'],self.me(buyer)['score']),(7,12))
+        self.assertEqual(self.me(other)['dice_balance'],0)
+        self.assertEqual(result['reservation']['name'],'예약자실명')
+        self.assertEqual(result['reservation']['status'],'approved')
+        self.assertEqual([order['id'] for order in self.request('GET','/api/orders',token=buyer['token'])['orders']],
+                         [result['order']['id'],previous['id']])
+        self.assertEqual(self.request('GET','/api/orders',token=other['token'])['orders'],[])
+        self.assertEqual(self.complete(r,{'user_id':buyer['user']['id']},identity),result)
+        self.assertTrue(self.complete(r,{'user_id':buyer['user']['id']})['already_completed'])
+        with self.assertRaises(APIError) as error:self.complete(r,{'user_id':other['user']['id']})
+        self.assertEqual(error.exception.status,409)
+        with self.assertRaises(APIError) as error:self.claim(r,other)
+        self.assertEqual(error.exception.status,409)
+        self.assertEqual(self.product(101)['preorder_stock'],0)
+        self.assertEqual(self.me(buyer)['dice_balance'],7)
+
+    def test_queued_pickup_cannot_switch_to_another_account(self):
+        buyer=self.buyer();other=self.buyer();r=self.reserve(buyer['user']['name'])
+        order=self.claim(r,buyer)
+        with self.assertRaises(APIError) as error:self.complete(r,{'user_id':other['user']['id']})
+        self.assertEqual(error.exception.status,409)
+        self.assertEqual(self.me(other)['dice_balance'],0)
+        self.assertEqual(self.lookup(r['name'])['order']['status'],'pending')
+        result=self.complete(r,{'user_id':buyer['user']['id']})
+        self.assertEqual(result['order']['id'],order['id'])
+        self.assertEqual(self.me(buyer)['dice_balance'],2)
+
+    def test_dashboard_lists_every_reservation_and_tracks_pickup_and_cancellation(self):
+        buyer=self.buyer()
+        waiting=self.reserve('예약대기',[{'product_id':101,'quantity':1}])
+        pending=self.reserve(buyer['user']['name'],[{'product_id':101,'quantity':2}])
+        approved=self.reserve('우유예약',[{'product_id':112,'quantity':1}])
+        order=self.claim(pending,buyer)
+        self.complete(approved,{'user_id':buyer['user']['id']})
+        dashboard=self.request('GET','/api/staff/dashboard',token=self.staff)
+        rows=dashboard['reservations']
+        self.assertEqual([r['id'] for r in rows],[approved['id'],pending['id'],waiting['id']])
+        self.assertEqual([r['status'] for r in rows],['approved','pending','reserved'])
+        self.assertEqual(rows[1]['phone'],'01012345678')
+        self.assertEqual(rows[1]['items'],[{'product_id':101,'name':'플레인 휘낭시에','quantity':2,'price':2800}])
+        self.assertEqual(rows[1]['total'],5600)
+        for token,status in [(buyer['token'],403),(None,401)]:
+            with self.assertRaises(APIError) as error:self.request('GET','/api/staff/dashboard',token=token)
+            self.assertEqual(error.exception.status,status)
+        self.request('POST',f"/api/staff/orders/{order['id']}/cancel",{},self.staff)
+        rows=self.request('GET','/api/staff/dashboard',token=self.staff)['reservations']
+        self.assertEqual(next(r for r in rows if r['id']==pending['id'])['status'],'reserved')
+
+    def test_competing_account_selections_credit_only_the_first_account(self):
+        buyers=[self.buyer(),self.buyer()];r=self.reserve('공동예약')
+        barrier=threading.Barrier(2)
+        def complete(buyer):
+            barrier.wait(timeout=5)
+            try:return self.complete(r,{'user_id':buyer['user']['id']})['order']
+            except APIError as error:return error.status
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(complete,buyers))
+        self.assertEqual(sum(isinstance(result,dict) for result in results),1)
+        self.assertIn(409,results)
+        self.assertEqual(sorted(self.me(b)['dice_balance'] for b in buyers),[0,2])
+        self.assertEqual(self.product(101)['preorder_stock'],0)
+        with self.app.db.transaction() as tx:self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM orders')['n'],1)
 
     def test_cancelled_request_can_be_collected_with_a_new_order(self):
         buyer=self.buyer();r=self.reserve(buyer['user']['name'])

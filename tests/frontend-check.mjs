@@ -15,10 +15,11 @@ function fixture({guest = false, storage = new Map()} = {}) {
   const root = {innerHTML: ''};
   let renderCount = 0;
   const requests = [];
+  const routeChanges = [];
   const response = (body, status = 200) => ({ok: status < 400, status, json: async () => body});
   const context = {
     crypto: {getRandomValues: bytes => webcrypto.getRandomValues(bytes)},
-    location: {pathname: '/', hash: '#shop'}, history: {replaceState() {}},
+    location: {pathname: '/', hash: '#shop'}, history: {replaceState(...args) {routeChanges.push(args[2]);}},
     localStorage: {getItem: () => guest ? null : 'token-A', removeItem() {}, setItem() {}},
     sessionStorage: {getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key)},
     window: {KAMBO_CONFIG: {apiBase: ''}, addEventListener() {}},
@@ -46,7 +47,7 @@ function fixture({guest = false, storage = new Map()} = {}) {
   vm.createContext(context);
   vm.runInContext(source + '\nconst renderPage = render; render = recordRender; toast = () => {}; modal = () => {};', context);
   return {
-    context, remote, storage, requests, response, root,
+    context, remote, storage, requests, response, root, routeChanges,
     run: script => vm.runInContext(script, context),
     get renders() {return renderCount;},
   };
@@ -70,7 +71,7 @@ test('buyers sign in before seeing purchase or event content', async () => {
   await f.run('refresh();');
   f.run('renderPage()');
   assert.match(f.root.innerHTML, /id="buyer-auth"/);
-  assert.doesNotMatch(f.root.innerHTML, /class="product-list"|class="dice-stage|class="primary-nav"/);
+  assert.doesNotMatch(f.root.innerHTML, /class="product-list"|class="inline-dice|class="primary-nav"/);
 });
 
 test('purchase and event have separate content and only two main menus', async () => {
@@ -81,16 +82,17 @@ test('purchase and event have separate content and only two main menus', async (
   assert.doesNotMatch(f.root.innerHTML, /현재 점수|랜덤 빵 뽑기|주사위 1개 굴리기/);
   const nav = f.root.innerHTML.match(/<nav class="primary-nav"[^>]*>(.*?)<\/nav>/s)[1];
   assert.equal((nav.match(/<button/g) || []).length, 2);
-  f.run("state.route='dice'; renderPage()");
+  f.run("state.route='ranking'; renderPage()");
   assert.match(f.root.innerHTML, /주사위 1개 굴리기/);
   assert.match(f.root.innerHTML, /현재 점수/);
+  assert.match(f.root.innerHTML, /최고의 연금술사 TOP 3/);
   assert.doesNotMatch(f.root.innerHTML, /현판 빵 목록|구매 요청하기/);
 });
 
 test('reaching ten points opens level-up without claiming bread automatically', async () => {
   const f = fixture();
   await f.run('refresh()');
-  f.run("state.config.reward_step=10; state.user.score=8; state.route='dice'");
+  f.run("state.config.reward_step=10; state.user.score=8; state.route='ranking'");
   let prompt='';
   f.context.captureModal = html => {prompt=html;};
   f.run('modal = captureModal');
@@ -184,7 +186,7 @@ test('an expired response from an older login cannot log out the current user', 
   assert.equal(f.run('state.user.id'), 2);
 });
 
-test('event entry defaults to ranking and its action follows dice balance', async () => {
+test('one event page shows rankings and a direct roll action that follows dice balance', async () => {
   const f=fixture();
   await f.run('refresh()');
   f.run('renderPage()');
@@ -193,21 +195,70 @@ test('event entry defaults to ranking and its action follows dice balance', asyn
   assert.match(f.run('navButton(buyerNav[1])'), /data-route="ranking"/);
   f.run("state.route='ranking'; renderPage()");
   assert.match(f.root.innerHTML, /최고의 연금술사 TOP 3/);
-  assert.match(f.root.innerHTML, /data-route="dice"[^>]*>.*주사위 굴리기 · 2개/);
+  assert.match(f.root.innerHTML, /data-action="roll-dice"[^>]*>.*주사위 1개 굴리기/);
+  assert.match(f.root.innerHTML, /남은 주사위 <strong>2개/);
+  assert.equal((f.root.innerHTML.match(/data-action="roll-dice"/g)||[]).length,1);
+  assert.doesNotMatch(f.root.innerHTML, /class="subnav"|data-route="dice"/);
   assert.doesNotMatch(f.root.innerHTML, /purchase-cta/);
   f.run('state.user.dice_balance=0; renderPage()');
   assert.match(f.root.innerHTML, /purchase-cta full" data-action="navigate" data-route="shop"/);
   assert.match(f.root.innerHTML, /빵 구매하고 주사위 얻기/);
-  f.run("state.route='dice'; renderPage()");
-  assert.match(f.root.innerHTML, /빵 구매하고 주사위 얻기/);
   assert.doesNotMatch(f.root.innerHTML, /data-action="roll-dice"/);
+  assert.match(f.root.innerHTML, /최고의 연금술사 TOP 3/);
+});
+
+test('old dice links open the same event page and update the bookmark route',async()=>{
+  const f=fixture();await f.run('refresh()');
+  f.run("state.route='dice'; renderPage()");
+  assert.equal(f.run('state.route'),'ranking');
+  assert.equal(f.routeChanges.at(-1),'#ranking');
+  assert.match(f.root.innerHTML,/data-action="roll-dice"/);
+  assert.match(f.root.innerHTML,/최고의 연금술사 TOP 3/);
+  assert.doesNotMatch(f.root.innerHTML,/class="subnav"|data-route="dice"/);
+});
+
+test('rolling stays with the rankings, blocks repeated clicks, and shows the last die result',async()=>{
+  const f=fixture();await f.run('refresh()');
+  f.run("state.route='ranking'; state.user.score=1; state.user.dice_balance=1; render=renderPage");
+  let release;
+  let user={id:1,name:'구매자1',role:'buyer',score:1,dice_balance:1,rewards_claimed:0};
+  f.context.fetchOverride=async(path,options)=>{
+    if(path==='/api/dice/roll')return new Promise(resolve=>{release=()=>{
+      user={...user,score:5,dice_balance:0};resolve(f.response({value:4,score:5,dice_balance:0}));
+    };});
+    if(path==='/api/auth/me')return f.response({user});
+    return f.context.normalFetch(path,options);
+  };
+  const first=f.run('rollDice()');
+  assert.match(f.root.innerHTML,/inline-dice rolling/);
+  assert.match(f.root.innerHTML,/data-action="roll-dice" disabled/);
+  assert.match(f.root.innerHTML,/최고의 연금술사 TOP 3/);
+  await f.run('rollDice()');
+  assert.equal(f.requests.filter(r=>r.path==='/api/dice/roll').length,1);
+  release();await first;
+  assert.equal(f.run('state.route'),'ranking');
+  assert.deepEqual(f.routeChanges,[]);
+  assert.match(f.root.innerHTML,/결과 4 · \+4점/);
+  assert.match(f.root.innerHTML,/현재 점수 <strong>5점/);
+  assert.match(f.root.innerHTML,/남은 주사위 <strong>0개/);
+  assert.match(f.root.innerHTML,/빵 구매하고 주사위 얻기/);
+  assert.match(f.root.innerHTML,/최고의 연금술사 TOP 3/);
+  assert.doesNotMatch(f.root.innerHTML,/data-action="roll-dice"/);
+});
+
+test('event actions remain available while the leaderboard is loading',async()=>{
+  const f=fixture();await f.run('refresh()');
+  f.run("state.route='ranking'; state.leaderboard=null; renderPage()");
+  assert.match(f.root.innerHTML,/순위를 불러오는 중/);
+  assert.match(f.root.innerHTML,/data-action="roll-dice"/);
+  assert.match(f.root.innerHTML,/현재 점수/);
 });
 
 test('score milestones wait for a successful bread claim before changing character', async () => {
   const f=fixture();
   await f.run('refresh()');
   f.run("state.route='ranking'; state.user.score=9; renderPage()");
-  assert.match(f.root.innerHTML, /1점 더 모으면 랜덤 빵 증정!/);
+  assert.match(f.root.innerHTML, /1점 더 모으면 레벨업!/);
   assert.equal((f.root.innerHTML.match(/character-unknown/g)||[]).length,6);
   assert.doesNotMatch(f.root.innerHTML,/alchemist-[0-5]\.svg/);
   assert.doesNotMatch(f.root.innerHTML, /data-action="claim-reward"/);
@@ -220,7 +271,7 @@ test('score milestones wait for a successful bread claim before changing charact
   assert.match(f.root.innerHTML,/alchemist-1\.svg/);
   assert.doesNotMatch(f.root.innerHTML,/alchemist-[2-5]\.svg/);
   assert.equal((f.root.innerHTML.match(/character-unknown/g)||[]).length,4);
-  assert.match(f.root.innerHTML, /10점 더 모으면 랜덤 빵 증정!/);
+  assert.match(f.root.innerHTML, /10점 더 모으면 레벨업!/);
   f.run('state.user.score=60; state.user.rewards_claimed=5; renderPage()');
   assert.equal(f.run('eventProgress().level'), 5);
   assert.match(f.root.innerHTML, /빵 보상 받기/);
@@ -321,7 +372,8 @@ test('reservation lookup shows original items and completes for the matching buy
   assert.match(html,/우유 × 1/);
   assert.match(html,/7600원/);
   assert.match(html,/주사위 2개를 지급/);
-  assert.match(html,/name="user_id" value="10"/);
+  assert.match(html,/<select id="admin-pickup-user" name="user_id" required/);
+  assert.match(html,/<option value="10" selected>등록사용자/);
   assert.doesNotMatch(html,/name="pin"|data-sale-product/);
   await f.submit({user_id:'10'},'admin-manual-preorder-complete');
   assert.deepEqual(f.requests[1],{path:'/api/staff/preorders/7/complete',method:'POST',body:{
@@ -340,6 +392,8 @@ test('reservation pickup creates a new buyer PIN only when no account exists',as
     order:{id:9,dice_quantity:0},already_completed:false};
   await f.run("handleAdminClick('admin-sale-type',{dataset:{type:'preorder'}})");
   await f.submit({name:'새예약자',phone:reservation.phone},'admin-manual-preorder-lookup');
+  assert.match(f.run('renderAdmin()'),/수령할 구매자 계정/);
+  await f.run("handleAdminClick('admin-pickup-mode',{dataset:{mode:'new'}})");
   const html=f.run('renderAdmin()');
   assert.match(html,/name="pin" type="password"/);
   assert.match(html,/우유는 주사위를 지급하지 않습니다/);
@@ -350,15 +404,48 @@ test('reservation pickup creates a new buyer PIN only when no account exists',as
   assert.doesNotMatch(f.run('renderAdmin()'),/id="admin-manual-preorder-complete"/);
 });
 
+test('staff can choose a differently named existing account and retain it across rerenders',async()=>{
+  const f=adminFixture();f.state.route='sales';
+  const reservation=manualReservation({name:'예약자실명'});
+  f.context.respond=async path=>path.endsWith('/lookup')?{reservation}:{
+    reservation:{...reservation,status:'approved',order:{id:9,status:'approved',user_id:10,customer_name:'등록사용자'}},
+    order:{id:9,dice_quantity:2},already_completed:false};
+  await f.run("handleAdminClick('admin-sale-type',{dataset:{type:'preorder'}})");
+  await f.submit({name:reservation.name,phone:reservation.phone},'admin-manual-preorder-lookup');
+  let html=f.run('renderAdmin()');
+  assert.match(html,/기존 계정에 추가/);
+  assert.match(html,/<option value="10" >등록사용자/);
+  assert.doesNotMatch(html,/name="pin"/);
+  f.listeners.input({target:{name:'user_id',value:'10',closest:selector=>selector==='#admin-manual-preorder-complete'?{}:null}});
+  assert.match(f.run('renderAdmin()'),/<option value="10" selected>등록사용자/);
+  await f.submit({user_id:'10'},'admin-manual-preorder-complete');
+  assert.deepEqual(f.requests[1].body,{name:'예약자실명',phone:reservation.phone,user_id:10,request_id:'request-1'});
+  html=f.run('renderAdmin()');
+  assert.match(html,/수령 계정: 등록사용자/);
+  assert.doesNotMatch(html,/id="admin-manual-preorder-complete"/);
+});
+
+test('a reservation with no registered buyers can still create its first account',async()=>{
+  const f=adminFixture();f.state.route='sales';f.state.staffData.users=[];
+  const reservation=manualReservation();f.context.respond=async()=>({reservation});
+  await f.run("handleAdminClick('admin-sale-type',{dataset:{type:'preorder'}})");
+  await f.submit({name:reservation.name,phone:reservation.phone},'admin-manual-preorder-lookup');
+  const html=f.run('renderAdmin()');
+  assert.match(html,/name="pin" type="password"/);
+  assert.doesNotMatch(html,/<select[^>]*name="user_id"/);
+});
+
 test('a queued pickup uses its linked buyer and an approved queue order cannot be completed again',async()=>{
   const f=adminFixture();f.state.route='sales';
-  const reservation=manualReservation({name:'연결된구매자',status:'pending',order:{id:9,user_id:21,status:'pending'}});
+  const reservation=manualReservation({name:'연결된구매자',status:'pending',order:{id:9,user_id:21,customer_name:'실제계정',status:'pending'}});
   f.context.respond=async()=>({reservation});
   await f.run("handleAdminClick('admin-sale-type',{dataset:{type:'preorder'}})");
   await f.submit({name:reservation.name,phone:reservation.phone},'admin-manual-preorder-lookup');
   let html=f.run('renderAdmin()');
   assert.match(html,/수령 요청 접수됨/);
   assert.match(html,/name="user_id" value="21"/);
+  assert.match(html,/수령 계정: 실제계정/);
+  assert.doesNotMatch(html,/<select[^>]*name="user_id"|admin-pickup-mode/);
   f.state.staffData.orders=[{id:9,reservation_id:7,user_id:21,status:'approved'}];
   html=f.run('renderAdmin()');
   assert.match(html,/이미 수령 완료/);
@@ -410,6 +497,26 @@ test('milk uses the product inventory table and normal stock adjustment',()=>{
   assert.match(html,/<td><strong>우유<\/strong><\/td><td>2<\/td>/);
   assert.match(html,/data-product="112"/);
   assert.doesNotMatch(html,/inventory-milk|우유 재고 수정/);
+});
+
+test('inventory offers a collapsed preorder status table with plain menu text and live status',()=>{
+  const f=adminFixture();f.state.route='inventory';
+  f.state.staffData.reservations=[manualReservation(),manualReservation({id:8,name:'수령요청자',status:'pending'}),
+    manualReservation({id:9,name:'완료예약자',status:'approved'})];
+  let html=f.run('renderAdmin()');
+  assert.match(html,/<details id="inventory-preorders" class="preorder-status-panel">/);
+  assert.match(html,/<summary class="secondary-button">.*예판 수령 현황/);
+  assert.match(html,/<th>이름<\/th><th>전화번호<\/th><th>메뉴<\/th><th>수령 상태<\/th>/);
+  assert.match(html,/010-1234-5678/);
+  assert.match(html,/<td class="preorder-menu">플레인 휘낭시에 2개, 우유 1개<\/td>/);
+  assert.match(html,/수령 대기/);
+  assert.match(html,/수령 요청 접수/);
+  assert.match(html,/수령 완료/);
+  f.state.staffData.reservations[0].status='approved';
+  html=f.run('renderAdmin()');
+  assert.doesNotMatch(html,/수령 대기/);
+  f.state.staffData.reservations=[];
+  assert.match(f.run('renderAdmin()'),/등록된 예판이 없습니다/);
 });
 
 test('milk purchase and mixed order messages use bread dice rather than total quantity',async()=>{
