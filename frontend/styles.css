@@ -58,3 +58,15 @@
 .preorder-status-panel[open]>summary>.icon{transform:rotate(90deg)}
 .preorder-status-content{margin-top:14px}
 .preorder-status-content .preorder-menu{min-width:240px;max-width:560px;white-space:normal;line-height:1.8}
+
+.admin-search{max-width:620px;margin-bottom:14px}
+.admin-search input{padding-right:16px}
+.search-count{margin:0 0 12px;color:var(--muted);font-size:12px;line-height:1.7}
+.preorder-matches{max-height:310px;overflow:auto;overscroll-behavior:contain;border:1px solid var(--line);border-radius:10px}
+.preorder-match{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 16px;border-bottom:1px solid var(--line)}
+.preorder-match:last-child{border-bottom:0}
+.preorder-match>div{min-width:0}
+.preorder-match strong{display:block;font-size:14px}
+.preorder-match small{display:block;font-size:12px;color:var(--muted);margin-top:5px}
+.preorder-match p{font-size:12px;line-height:1.7;margin:7px 0 0;color:var(--muted)}
+.preorder-match button{flex-shrink:0;font-size:12px;min-height:42px;padding:10px 12px}
