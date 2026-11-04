@@ -173,9 +173,17 @@ def order_data(tx, order_id):
     return order
 
 
-def all_orders(tx, user_id=None):
+def all_orders(tx, user_id=None, *, include_inventory=False):
     rows = tx.all("SELECT id FROM orders" + (" WHERE user_id = ?" if user_id else "") + " ORDER BY id DESC LIMIT 500", (user_id,) if user_id else ())
-    return [order_data(tx, row["id"]) for row in rows]
+    orders = [order_data(tx, row["id"]) for row in rows]
+    if include_inventory:
+        inventory = {row["id"]: row for row in tx.all("SELECT id,stock,preorder_stock FROM products")}
+        for order in orders:
+            bucket = "preorder_stock" if order["type"] == "preorder" else "stock"
+            for item in order["items"]:
+                item["remaining_stock"] = inventory[item["product_id"]][bucket]
+                item["unit"] = PRODUCT_UNITS.get(item["product_id"], "개")
+    return orders
 
 
 def manual_buyer(tx, body, reservation_name=None):
@@ -463,7 +471,7 @@ class Application:
                 stats = tx.one("SELECT COALESCE(SUM(CASE WHEN status = 'approved' THEN total ELSE 0 END),0) AS revenue, COALESCE(SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END),0) AS approved_orders, COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END),0) AS pending_orders FROM orders")
                 stats["bread_sold"] = tx.one("SELECT COALESCE(SUM(i.quantity),0) AS count FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.status='approved' AND i.product_id != ?", (MILK_PRODUCT_ID,))["count"]
                 stats["milk_stock"] = milk_stock(tx)
-                return {"orders": all_orders(tx), "products": products(tx), "stats": stats,
+                return {"orders": all_orders(tx, include_inventory=True), "products": products(tx), "stats": stats,
                         "reservations": all_reservations(tx),
                         "users": [public_user(row) for row in tx.all("SELECT * FROM users WHERE role = 'buyer' ORDER BY name,id")],
                         "inventory_logs": tx.all("SELECT * FROM inventory_logs ORDER BY id DESC LIMIT 300"),

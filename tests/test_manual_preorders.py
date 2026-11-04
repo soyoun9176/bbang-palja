@@ -195,6 +195,47 @@ class ManualPreorderTests(unittest.TestCase):
         rows=self.request('GET','/api/staff/dashboard',token=self.staff)['reservations']
         self.assertEqual(next(r for r in rows if r['id']==pending['id'])['status'],'reserved')
 
+    def test_dashboard_order_stock_tracks_current_holds_cancellation_and_approval(self):
+        buyer=self.buyer()
+        def submit(items):
+            return self.request('POST','/api/orders',{'items':items,'request_id':uuid.uuid4().hex},buyer['token'])['order']
+        def remaining():
+            orders=self.request('GET','/api/staff/dashboard',token=self.staff)['orders']
+            return {o['id']:{i['product_id']:i['remaining_stock'] for i in o['items']} for o in orders}
+        first=submit([{'product_id':101,'quantity':2},{'product_id':112,'quantity':1}])
+        self.assertEqual(remaining()[first['id']],{101:8,112:4})
+        second=submit([{'product_id':101,'quantity':3}])
+        self.assertEqual(remaining()[first['id']][101],5)
+        self.request('POST',f"/api/staff/orders/{second['id']}/cancel",{},self.staff)
+        self.assertEqual(remaining()[first['id']][101],8)
+        self.request('POST',f"/api/staff/orders/{first['id']}/approve",{},self.staff)
+        self.assertEqual(remaining()[first['id']],{101:8,112:4})
+        for order in self.request('GET','/api/orders',token=buyer['token'])['orders']:
+            for item in order['items']:
+                self.assertNotIn('remaining_stock',item)
+                self.assertNotIn('unit',item)
+
+    def test_dashboard_preorder_stock_uses_only_remaining_reserved_inventory(self):
+        buyer=self.buyer()
+        self.reserve('다른예약',[{'product_id':101,'quantity':1}])
+        reservation=self.reserve(buyer['user']['name'],[{'product_id':101,'quantity':2}])
+        order=self.claim(reservation,buyer)
+        dashboard=self.request('GET','/api/staff/dashboard',token=self.staff)
+        item=next(o for o in dashboard['orders'] if o['id']==order['id'])['items'][0]
+        self.assertEqual(item['remaining_stock'],1)
+        self.assertEqual(self.product(101)['stock'],7)
+        self.request('POST',f"/api/staff/orders/{order['id']}/cancel",{},self.staff)
+        item=self.request('GET','/api/staff/dashboard',token=self.staff)['orders'][0]['items'][0]
+        self.assertEqual(item['remaining_stock'],3)
+
+    def test_dashboard_order_stock_preserves_donut_set_units(self):
+        buyer=self.buyer()
+        with self.app.db.transaction(write=True) as tx:tx.execute('UPDATE products SET stock=1 WHERE id=108')
+        self.request('POST','/api/orders',{'items':[{'product_id':108,'quantity':1}],
+                     'request_id':uuid.uuid4().hex},buyer['token'])
+        item=self.request('GET','/api/staff/dashboard',token=self.staff)['orders'][0]['items'][0]
+        self.assertEqual((item['remaining_stock'],item['unit']),(0,'세트'))
+
     def test_competing_account_selections_credit_only_the_first_account(self):
         buyers=[self.buyer(),self.buyer()];r=self.reserve('공동예약')
         barrier=threading.Barrier(2)
@@ -259,3 +300,6 @@ class ManualPreorderTests(unittest.TestCase):
         self.assertEqual(result['order']['total'],5000)
         self.assertEqual(self.me(buyer)['dice_balance'],2)
         self.assertEqual((self.product(1)['stock'],self.product(1)['preorder_stock']),(9,0))
+        dashboard=self.request('GET','/api/staff/dashboard',token=self.staff)
+        self.assertNotIn(1,[p['id'] for p in dashboard['products']])
+        self.assertEqual(dashboard['orders'][0]['items'][0]['remaining_stock'],0)
