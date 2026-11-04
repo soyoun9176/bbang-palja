@@ -25,21 +25,13 @@ function navButton([route,img,label]) {
   const pending=isAdmin&&route==='queue'?(state.staffData?.stats.pending_orders||0):0;
   return `<button class="nav-item ${active?'active':''}" data-action="navigate" data-route="${route}" ${active?'aria-current="page"':''}>${icon(img)}<span>${label}</span>${pending?`<b class="pending-pill">${pending}</b>`:''}</button>`;
 }
-function staffStockBar() {
-  if(!isAdmin||!state.user||!state.staffData)return '';
-  const pending=state.staffData.orders.filter(o=>o.status==='pending'&&o.type==='preorder');
-  return `<section class="staff-stock-bar" aria-label="현재 품목 재고"><strong>현재 재고</strong><div>${state.products.map(p=>{
-    const held=pending.reduce((sum,o)=>sum+o.items.filter(i=>i.product_id===p.id).reduce((n,i)=>n+i.quantity,0),0);
-    return `<span><b>${esc(p.name)}</b> 현판 ${p.stock} · 예판 ${p.preorder_stock+held}</span>`;
-  }).join('')}</div></section>`;
-}
 function shell(content) {
   const eventPage=!isAdmin&&['dice','ranking'].includes(state.route);
   return `<div class="shell ${isAdmin?'admin':eventPage?'event-space':'purchase-space'} ${state.user?'signed-in':''}">
     <header class="app-header"><a href="${isAdmin?'/admin/':'/'}" aria-label="캄보딜라이트 홈">${brand()}</a>
     ${state.user?`<button class="profile-button" data-action="profile">${esc(state.user.name)}${isAdmin?' · 담당자':''} ${icon('chevron')}</button>`:isAdmin?'<span class="muted">담당자 로그인</span>':''}</header>
     ${state.user?`<nav class="primary-nav" aria-label="${isAdmin?'담당자 메뉴':'주요 메뉴'}">${(isAdmin?staffNav:buyerNav).map(x=>navButton(x)).join('')}</nav>`:''}
-    ${staffStockBar()}<main class="main">${content}</main>
+    <main class="main">${content}</main>
     ${!isAdmin&&state.user&&state.route==='shop'&&cartCount()?`<button class="mobile-cart" data-action="open-cart">선택 수량 ${cartCount()} <strong>${money(cartTotal())}원 · 구매하기 ${icon('arrow')}</strong></button>`:''}
   </div>`;
 }

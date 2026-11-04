@@ -448,6 +448,29 @@ test('order search includes the reservation name and phone and retains the selec
   assert.equal(f.requests.length,0);
 });
 
+test('staff order lines show current remaining stock without subtracting the order again',()=>{
+  const f=adminFixture();
+  f.context.order={id:1,customer_name:'구매자',type:'walkin',status:'pending',quantity:2,total:5600,
+    items:[{product_id:101,name:'플레인 휘낭시에',price:2800,quantity:2,remaining_stock:8,unit:'개'}]};
+  assert.match(f.run('orderCard(order)'),/× 2<\/b><small[^>]*>\(남은 재고 8개\)/);
+  f.context.order.items[0].remaining_stock=0;
+  assert.match(f.run('orderCard(order)'),/\(남은 재고 0개\)/);
+  f.context.order.type='preorder';
+  assert.match(f.run('orderCard(order)'),/\(남은 예판 재고 0개\)/);
+  f.context.order.items=[{product_id:108,name:'도넛',price:2000,quantity:1,remaining_stock:3,unit:'세트'}];
+  f.context.order.type='manual';
+  assert.match(f.run('orderCard(order)'),/\(남은 재고 3세트\)/);
+  // A historical product need not be in the active product list.
+  f.context.order.items=[{product_id:1,name:'이전 빵',price:2500,quantity:2,remaining_stock:4,unit:'개'}];
+  assert.match(f.run('orderCard(order)'),/\(남은 재고 4개\)/);
+  delete f.context.order.items[0].remaining_stock;
+  assert.doesNotMatch(f.run('orderCard(order)'),/남은 재고/);
+  f.context.order.items[0].product_id=101;
+  assert.match(f.run('orderCard(order)'),/\(남은 재고 2개\)/);
+  f.context.order.type='preorder';
+  assert.match(f.run('orderCard(order)'),/\(남은 예판 재고 0개\)/);
+});
+
 test('manual sales switch between the existing walk-in form and reservation lookup',async()=>{
   const f=adminFixture();f.state.route='sales';
   let html=f.run('renderAdmin()');

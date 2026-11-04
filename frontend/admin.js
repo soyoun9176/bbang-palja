@@ -89,9 +89,17 @@ function empty(title, description, icon = 'box') {
 
 
 
+function orderStockNote(order, item) {
+  const product = productList().find(p => p.id === item.product_id);
+  const stock = item.remaining_stock ?? product?.[order.type === 'preorder' ? 'preorder_stock' : 'stock'];
+  if (!Number.isInteger(stock) || stock < 0) return '';
+  const label = order.type === 'preorder' ? '남은 예판 재고' : '남은 재고';
+  return `<small class="order-stock-note">(${label} ${number(stock)}${escape(item.unit || product?.unit || '개')})</small>`;
+}
+
 function orderCard(order) {
   const pending = order.status === 'pending';
-  return `<article class="pending-order"><div class="pending-title"><h3>${escape(order.customer_name)}<small>#${order.id} · ${typeLabel(order.type)}</small></h3><span class="status ${escape(order.status)}">${i(pending ? 'clock' : order.status === 'approved' ? 'check' : 'x')}${statusLabel(order.status)}</span></div><div class="order-lines">${(order.items || []).map(item => `<div class="order-line"><span>${escape(item.name)} <b>× ${item.quantity}</b></span><span>${won(item.price * item.quantity)}</span></div>`).join('')}</div><div class="order-bottom"><span>${stamp(order.created_at)} 접수 · 총 ${order.quantity}개</span><strong>${won(order.total)}</strong></div>${pending ? `<div class="order-controls"><button class="secondary-button" data-action="admin-cancel" data-id="${order.id}">${i('x')}취소</button><button class="primary-button" data-action="admin-approve" data-id="${order.id}">${i('check')}${order.type === 'preorder' ? '품목 전달 완료 · 승인' : '입금 · 전달 확인 후 승인'}</button></div>` : ''}</article>`;
+  return `<article class="pending-order"><div class="pending-title"><h3>${escape(order.customer_name)}<small>#${order.id} · ${typeLabel(order.type)}</small></h3><span class="status ${escape(order.status)}">${i(pending ? 'clock' : order.status === 'approved' ? 'check' : 'x')}${statusLabel(order.status)}</span></div><div class="order-lines">${(order.items || []).map(item => `<div class="order-line"><span>${escape(item.name)} <b>× ${item.quantity}</b>${orderStockNote(order, item)}</span><span>${won(item.price * item.quantity)}</span></div>`).join('')}</div><div class="order-bottom"><span>${stamp(order.created_at)} 접수 · 총 ${order.quantity}개</span><strong>${won(order.total)}</strong></div>${pending ? `<div class="order-controls"><button class="secondary-button" data-action="admin-cancel" data-id="${order.id}">${i('x')}취소</button><button class="primary-button" data-action="admin-approve" data-id="${order.id}">${i('check')}${order.type === 'preorder' ? '품목 전달 완료 · 승인' : '입금 · 전달 확인 후 승인'}</button></div>` : ''}</article>`;
 }
 
 function queueResults() {
@@ -103,7 +111,7 @@ function queueResults() {
 }
 function queuePage() {
   return `${heading('주문 확인','이름·주문·입금 내역을 확인한 뒤 승인해 주세요.',`<button class="secondary-button" data-action="admin-refresh">새로고침</button>`)}
-  ${help('주문 확인 방법','현판은 입금과 빵 전달을 확인한 뒤 승인합니다. 예판은 예약한 빵을 전달한 뒤 승인합니다. 승인하면 빵 개수만큼 주사위가 지급됩니다. 우유는 주사위 지급에서 제외합니다. 대기 주문을 취소하면 확보한 재고가 돌아옵니다.')}
+  ${help('주문 확인 방법','현판은 입금과 빵 전달을 확인한 뒤 승인합니다. 예판은 예약한 빵을 전달한 뒤 승인합니다. 품목 옆 괄호는 접수된 주문을 반영한 현재 남은 재고이며, 예판은 별도 예판 재고를 표시합니다. 승인하면 빵 개수만큼 주사위가 지급됩니다. 우유는 주사위 지급에서 제외합니다. 대기 주문을 취소하면 확보한 재고가 돌아옵니다.')}
   <div class="admin-subtabs">${[['pending','승인 대기'],['approved','승인 완료'],['cancelled','취소']].map(([key,label])=>`<button class="tab-chip ${orderFilter===key?'active':''}" data-action="admin-order-filter" data-filter="${key}">${label} ${list('orders').filter(o=>o.status===key).length}</button>`).join('')}</div>
   ${searchField('queue','admin-queue-search','주문 검색','이름 · 예약 전화번호 · 메뉴 검색')}<div id="admin-queue-results">${queueResults()}</div>`;
 }

@@ -304,7 +304,7 @@ DB에 `UNIQUE(user_id, threshold)`는 없고 쓰기 잠금·보상 횟수·요�
 | 예약 합계 | `reservation_items.quantity × price`의 합 |
 | 접수 보관 수량 | 해당 품목의 `pending` 주문 항목 수량 합 |
 | 재고 표의 매장 예상 | `stock + preorder_stock + 접수 보관` |
-| 상단 재고 표시의 예판 수량 | `preorder_stock + pending 예판 주문의 해당 품목 수량` |
+| 관리자 주문 항목 `remaining_stock` | 조회 시점의 `stock` (예판 주문은 `preorder_stock`). 주문 접수 시 이미 차감되어 추가 차감하지 않음 |
 | 순위 | 구매자만 `score DESC, id ASC`로 정렬. 동점이면 작은 사용자 번호 우선 |
 | 매출 | `approved` 주문의 `total` 합계 |
 | 판매 빵 수 | 승인된 주문 항목 중 우유를 제외한 수량 합 |
