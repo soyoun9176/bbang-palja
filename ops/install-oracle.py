@@ -59,7 +59,7 @@ def main():
         values = {
             'APP_ENV': 'production', 'HOST': '127.0.0.1', 'PORT': '8000',
             'STAFF_PASSWORD': secrets.token_urlsafe(18), 'DEMO_SEED': '0',
-            'DB_PATH': str(database), 'ALLOWED_ORIGINS': 'https://bbang-palja.pages.dev',
+            'DB_PATH': str(database), 'ALLOWED_ORIGINS': json.loads((source/'ops/pages-project.json').read_text())['production_origin'],
         }
         with environment_file.open('x') as out:
             os.chmod(environment_file, 0o600)

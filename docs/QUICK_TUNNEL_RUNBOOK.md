@@ -1,6 +1,6 @@
 # 이틀 행사 가안 · Quick Tunnel 운영 매뉴얼
 
-구매자는 https://bbang-palja.pages.dev/ 에 접속하고, 담당자는 https://bbang-palja.pages.dev/admin/ 에 접속합니다. Pages의 정적 JS가 Quick Tunnel의 HTTPS 주소로 Oracle API를 호출합니다. 별도 Worker나 도메인 구매는 사용하지 않습니다.
+구매자는 https://cambo-delight.pages.dev/ 에 접속하고, 담당자는 https://cambo-delight.pages.dev/admin/ 에 접속합니다. Pages의 정적 JS가 Quick Tunnel의 HTTPS 주소로 Oracle API를 호출합니다. 별도 Worker나 도메인 구매는 사용하지 않습니다.
 
 현재는 **가안 테스트 환경**입니다. 상품·계정·예약·주문·재고는 시연용이며 실제 결제 연동은 없습니다. 샘플 DB를 실제 행사 DB로 사용하지 않습니다.
 
@@ -18,7 +18,7 @@
 | API 내부 주소 | `http://127.0.0.1:8000` |
 | Quick Tunnel 상태 확인 | `http://127.0.0.1:20001/ready` (서버 내부 전용) |
 | Pages API 주소 설정 | `frontend/config.js`의 `apiBase` |
-| CORS 허용 출처 | `https://bbang-palja.pages.dev` |
+| CORS 허용 출처 | `https://cambo-delight.pages.dev` |
 
 두 서비스는 비특권 DynamicUser로 실행하고 부팅 시 자동 시작합니다. DB와 비밀번호는 Git 및 코드 배포 경로 밖에 보관합니다. 기존 방화벽과 다른 서비스는 변경하지 않습니다. 이전에 만든 `cloudflared-bbang-palja.service` Named Tunnel은 별도로 유지되며 현재 Pages 연결에는 사용하지 않습니다.
 
@@ -77,7 +77,7 @@ GitHub SSH 인증이 거부되면 Mac에서 `ssh-add --apple-use-keychain ~/.ssh
 
 담당자 기본 주소는 `/admin/`입니다. 이전 `/admin` → `/` 이동이 브라우저에 저장된 경우에도 끝의 `/`가 있는 주소는 별도 경로로 접속됩니다.
 
-이전 배포의 JS가 남아 있으면 API 연결 오류가 보일 수 있습니다. 먼저 페이지를 새로고침합니다. 예전 `/admin` 리다이렉트가 브라우저에 저장되어 담당자 주소가 구매자 화면으로 바뀐다면 `/admin?check=현재커밋`처럼 새 쿼리를 붙여 접속하거나 시크릿 창에서 확인합니다. 예: `https://bbang-palja.pages.dev/admin?check=b87e173`.
+이전 배포의 JS가 남아 있으면 API 연결 오류가 보일 수 있습니다. 먼저 페이지를 새로고침합니다. 예전 `/admin` 리다이렉트가 브라우저에 저장되어 담당자 주소가 구매자 화면으로 바뀐다면 `/admin?check=현재커밋`처럼 새 쿼리를 붙여 접속하거나 시크릿 창에서 확인합니다. 예: `https://cambo-delight.pages.dev/admin?check=b87e173`.
 
 이 증상만으로 API나 터널을 재시작하지 않습니다. 새 창에서도 실패하면 `/api/health`, 현재 터널 주소, Pages 배포 성공 여부를 위 순서로 확인합니다.
 

@@ -15,6 +15,64 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('build_frontend', ROOT/'ops/build-frontend.py')
 frontend = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(frontend)
+pages_spec = importlib.util.spec_from_file_location('pages_build',ROOT/'ops/pages-build.py')
+pages = importlib.util.module_from_spec(pages_spec)
+pages_spec.loader.exec_module(pages)
+
+
+class PagesTargetTests(unittest.TestCase):
+    def response(self,body=None,headers=None,status=200):
+        response=io.BytesIO(json.dumps(body or {}).encode())
+        response.headers=headers or {}
+        response.status=status
+        return response
+
+    def test_only_cambo_delight_and_its_main_deployment_aliases_are_enabled(self):
+        project=pages.deployment_project({})
+        self.assertEqual(project['production_origin'],'https://cambo-delight.pages.dev')
+        for url in ('https://cambo-delight.pages.dev','https://abc123.cambo-delight.pages.dev'):
+            self.assertEqual(pages.deployment_project({'CF_PAGES_BRANCH':'main','CF_PAGES_URL':url}),project)
+        for environment in ({'CF_PAGES_URL':'https://bbang-palja.pages.dev'},
+                            {'CF_PAGES_URL':'https://cambo-delight.pages.dev.example.com'},
+                            {'CF_PAGES_URL':'http://cambo-delight.pages.dev'},
+                            {'CF_PAGES_BRANCH':'feature/unverified'}):
+            with self.subTest(environment=environment):
+                with self.assertRaises(SystemExit):pages.deployment_project(environment)
+
+    def test_api_gate_checks_matching_commit_and_browser_preflight_for_the_new_origin(self):
+        origin='https://cambo-delight.pages.dev'
+        responses=[self.response({'ok':True,'commit':'a'*40},{'Access-Control-Allow-Origin':origin}),
+                   self.response(headers={'Access-Control-Allow-Origin':origin,
+                       'Access-Control-Allow-Methods':'GET, POST, OPTIONS',
+                       'Access-Control-Allow-Headers':'Authorization, Content-Type'},status=204)]
+        with patch.object(pages.urllib.request,'urlopen',side_effect=responses) as request:
+            self.assertTrue(pages.api_ready('https://example.trycloudflare.com','a'*40,origin))
+        health,preflight=[call.args[0] for call in request.call_args_list]
+        self.assertEqual(health.get_header('Origin'),origin)
+        self.assertEqual((preflight.get_method(),preflight.full_url),('OPTIONS','https://example.trycloudflare.com/api/orders'))
+        headers={key.lower():value for key,value in preflight.header_items()}
+        self.assertEqual(headers['origin'],origin)
+        self.assertEqual(headers['access-control-request-method'],'POST')
+        self.assertEqual(headers['access-control-request-headers'],'Authorization, Content-Type')
+
+    def test_wrong_commit_or_missing_cors_never_opens_the_deployment_gate(self):
+        origin='https://cambo-delight.pages.dev'
+        for body,headers in [({'ok':True,'commit':'b'*40},{'Access-Control-Allow-Origin':origin}),
+                             ({'ok':True,'commit':'a'*40},{}),
+                             ({'ok':False,'commit':'a'*40},{'Access-Control-Allow-Origin':origin})]:
+            with patch.object(pages.urllib.request,'urlopen',return_value=self.response(body,headers)) as request:
+                self.assertFalse(pages.api_ready('https://example.trycloudflare.com','a'*40,origin))
+                self.assertEqual(request.call_count,1)
+        for change in ({'status':200},{'headers':{'Access-Control-Allow-Origin':'https://other.pages.dev'}},
+                       {'headers':{'Access-Control-Allow-Origin':origin,'Access-Control-Allow-Methods':'GET',
+                                   'Access-Control-Allow-Headers':'Authorization, Content-Type'}},
+                       {'headers':{'Access-Control-Allow-Origin':origin,'Access-Control-Allow-Methods':'POST',
+                                   'Access-Control-Allow-Headers':'Content-Type'}}):
+            options={'headers':{'Access-Control-Allow-Origin':origin,'Access-Control-Allow-Methods':'POST',
+                                'Access-Control-Allow-Headers':'Authorization, Content-Type'},'status':204,**change}
+            with patch.object(pages.urllib.request,'urlopen',side_effect=[
+                    self.response({'ok':True,'commit':'a'*40},{'Access-Control-Allow-Origin':origin}),self.response(**options)]):
+                self.assertFalse(pages.api_ready('https://example.trycloudflare.com','a'*40,origin))
 
 
 class DeploymentTests(unittest.TestCase):

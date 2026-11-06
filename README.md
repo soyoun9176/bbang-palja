@@ -6,13 +6,13 @@
 
 | 구성 | 현재 운영 방식 |
 | --- | --- |
-| 프론트 | Cloudflare Pages · HTML/CSS/JavaScript |
+| 프론트 | Cloudflare Pages `cambo-delight` · HTML/CSS/JavaScript |
 | 백엔드 | Oracle Free Ubuntu 인스턴스 · Python HTTP API |
 | 연결 | Cloudflare Quick Tunnel |
 | DB | Oracle 서버의 SQLite(WAL). 전화번호 계정 스키마, 로컬·공개 데이터 분리 |
 | 자동 배포 | `main` merge → GitHub 검사 → Oracle DB 백업·API 배포 → Pages 공개 |
 
-공개 가안 운영 중: [구매자](https://bbang-palja.pages.dev/) · [관리자](https://bbang-palja.pages.dev/admin/) · [현재 배포 버전](https://bbang-palja.pages.dev/version.json)
+공개 가안 운영 중: [구매자](https://cambo-delight.pages.dev/) · [관리자](https://cambo-delight.pages.dev/admin/) · [현재 배포 버전](https://cambo-delight.pages.dev/version.json)
 
 현재 공개 데이터는 시연용이며, 입금은 담당자가 직접 확인합니다. [배포·복구](docs/CI_CD.md) · [서버·터널 운영](docs/QUICK_TUNNEL_RUNBOOK.md)
 
@@ -65,7 +65,7 @@ DEMO_SEED=0 python3 -m server --port 8000
 | 상태 (2026-11-07 기준) | 작업 |
 | --- | --- |
 | 공개 배포 반영 | 전화번호 계정, 캐릭터 프로필, 종류별 주사위·보상 말풍선, 이벤트 지급 승인/취소, 우유·두유 선택, 자동 배포 |
-| 로컬 작업 | 비회원 구매·수기 판매·예약 수령, 이벤트 임의 지급·담당자 기록 |
+| 공개 배포 반영 | 비회원 구매·수기 판매·예약 수령, 이벤트 임의 지급·담당자 기록 |
 | DB 재세팅 | 백업 후 새 DB 생성 명령, 기존 clone 재설정 안내 |
 | 문서 정리 완료 | README, DB 구조, 화면·메뉴·배포 운영 문서 |
 | 추가 작업 | 실물 빵 사진, 디자인·캐릭터·주사위 애니메이션 확정, 행사 초기 재고·예판 내역 입력 |

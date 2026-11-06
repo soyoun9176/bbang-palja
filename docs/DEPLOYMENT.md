@@ -1,6 +1,6 @@
 # 배포 준비
 
-프론트엔드는 Cloudflare Pages 프로젝트 `bbang-palja`에 Git 연동으로 배포합니다. 공개 주소는 https://bbang-palja.pages.dev 입니다. 가안 API는 Oracle의 전용 systemd 서비스와 Quick Tunnel로 연결합니다. 주소 변경·재시작·백업·실제 행사 전환 절차는 [Quick Tunnel 운영 매뉴얼](QUICK_TUNNEL_RUNBOOK.md)에 정리했습니다.
+프론트엔드는 Cloudflare Pages 프로젝트 `cambo-delight`에 Git 연동으로 배포합니다. 공개 주소는 https://cambo-delight.pages.dev 입니다. 가안 API는 Oracle의 전용 systemd 서비스와 Quick Tunnel로 연결합니다. 주소 변경·재시작·백업·실제 행사 전환 절차는 [Quick Tunnel 운영 매뉴얼](QUICK_TUNNEL_RUNBOOK.md)에 정리했습니다.
 
 ## 환경 변수
 
@@ -54,6 +54,7 @@ Python의 내장 HTTP 서버는 프로토타입 실행용입니다. 외부 공�
 
 | 항목 | 설정 |
 | --- | --- |
+| 프로젝트·공개 주소 | `cambo-delight` · https://cambo-delight.pages.dev |
 | 운영 브랜치 | `main`, 자동 배포 활성화 |
 | 프레임워크 | `None` |
 | 루트 디렉터리 | 저장소 최상위, 입력란은 비움 |

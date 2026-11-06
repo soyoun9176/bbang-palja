@@ -28,5 +28,5 @@ jobs:
         run: python3 -m unittest discover -s tests -v
       - name: Frontend behavior tests
         run: node --test tests/frontend-check.mjs
-      - name: Build versioned static files
+      - name: Build versioned static files for cambo-delight Pages
         run: python3 ops/build-frontend.py
