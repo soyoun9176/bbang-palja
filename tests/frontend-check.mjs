@@ -84,6 +84,169 @@ test('login sends normalized phone and password without nickname',async()=>{
   assert.deepEqual(JSON.parse(f.requests.find(r=>r.path==='/api/auth/login').body),{phone:'010-1234-5678',pin:'1234'});
 });
 
+test('guest entry is available from login and signup and only asks for a buyer name',()=>{
+  const f=fixture({guest:true});
+  for(const mode of ['login','register']){
+    f.run(`state.authMode='${mode}'`);
+    assert.match(f.run('renderBuyerLogin()'),/계정 없이 빵만 구매/);
+  }
+  f.run("state.route='guest';state.guestName='<구매자>';state.products=[]");
+  const html=f.run('renderShop()');
+  assert.match(html,/name="guest_name"/);
+  assert.match(html,/&lt;구매자&gt;/);
+  assert.doesNotMatch(html,/name="phone"|name="pin"|예약한 빵 수령/);
+  assert.doesNotMatch(f.run("shell(renderShop())"),/data-route="ranking"/);
+});
+
+test('guest checkout keeps its receipt and polls only that order without authenticating an account',async()=>{
+  const f=fixture({guest:true}),stored=new Map();
+  f.context.localStorage.setItem=(key,value)=>stored.set(key,value);
+  f.run("state.route='guest';state.guestName=' 빵손님 ';state.cart={1:1}");
+  let receipt;
+  const order={id:8,user_id:null,customer_name:'빵손님',items:[],status:'pending',quantity:1,total:2800,dice_quantity:0};
+  f.context.fetchOverride=(path,options)=>{
+    if(path==='/api/guest/orders'){receipt=JSON.parse(options.body).request_id;return f.response({order});}
+    if(path==='/api/guest/orders/8'){assert.equal(options.headers.Authorization,`Bearer ${receipt}`);return f.response({order});}
+    return f.context.normalFetch(path,options);
+  };
+  await f.run('checkout({disabled:false})');
+  const body=JSON.parse(f.requests.find(r=>r.path==='/api/guest/orders').body);
+  assert.equal(body.name,'빵손님');
+  assert.equal(body.phone,undefined);assert.equal(body.pin,undefined);
+  assert.deepEqual(JSON.parse(stored.get('kambo.guest.orders')),[{id:8,token:receipt}]);
+  assert.equal(f.run('state.route'),'guest-orders');
+  assert.equal(f.run('state.token'),null);
+  assert.equal(f.requests.some(r=>['/api/auth/me','/api/orders','/api/auth/register'].includes(r.path)),false);
+  f.run("state.orders[0].status='approved'");
+  const html=f.run('renderOrders()');
+  assert.match(html,/빵손님 님/);assert.match(html,/구매가 완료/);
+  assert.doesNotMatch(html,/이벤트 참여하기|주사위 1개 지급/);
+});
+
+test('guest checkout validates name and reuses its request key after a lost response',async()=>{
+  const f=fixture({guest:true});
+  f.run("state.route='guest';state.cart={1:1};closeModal=()=>{}");
+  await f.run('checkout({disabled:false})');
+  assert.equal(f.requests.length,0);
+  f.run("state.guestName='손님'");
+  let attempt=0;
+  f.context.fetchOverride=(path,options)=>{
+    if(path==='/api/guest/orders'){if(++attempt===1)throw new Error('connection lost');return f.response({order:{id:1,user_id:null,customer_name:'손님',quantity:1,total:2800}});}
+    if(path==='/api/guest/orders/1')return f.response({order:{id:1,user_id:null,customer_name:'손님',quantity:1,total:2800}});
+    return f.context.normalFetch(path,options);
+  };
+  await f.run('checkout({disabled:false})');await f.run('checkout({disabled:false})');
+  const requests=f.requests.filter(r=>r.path==='/api/guest/orders');
+  assert.equal(requests.length,2);
+  assert.equal(JSON.parse(requests[0].body).request_id,JSON.parse(requests[1].body).request_id);
+});
+
+test('staff guest sale sends only buyer name, items and explicit guest mode',async()=>{
+  const f=adminFixture();f.state.route='sales';
+  await f.run("handleAdminClick('admin-customer-mode',{dataset:{mode:'guest'}})");
+  const html=f.run('renderAdmin()');
+  assert.match(html,/계정 없이 판매/);
+  assert.match(html,/name="name"/);assert.doesNotMatch(html,/name="phone"|name="pin"|name="user_id"/);
+  f.context.form={id:'admin-manual-sale',values:new Map([['guest','1'],['name','현장 손님']]),
+    querySelector:()=>null,querySelectorAll:()=>[{dataset:{saleProduct:'101'},value:'2'}],reset(){}};
+  f.context.respond=async()=>({order:{id:9,user_id:null,dice_quantity:0}});
+  await f.run('handleAdminSubmit(form)');
+  assert.deepEqual(f.requests[0].body,{guest:true,name:'현장 손님',items:[{product_id:101,quantity:2}],request_id:'request-1'});
+  assert.match(f.messages[0],/비회원 수기 판매 #9/);
+});
+
+test('staff guest preorder pickup does not ask for an account or PIN',async()=>{
+  const f=adminFixture();f.state.route='sales';
+  f.context.respond=async()=>({reservation:manualReservation()});
+  await f.run("handleAdminClick('admin-sale-type',{dataset:{type:'preorder'}})");
+  await f.lookup({name:'등록사용자',phone:'01012345678'});
+  await f.run("handleAdminClick('admin-pickup-mode',{dataset:{mode:'guest'}})");
+  const html=f.run('renderAdmin()');
+  assert.match(html,/계정 없이 수령/);assert.match(html,/name="guest"/);
+  assert.doesNotMatch(html,/name="user_id"|name="pin"/);
+  f.context.respond=async()=>({reservation:manualReservation({status:'approved'}),order:{id:9,user_id:null,dice_quantity:0}});
+  await f.submit({guest:'1'},'admin-manual-preorder-complete');
+  assert.deepEqual(f.requests[1].body,{name:'등록사용자',phone:'01012345678',guest:true,request_id:'request-1'});
+});
+
+test('event manual grants default to an account and keep the normal fulfillment queue separate',async()=>{
+  const f=adminFixture();
+  assert.match(f.run('renderAdmin()'),/data-tab="manual">임의 지급/);
+  assert.doesNotMatch(f.run('renderAdmin()'),/id="admin-manual-grant"/);
+  await f.run("handleAdminClick('admin-event-tab',{dataset:{tab:'manual'}})");
+  const html=f.run('renderAdmin()');
+  assert.match(html,/id="admin-manual-grant"/);
+  assert.match(html,/name="user_id"/);
+  assert.match(html,/name="reason"[^>]*required/);
+  assert.match(html,/data-kind="score"/);
+  assert.doesNotMatch(html,/name="name"|name="phone"|name="pin"/);
+});
+
+test('guest manual grants request a name and block score and profile gifts in the UI',async()=>{
+  const f=adminFixture();f.run("eventTab='manual'");
+  await f.run("handleAdminClick('admin-grant-recipient',{dataset:{mode:'guest'}})");
+  await f.run("handleAdminClick('admin-grant-kind',{dataset:{kind:'score'}})");
+  let html=f.run('renderAdmin()');
+  assert.match(html,/name="name"/);assert.match(html,/name="guest"/);
+  assert.match(html,/data-kind="score"[^>]*disabled/);
+  assert.doesNotMatch(html,/name="user_id"|name="points"|name="phone"|name="pin"/);
+  await f.run("handleAdminClick('admin-grant-kind',{dataset:{kind:'gift'}})");
+  html=f.run('renderAdmin()');
+  assert.match(html,/<option value="sunglasses"[^>]*disabled/);
+});
+
+test('account manual bread grants send quantity and reason and display the audit record',async()=>{
+  const f=adminFixture();f.run("eventTab='manual'");
+  const grant={id:4,user_id:10,customer_name:'등록사용자',kind:'bread',product_id:101,
+    item_name:'플레인 휘낭시에',quantity:2,points:0,reason:'지급 오류 보완',staff_name:'담당자',created_at:'2026-11-07T00:00:00Z'};
+  f.context.respond=async()=>{f.state.staffData.manual_grants=[grant];return {grant};};
+  await f.submit({user_id:'10',product_id:'101',quantity:'2',reason:'지급 오류 보완'},'admin-manual-grant');
+  assert.deepEqual(f.requests[0],{path:'/api/staff/manual-event-grants',method:'POST',body:{
+    kind:'bread',reason:'지급 오류 보완',user_id:10,quantity:2,product_id:101,request_id:'request-1'}});
+  const html=f.run('renderAdmin()');
+  assert.match(html,/임의 지급 기록 · 1건/);
+  assert.match(html,/플레인 휘낭시에 × 2개/);
+  assert.match(html,/지급 오류 보완/);assert.match(html,/담당자/);
+  assert.match(f.messages[0],/임의 지급 #4/);
+});
+
+test('guest custom prize grants only send a name and gift details',async()=>{
+  const f=adminFixture();f.run("eventTab='manual'");
+  await f.run("handleAdminClick('admin-grant-recipient',{dataset:{mode:'guest'}})");
+  await f.run("handleAdminClick('admin-grant-kind',{dataset:{kind:'gift'}})");
+  f.run("grantGift='custom'");
+  assert.match(f.run('renderAdmin()'),/name="gift_name"/);
+  f.context.respond=async()=>({grant:{id:5}});
+  await f.submit({guest:'1',name:'비회원 수령자',gift:'custom',gift_name:'푸딩 무드등',quantity:'1',reason:'현장 보상'},'admin-manual-grant');
+  assert.deepEqual(f.requests[0].body,{kind:'gift',reason:'현장 보상',guest:true,name:'비회원 수령자',
+    gift:'custom',gift_name:'푸딩 무드등',quantity:1,request_id:'request-1'});
+});
+
+test('manual score form submits a score rather than quantity or inventory fields',async()=>{
+  const f=adminFixture();f.run("eventTab='manual'");
+  await f.run("handleAdminClick('admin-grant-kind',{dataset:{kind:'score'}})");
+  const html=f.run('renderAdmin()');
+  assert.match(html,/name="points"/);
+  assert.doesNotMatch(html,/name="quantity"|name="product_id"|name="gift"/);
+  f.context.respond=async()=>({grant:{id:6}});
+  await f.submit({user_id:'10',points:'7',reason:'점수 복구'},'admin-manual-grant');
+  assert.deepEqual(f.requests[0].body,{kind:'score',reason:'점수 복구',user_id:10,points:7,request_id:'request-1'});
+});
+
+test('recipient and reason drafts survive changing grant kind and gift',async()=>{
+  const f=adminFixture();f.run("eventTab='manual'");
+  function input(name,value){f.listeners.input({target:{name,value,dataset:{},
+    closest:selector=>selector==='#admin-manual-grant'?{}:null}});}
+  input('user_id','10');input('reason','오류 보완');input('quantity','2');
+  await f.run("handleAdminClick('admin-grant-kind',{dataset:{kind:'gift'}})");
+  input('gift','custom');
+  const html=f.run('renderAdmin()');
+  assert.match(html,/<option value="10" selected>/);
+  assert.match(html,/name="reason"[^>]*value="오류 보완"/);
+  assert.match(html,/name="quantity"[^>]*value="2"/);
+  assert.match(html,/name="gift_name"/);
+});
+
 function profileForm(f) {
   const error={hidden:true,textContent:''},fields=[{disabled:false},{disabled:false}];
   const form={dataset:{userId:'1'},isConnected:true,querySelectorAll:selector=>selector==='fieldset'?fields:[],

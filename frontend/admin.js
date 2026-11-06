@@ -2,6 +2,10 @@ let helpers;
 let orderFilter = 'pending';
 let eventFilter = 'pending';
 let eventTab = 'requests';
+let grantRecipientMode = 'account';
+let grantKind = 'bread';
+let grantGift = 'oatmeal';
+let grantDraft = {};
 let inventoryBucket = 'all';
 let customerMode = 'existing';
 let manualSaleType = 'walkin';
@@ -17,6 +21,10 @@ export function initAdmin(shared) {
   helpers = shared;
   if (!inputListenerAdded) {
     document.addEventListener('input', event => {
+      if(event.target.closest?.('#admin-manual-grant')){
+        if(['user_id','name','product_id','quantity','points','reason','gift_name'].includes(event.target.name))grantDraft[event.target.name]=event.target.value;
+        if(event.target.name==='gift'){grantGift=event.target.value;helpers.render();return;}
+      }
       const search = event.target.dataset?.adminSearch;
       if (Object.hasOwn(staffSearch,search)) { updateStaffSearch(search,event.target.value); return; }
       if(event.target.name==='user_id'){
@@ -53,6 +61,7 @@ const preorderLabel = status => ({reserved:'수령 대기',pending:'수령 요�
 const phoneLabel = phone => String(phone).replace(/^(\d{3})(\d{3,4})(\d{4})$/,'$1-$2-$3');
 const preorderMenu = r => r.items.map(item=>`${item.name} ${item.quantity}${productList().find(p=>p.id===item.product_id)?.unit||'개'}`).join(', ');
 function buyerIdentity(id,name='') {
+  if(id===null)return `<span class="profile-name"><span>${escape(name)}</span><small class="muted">비회원</small></span>`;
   const user=list('users').find(u=>u.id===id)||{id,name};
   return `<span class="profile-name">${helpers.profileAvatar?.(user)||''}<span>${escape(name||user.name)}</span></span>`;
 }
@@ -123,7 +132,7 @@ function queueResults() {
 }
 function queuePage() {
   return `${heading('주문','이름·주문·입금 내역을 확인한 뒤 승인해 주세요.',`<button class="secondary-button" data-action="admin-refresh">새로고침</button>`)}
-  ${help('주문 확인 방법','현판은 입금과 빵 전달을 확인한 뒤 승인합니다. 예판은 예약한 빵을 전달한 뒤 승인합니다. 품목 옆 괄호는 접수된 주문을 반영한 현재 남은 재고이며, 예판은 별도 예판 재고를 표시합니다. 현장 구매는 빵 개수만큼, 예약 수령은 예약 금액 등급의 전용 주사위 1개를 지급합니다. 음료만 구매하면 주사위가 지급되지 않습니다. 대기 주문을 취소하면 확보한 재고가 돌아옵니다.')}
+  ${help('주문 확인 방법','현판은 입금과 빵 전달을 확인한 뒤 승인합니다. 예판은 예약한 빵을 전달한 뒤 승인합니다. 품목 옆 괄호는 접수된 주문을 반영한 현재 남은 재고이며, 예판은 별도 예판 재고를 표시합니다. 현장 구매는 빵 개수만큼, 예약 수령은 예약 금액 등급의 전용 주사위 1개를 지급합니다. 비회원 또는 음료만 구매하면 주사위가 지급되지 않습니다. 대기 주문을 취소하면 확보한 재고가 돌아옵니다.')}
   <div class="admin-subtabs">${[['pending','승인 대기'],['approved','승인 완료'],['cancelled','취소']].map(([key,label])=>`<button class="tab-chip ${orderFilter===key?'active':''}" data-action="admin-order-filter" data-filter="${key}">${label} ${list('orders').filter(o=>o.status===key).length}</button>`).join('')}</div>
   ${searchField('queue','admin-queue-search','주문 검색','이름 · 예약 전화번호 · 메뉴 검색')}<div id="admin-queue-results">${queueResults()}</div>`;
 }
@@ -183,13 +192,16 @@ async function lookupManualPreorder(name,phone) {
 }
 
 function manualPickupAccount(reservation, order) {
+  if (order?.user_id===null) return '<input type="hidden" name="guest" value="1"><p class="callout">비회원 수령 · 주사위 미지급</p>';
   if (order) {
     const name=order.customer_name || list('users').find(u=>u.id===order.user_id)?.name || reservation.name;
     return `<input type="hidden" name="user_id" value="${order.user_id}"><p class="callout">수령 계정: ${buyerIdentity(order.user_id,name)}<span>이미 접수한 계정에 주사위를 추가합니다.</span></p>`;
   }
+  const guestButton=`<button class="tab-chip ${manualPickupMode==='guest'?'active':''}" data-action="admin-pickup-mode" data-mode="guest" type="button" aria-pressed="${manualPickupMode==='guest'}">계정 없이 수령</button>`;
+  if(manualPickupMode==='guest')return `<div class="admin-subtabs">${guestButton}<button class="tab-chip" data-action="admin-pickup-mode" data-mode="existing" type="button" ${!list('users').length?'disabled':''}>기존 계정에 추가</button><button class="tab-chip" data-action="admin-pickup-mode" data-mode="new" type="button">새 계정 만들기</button></div><input type="hidden" name="guest" value="1"><p class="form-hint">예약자 이름으로 수령만 기록합니다. 계정 생성과 주사위 지급은 하지 않습니다.</p>`;
   const samePhone=list('users').some(u=>u.phone===reservation.phone);
   const existing=manualPickupMode!=='new'||samePhone;
-  return `<div class="admin-subtabs" role="group" aria-label="예약 수령 계정"><button class="tab-chip ${existing?'active':''}" data-action="admin-pickup-mode" data-mode="existing" type="button" aria-pressed="${existing}" ${!list('users').length?'disabled':''}>기존 계정에 추가</button><button class="tab-chip ${!existing?'active':''}" data-action="admin-pickup-mode" data-mode="new" type="button" aria-pressed="${!existing}" ${samePhone?'disabled':''}>새 계정 만들기</button></div>
+  return `<div class="admin-subtabs" role="group" aria-label="예약 수령 계정">${guestButton}<button class="tab-chip ${existing?'active':''}" data-action="admin-pickup-mode" data-mode="existing" type="button" aria-pressed="${existing}" ${!list('users').length?'disabled':''}>기존 계정에 추가</button><button class="tab-chip ${!existing?'active':''}" data-action="admin-pickup-mode" data-mode="new" type="button" aria-pressed="${!existing}" ${samePhone?'disabled':''}>새 계정 만들기</button></div>
     ${existing?`${searchField('users','admin-pickup-user-search','기존 계정 검색','닉네임 · 전화번호 검색')}<div class="field"><label for="admin-pickup-user">수령할 구매자 계정</label><select id="admin-pickup-user" name="user_id" required>${buyerOptions(manualPickupUser,'수령 계정 선택',staffSearch.users)}</select><div class="selected-profile" data-selected-profile>${manualPickupUser?buyerIdentity(Number(manualPickupUser)):''}</div><p id="pickup-account-count" class="search-count" role="status">검색된 계정 ${list('users').filter(u=>matchesSearch(staffSearch.users,u.name,u.phone)).length}명</p><p class="form-hint">검색 후 수령 계정을 선택해 주세요. 주사위는 선택한 계정에 추가됩니다.</p></div>`:`<p class="form-hint">${escape(reservation.name)} 님의 예약 전화번호로 계정을 함께 만듭니다. 아래 비밀번호를 구매자에게 알려주세요.</p><div class="field"><label for="admin-pickup-pin">새 구매자 숫자 4자리 비밀번호</label><input id="admin-pickup-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" required autocomplete="new-password"></div>`}`;
 }
 
@@ -200,16 +212,16 @@ function manualPreorderPage() {
     const order = list('orders').find(o=>o.reservation_id===r.id&&o.status!=='cancelled') || r.order;
     const completed = order?.status==='approved' || r.status==='approved';
     result = `<div id="manual-preorder-result" class="reservation-result"><div class="order-top"><h2>${escape(r.name)} 님의 예약</h2><span class="status ${completed?'approved':'pending'}">${completed?'수령 완료':order?.status==='pending'?'수령 요청 접수됨':'수령 대기'}</span></div><div class="order-lines">${r.items.map(item=>`<div class="order-line"><span>${escape(item.name)} × ${item.quantity}</span><span>${won(item.price*item.quantity)}</span></div>`).join('')}</div><div class="basket-total"><span>예약 금액</span><strong>${won(r.total)}</strong></div>
-    ${completed?`<p class="callout">이미 수령 완료한 예약입니다.${order?` 주문 #${order.id} · 수령 계정: ${escape(order.customer_name||list('users').find(u=>u.id===order.user_id)?.name||r.name)}`:''}</p>`:`<form id="admin-manual-preorder-complete"><p class="form-hint">예약된 품목을 전달한 뒤 승인해 주세요. ${r.dice_quantity?`주사위 ${r.dice_quantity}개를 지급합니다.`:'우유·두유는 주사위를 지급하지 않습니다.'}</p>${manualPickupAccount(r,order)}<button class="primary-button full" type="submit">예약한 빵 전달 완료 · 승인</button></form>`}</div>`;
+    ${completed?`<p class="callout">이미 수령 완료한 예약입니다.${order?` 주문 #${order.id} · 수령 계정: ${escape(order.customer_name||list('users').find(u=>u.id===order.user_id)?.name||r.name)}`:''}</p>`:`<form id="admin-manual-preorder-complete"><p class="form-hint">예약된 품목을 전달한 뒤 승인해 주세요. ${order?.user_id===null||manualPickupMode==='guest'?'비회원 수령은 주사위를 지급하지 않습니다.':r.dice_quantity?`주사위 ${r.dice_quantity}개를 지급합니다.`:'우유·두유는 주사위를 지급하지 않습니다.'}</p>${manualPickupAccount(r,order)}<button class="primary-button full" type="submit">예약한 빵 전달 완료 · 승인</button></form>`}</div>`;
   }
-  return `${help('예약 수령 처리 방법','이름·전화번호 일부·메뉴로 검색한 뒤 예약 확인을 누릅니다. 예약 내역 그대로 빵을 전달하고 수령 계정을 선택해 승인합니다. 이미 접수된 요청은 같은 주문으로 처리하며, 완료된 예약은 다시 지급하지 않습니다.')}<section class="content-card narrow">${searchField('pickup','admin-pickup-search','예약 검색','이름 · 전화번호 뒷자리 · 메뉴 검색')}<div id="manual-preorder-matches">${manualPreorderMatches()}</div>${result}</section>`;
+  return `${help('예약 수령 처리 방법','이름·전화번호 일부·메뉴로 검색한 뒤 예약 확인을 누릅니다. 예약 내역 그대로 빵을 전달하고 계정 없이 수령하거나 수령 계정을 선택해 승인합니다. 이미 접수된 요청은 같은 주문으로 처리하며, 완료된 예약은 다시 지급하지 않습니다.')}<section class="content-card narrow">${searchField('pickup','admin-pickup-search','예약 검색','이름 · 전화번호 뒷자리 · 메뉴 검색')}<div id="manual-preorder-matches">${manualPreorderMatches()}</div>${result}</section>`;
 }
 
 function salesPage() {
   const intro = `${heading('수기판매','구매자가 직접 입력하기 어려울 때 사용합니다.')}<div class="admin-subtabs" role="group" aria-label="수기 판매 유형">${[['walkin','현장 구매'],['preorder','예약한 빵 수령']].map(([key,label])=>`<button class="tab-chip ${manualSaleType===key?'active':''}" data-action="admin-sale-type" data-type="${key}" aria-pressed="${manualSaleType===key}">${label}</button>`).join('')}</div>`;
   if (manualSaleType==='preorder') return intro+manualPreorderPage();
-  return `${intro}${help('수기 판매 방법','입금과 빵 전달을 먼저 확인합니다. 구매자와 수량을 입력한 뒤 판매 완료를 누르면 즉시 승인되고 빵 개수만큼 주사위가 지급됩니다. 음료는 제외합니다.')}<section class="content-card narrow"><div class="admin-subtabs"><button class="tab-chip ${customerMode==='existing'?'active':''}" data-action="admin-customer-mode" data-mode="existing">기존 구매자</button><button class="tab-chip ${customerMode==='new'?'active':''}" data-action="admin-customer-mode" data-mode="new">새 구매자</button></div><form id="admin-manual-sale">
-  ${customerMode==='existing'?`<div class="field"><label for="admin-sale-user">구매자</label><select id="admin-sale-user" name="user_id" required>${buyerOptions()}</select><div class="selected-profile" data-selected-profile></div></div>`:`<div class="form-grid"><div class="field"><label for="admin-sale-name">구매자 이름</label><input id="admin-sale-name" name="name" maxlength="30" required autocomplete="off"></div><div class="field"><label for="admin-sale-phone">구매자 전화번호</label><input id="admin-sale-phone" name="phone" type="tel" inputmode="tel" placeholder="010-1234-5678" maxlength="13" pattern="010(?:[0-9]{8}|-[0-9]{4}-[0-9]{4})" data-phone-input required></div><div class="field"><label for="admin-sale-pin">숫자 4자리 비밀번호</label><input id="admin-sale-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" required autocomplete="new-password"></div></div>`}
+  return `${intro}${help('수기 판매 방법','입금과 빵 전달을 먼저 확인합니다. 계정 없이 판매는 이름과 수량만 입력합니다. 판매 완료를 누르면 즉시 승인됩니다. 기존 계정에 연결하거나 새 계정을 만들면 빵 개수만큼 주사위가 지급됩니다. 음료는 제외합니다.')}<section class="content-card narrow"><div class="admin-subtabs"><button class="tab-chip ${customerMode==='guest'?'active':''}" data-action="admin-customer-mode" data-mode="guest">계정 없이 판매</button><button class="tab-chip ${customerMode==='existing'?'active':''}" data-action="admin-customer-mode" data-mode="existing">기존 구매자</button><button class="tab-chip ${customerMode==='new'?'active':''}" data-action="admin-customer-mode" data-mode="new">새 구매자</button></div><form id="admin-manual-sale">
+  ${customerMode==='guest'?`<input type="hidden" name="guest" value="1"><div class="field"><label for="admin-sale-name">구매자 이름</label><input id="admin-sale-name" name="name" maxlength="30" required autocomplete="off"></div><p class="form-hint">계정을 만들지 않고 주문만 기록합니다. 주사위는 지급하지 않습니다.</p>`:customerMode==='existing'?`<div class="field"><label for="admin-sale-user">구매자</label><select id="admin-sale-user" name="user_id" required>${buyerOptions()}</select><div class="selected-profile" data-selected-profile></div></div>`:`<div class="form-grid"><div class="field"><label for="admin-sale-name">구매자 이름</label><input id="admin-sale-name" name="name" maxlength="30" required autocomplete="off"></div><div class="field"><label for="admin-sale-phone">구매자 전화번호</label><input id="admin-sale-phone" name="phone" type="tel" inputmode="tel" placeholder="010-1234-5678" maxlength="13" pattern="010(?:[0-9]{8}|-[0-9]{4}-[0-9]{4})" data-phone-input required></div><div class="field"><label for="admin-sale-pin">숫자 4자리 비밀번호</label><input id="admin-sale-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" required autocomplete="new-password"></div></div>`}
   ${productList().map(p=>`<div class="qty-input"><label for="admin-sale-qty-${p.id}">${escape(p.name)}<small>${won(p.price)} · 재고 ${p.stock}</small></label><input id="admin-sale-qty-${p.id}" type="number" name="quantity_${p.id}" min="0" max="${Math.min(p.stock,100)}" step="1" value="0" data-sale-product="${p.id}" data-price="${p.price}" aria-label="${escape(p.name)} 구매 수량" ${p.stock<1?'disabled':''}></div>`).join('')}
   <div class="form-total"><span>총 금액</span><strong><span data-sale-total>0</span>원</strong></div><button class="primary-button full" type="submit">판매 완료</button></form></section>`;
 }
@@ -226,9 +238,36 @@ function eventResults(){
 function instagramPanel(){
   return `<section class="content-card narrow"><h2>인스타 인증</h2><p class="form-hint">등록 사용자를 선택하면 인싸 마법사의 주사위 1개를 지급합니다. 계정당 한 번만 인증할 수 있습니다.</p><form id="admin-instagram"><div class="field"><label for="admin-event-user">등록 사용자</label><select id="admin-event-user" name="user_id" required>${buyerOptions('','사용자 선택')}</select><div class="selected-profile" data-selected-profile></div></div><p class="callout">인싸 마법사의 주사위 1개 지급</p><button class="primary-button full" type="submit">인스타 이벤트 인증 완료</button></form></section><details id="instagram-history" class="history-section"><summary>인스타 이벤트 기록 · ${list('events').length}명</summary><div class="table-wrap"><table><thead><tr><th>시간</th><th>구매자</th><th>지급 주사위</th></tr></thead><tbody>${list('events').map(e=>`<tr><td>${stamp(e.created_at)}</td><td>${buyerIdentity(e.user_id,e.customer_name)}</td><td>${e.dice}개</td></tr>`).join('')}</tbody></table></div></details>`;
 }
+function manualGrantPanel(){
+  const guest=grantRecipientMode==='guest',supplies=data().event_supplies||[];
+  const giftOptions=[['oatmeal',`오트밀 미니바이트 · 재고 ${supplies.find(s=>s.key==='oatmeal')?.stock||0}`],
+    ['milk',`우유 · 재고 ${productList().find(p=>p.id===112)?.stock||0}`],
+    ['soymilk',`두유 · 재고 ${productList().find(p=>p.id===113)?.stock||0}`],
+    ['sunglasses','멋진 선글라스 (프로필 소품)'],['custom','기타 상품 (직접 입력)']];
+  const recipients=guest?`<input type="hidden" name="guest" value="1"><div class="field"><label for="grant-name">받는 사람 이름</label><input id="grant-name" name="name" maxlength="30" required value="${escape(grantDraft.name||'')}" autocomplete="off"></div>`:
+    `<div class="field"><label for="grant-user">등록 사용자</label><select id="grant-user" name="user_id" required>${buyerOptions(grantDraft.user_id||'','사용자 선택')}</select><div class="selected-profile" data-selected-profile>${grantDraft.user_id?buyerIdentity(Number(grantDraft.user_id)):''}</div></div>`;
+  let itemFields='';
+  if(grantKind==='score')itemFields=`<div class="field"><label for="grant-points">지급할 점수</label><input id="grant-points" name="points" type="number" min="1" max="10000" step="1" value="${escape(grantDraft.points||1)}" required></div>`;
+  else{
+    itemFields=grantKind==='bread'?`<div class="field"><label for="grant-product">지급할 빵</label><select id="grant-product" name="product_id" required><option value="">빵 선택</option>${productList().filter(p=>p.reward_eligible??(p.dice_per_unit!==0)).map(p=>`<option value="${p.id}" ${String(p.id)===grantDraft.product_id?'selected':''} ${p.stock<1?'disabled':''}>${escape(p.name)} · 재고 ${p.stock}${escape(p.unit||'개')}</option>`).join('')}</select></div>`:
+      `<div class="field"><label for="grant-gift">지급할 상품</label><select id="grant-gift" name="gift" required>${giftOptions.map(([key,label])=>`<option value="${key}" ${key===grantGift?'selected':''} ${guest&&key==='sunglasses'?'disabled':''}>${escape(label)}</option>`).join('')}</select></div>${grantGift==='custom'?`<div class="field"><label for="grant-gift-name">상품 이름</label><input id="grant-gift-name" name="gift_name" maxlength="80" value="${escape(grantDraft.gift_name||'')}" required></div><p class="form-hint">기타 상품은 지급 기록만 남깁니다.</p>`:grantGift==='sunglasses'?'<p class="form-hint">선택한 계정에서 프로필 선글라스를 착용할 수 있게 됩니다.</p>':''}`;
+    itemFields+=grantKind==='gift'&&grantGift==='sunglasses'?'<input type="hidden" name="quantity" value="1">':`<div class="field"><label for="grant-quantity">지급 수량</label><input id="grant-quantity" name="quantity" type="number" min="1" max="100" step="1" value="${escape(grantDraft.quantity||1)}" required></div>`;
+  }
+  const history=list('manual_grants');
+  return `${help('임의 지급 방법','물품을 전달한 뒤 등록합니다. 빵·우유·두유·오트밀은 재고가 차감되고 점수는 계정에 즉시 추가됩니다. 기존 지급 대기 요청은 먼저 해당 요청에서 승인하거나 취소해 주세요. 임의 지급은 구매 주사위나 매출을 추가하지 않습니다.')}
+    <section class="content-card narrow"><h2>임의 지급</h2>
+    <div class="admin-subtabs" role="group" aria-label="임의 지급 대상">${[['account','등록 사용자'],['guest','계정 없이 지급']].map(([key,label])=>`<button class="tab-chip ${grantRecipientMode===key?'active':''}" data-action="admin-grant-recipient" data-mode="${key}" aria-pressed="${grantRecipientMode===key}">${label}</button>`).join('')}</div>
+    <form id="admin-manual-grant">${recipients}
+      <div class="admin-subtabs" role="group" aria-label="지급 항목">${[['bread','빵'],['gift','상품'],['score','점수']].map(([key,label])=>`<button type="button" class="tab-chip ${grantKind===key?'active':''}" data-action="admin-grant-kind" data-kind="${key}" aria-pressed="${grantKind===key}" ${guest&&key==='score'?'disabled':''}>${label}</button>`).join('')}</div>
+      ${guest?'<p class="form-hint">계정 없이 빵·실물 상품 지급만 기록합니다. 점수와 프로필 소품은 등록 계정이 필요합니다.</p>':''}${itemFields}
+      <div class="field"><label for="grant-reason">지급 사유</label><input id="grant-reason" name="reason" maxlength="200" value="${escape(grantDraft.reason||'')}" placeholder="예: 이벤트 지급 오류 보완" required></div>
+      <button class="primary-button full" type="submit">${grantKind==='score'?'점수 지급하기':'지급 완료로 기록'}</button>
+    </form></section>
+    <section class="manual-grant-history"><h2>임의 지급 기록 · ${history.length}건</h2>${history.length?`<div class="table-wrap"><table><thead><tr><th>번호·시간</th><th>받는 사람</th><th>지급 내용</th><th>사유</th><th>담당자</th></tr></thead><tbody>${history.map(g=>`<tr><td>#${g.id}<br>${stamp(g.created_at)}</td><td>${buyerIdentity(g.user_id,g.customer_name)}</td><td>${g.kind==='score'?`${number(g.points)}점`:`${escape(g.item_name)} × ${number(g.quantity)}${escape(productList().find(p=>p.id===g.product_id)?.unit||'개')}`}</td><td>${escape(g.reason)}</td><td>${escape(g.staff_name)}</td></tr>`).join('')}</tbody></table></div>`:'<p class="form-hint">아직 임의 지급 기록이 없습니다.</p>'}</section>`;
+}
 function eventsPage() {
   const history=list('rewards').filter(r=>!r.fulfillment);
-  return `${heading('이벤트','당첨 물품을 전달한 뒤 승인해 주세요.',`<button class="secondary-button" data-action="admin-refresh">새로고침</button>`)}<div class="admin-subtabs"><button class="tab-chip ${eventTab==='requests'?'active':''}" data-action="admin-event-tab" data-tab="requests">물품 지급</button><button class="tab-chip ${eventTab==='instagram'?'active':''}" data-action="admin-event-tab" data-tab="instagram">인스타 인증</button></div>${eventTab==='instagram'?instagramPanel():`${help('이벤트 지급 방법','구매자가 당첨되면 물품 1개를 확보하고 지급 대기에 표시합니다. 우유 보상은 구매자가 우유·두유 중 재고 있는 품목을 선택한 뒤 접수됩니다. 전달 완료·승인은 재고를 추가 차감하지 않으며, 취소하면 확보했던 재고 1개가 돌아옵니다. 취소 후 재추첨은 하지 않습니다. 선글라스 등 디지털 보상은 자동 지급합니다.')}<div class="admin-subtabs">${[['pending','지급 대기'],['awaiting_choice','음료 선택 중'],['approved','지급 완료'],['cancelled','취소']].map(([key,label])=>`<button class="tab-chip ${eventFilter===key?'active':''}" data-action="admin-event-filter" data-filter="${key}">${label} ${list('reward_requests').filter(r=>r.status===key).length}</button>`).join('')}</div>${searchField('events','admin-event-search','이벤트 요청 검색','이름 · 물품 검색')}<div id="admin-event-results">${eventResults()}</div><details id="reward-history" class="history-section"><summary>이전·자동 지급 기록 · ${history.length}건</summary><div class="table-wrap"><table><thead><tr><th>시간</th><th>구매자</th><th>보상</th></tr></thead><tbody>${history.map(r=>`<tr><td>${stamp(r.created_at)}</td><td>${buyerIdentity(r.user_id,r.customer_name)}</td><td>${escape(r.product_name)}</td></tr>`).join('')}</tbody></table></div></details>`}`;
+  return `${heading('이벤트',eventTab==='manual'?'빵·상품·점수 지급과 담당자 기록을 관리합니다.':'당첨 물품을 전달한 뒤 승인해 주세요.',`<button class="secondary-button" data-action="admin-refresh">새로고침</button>`)}<div class="admin-subtabs"><button class="tab-chip ${eventTab==='requests'?'active':''}" data-action="admin-event-tab" data-tab="requests">물품 지급</button><button class="tab-chip ${eventTab==='instagram'?'active':''}" data-action="admin-event-tab" data-tab="instagram">인스타 인증</button><button class="tab-chip ${eventTab==='manual'?'active':''}" data-action="admin-event-tab" data-tab="manual">임의 지급</button></div>${eventTab==='manual'?manualGrantPanel():eventTab==='instagram'?instagramPanel():`${help('이벤트 지급 방법','구매자가 당첨되면 물품 1개를 확보하고 지급 대기에 표시합니다. 우유 보상은 구매자가 우유·두유 중 재고 있는 품목을 선택한 뒤 접수됩니다. 전달 완료·승인은 재고를 추가 차감하지 않으며, 취소하면 확보했던 재고 1개가 돌아옵니다. 취소 후 재추첨은 하지 않습니다. 선글라스 등 디지털 보상은 자동 지급합니다.')}<div class="admin-subtabs">${[['pending','지급 대기'],['awaiting_choice','음료 선택 중'],['approved','지급 완료'],['cancelled','취소']].map(([key,label])=>`<button class="tab-chip ${eventFilter===key?'active':''}" data-action="admin-event-filter" data-filter="${key}">${label} ${list('reward_requests').filter(r=>r.status===key).length}</button>`).join('')}</div>${searchField('events','admin-event-search','이벤트 요청 검색','이름 · 물품 검색')}<div id="admin-event-results">${eventResults()}</div><details id="reward-history" class="history-section"><summary>이전·자동 지급 기록 · ${history.length}건</summary><div class="table-wrap"><table><thead><tr><th>시간</th><th>구매자</th><th>보상</th></tr></thead><tbody>${history.map(r=>`<tr><td>${stamp(r.created_at)}</td><td>${buyerIdentity(r.user_id,r.customer_name)}</td><td>${escape(r.product_name)}</td></tr>`).join('')}</tbody></table></div></details>`}`;
 }
 
 function notesPage() {
@@ -273,6 +312,15 @@ export async function handleAdminClick(action, element) {
   const { state, api, refresh, render, closeModal, toast } = helpers;
   if (action === 'admin-route') { state.route = element.dataset.route; location.hash = state.route; render(); }
   else if(action==='admin-event-tab'){eventTab=element.dataset.tab;render();}
+  else if(action==='admin-grant-recipient'){
+    grantRecipientMode=element.dataset.mode==='guest'?'guest':'account';
+    if(grantRecipientMode==='guest'){if(grantKind==='score')grantKind='bread';if(grantGift==='sunglasses')grantGift='oatmeal';}
+    render();
+  }
+  else if(action==='admin-grant-kind'){
+    if(['bread','gift','score'].includes(element.dataset.kind)&&!(grantRecipientMode==='guest'&&element.dataset.kind==='score'))grantKind=element.dataset.kind;
+    render();
+  }
   else if(action==='admin-event-filter'){eventFilter=element.dataset.filter;render();}
   else if(action==='admin-event-cancel'){
     const row=list('reward_requests').find(r=>r.id===Number(element.dataset.id));if(!row)return true;
@@ -290,7 +338,7 @@ export async function handleAdminClick(action, element) {
     if (next !== manualSaleType) { manualSaleType = next; manualReservation = null; manualLookupVersion++; render(); }
   }
   else if (action === 'admin-customer-mode') { customerMode = element.dataset.mode; render(); }
-  else if (action === 'admin-pickup-mode') { manualPickupMode = element.dataset.mode==='new'?'new':'existing'; render(); }
+  else if (action === 'admin-pickup-mode') { manualPickupMode = ['guest','new'].includes(element.dataset.mode)?element.dataset.mode:'existing'; render(); }
   else if (action === 'admin-preorder-select') {
     const reservation=list('reservations').find(r=>r.id===Number(element.dataset.id));
     if(!reservation){toast('예약 목록을 새로고침해 주세요.','error');return true;}
@@ -311,7 +359,7 @@ export async function handleAdminClick(action, element) {
     try {
       const {order} = await api(`/api/staff/orders/${Number(element.dataset.id)}/approve`, { method: 'POST', body: {} });
       const dice = order.dice_quantity ?? order.quantity;
-      const message = dice ? `승인했어요. 주사위 ${dice}개를 지급했습니다.` : '승인했어요. 우유·두유는 주사위를 지급하지 않아요.';
+      const message = order.user_id===null ? '비회원 주문을 승인했어요.' : dice ? `승인했어요. 주사위 ${dice}개를 지급했습니다.` : '승인했어요. 우유·두유는 주사위를 지급하지 않아요.';
       try { await refresh(); }
       catch { toast(`${message} 최신 현황을 가져오지 못했으니 새로고침해 주세요.`, 'error'); return true; }
       render();
@@ -348,7 +396,7 @@ function formError(form, error) {
 }
 
 export async function handleAdminSubmit(form) {
-  const accepted = ['admin-event-supply','staff-login','admin-inventory','admin-manual-sale','admin-instagram','admin-memo','admin-preorder-import','admin-cancel-confirm','admin-manual-preorder-complete'];
+  const accepted = ['admin-manual-grant','admin-event-supply','staff-login','admin-inventory','admin-manual-sale','admin-instagram','admin-memo','admin-preorder-import','admin-cancel-confirm','admin-manual-preorder-complete'];
   if (!accepted.includes(form.id)) return false;
   const { state, api, submitButton, refresh, render, toast, closeModal } = helpers;
   const values = new FormData(form);
@@ -365,6 +413,19 @@ export async function handleAdminSubmit(form) {
       state.route = 'queue';
       history.replaceState(null,'','#queue');
       message = `${response.user.name}님, 오늘도 잘 부탁드려요.`;
+    } else if(form.id==='admin-manual-grant'){
+      const body={kind:grantKind,reason:values.get('reason')};
+      if(values.has('guest')){body.guest=true;body.name=values.get('name');}
+      else body.user_id=Number(values.get('user_id'));
+      if(grantKind==='score')body.points=Number(values.get('points'));
+      else{
+        body.quantity=Number(values.get('quantity'));
+        if(grantKind==='bread')body.product_id=Number(values.get('product_id'));
+        else{body.gift=values.get('gift');if(body.gift==='custom')body.gift_name=values.get('gift_name');}
+      }
+      const {grant}=await createAction('manual-event-grant','/api/staff/manual-event-grants',body);
+      grantDraft={};
+      message=`임의 지급 #${grant.id} 기록을 남겼어요.`;
     } else if(form.id==='admin-event-supply'){
       await createAction('event-supply','/api/staff/event-supplies',{key:'oatmeal',delta:Number(values.get('delta')),reason:values.get('reason')});
       message='이벤트 물품 재고를 반영했어요.';
@@ -375,15 +436,17 @@ export async function handleAdminSubmit(form) {
       const items = [...form.querySelectorAll('[data-sale-product]')].map(input => ({ product_id: Number(input.dataset.saleProduct), quantity: Number(input.value) })).filter(item => item.quantity > 0);
       if (!items.length) throw new Error('구매한 품목을 한 개 이상 입력해 주세요.');
       const body = { items };
-      if (values.has('user_id')) body.user_id = Number(values.get('user_id'));
+      if (values.has('guest')) { body.guest = true; body.name = values.get('name'); }
+      else if (values.has('user_id')) body.user_id = Number(values.get('user_id'));
       else { body.name = values.get('name'); body.phone = helpers.normalizePhone(values.get('phone')); body.pin = values.get('pin'); }
       const {order} = await createAction('manual-sale', '/api/staff/manual-sale', body);
-      message = order.dice_quantity ? `수기 판매를 등록하고 주사위 ${order.dice_quantity}개를 지급했어요.` : '수기 판매를 등록했어요. 우유·두유는 주사위를 지급하지 않아요.';
+      message = order.user_id===null ? `비회원 수기 판매 #${order.id}를 등록했어요.` : order.dice_quantity ? `수기 판매를 등록하고 주사위 ${order.dice_quantity}개를 지급했어요.` : '수기 판매를 등록했어요. 우유·두유는 주사위를 지급하지 않아요.';
     } else if (form.id === 'admin-manual-preorder-complete') {
       if (!manualReservation) throw new Error('예약을 검색하고 예약 확인을 먼저 눌러 주세요.');
       const reservation = manualReservation, version = manualLookupVersion;
       const body = {name:reservation.name,phone:reservation.phone};
-      if (values.has('user_id')) body.user_id = Number(values.get('user_id'));
+      if (values.has('guest')) body.guest = true;
+      else if (values.has('user_id')) body.user_id = Number(values.get('user_id'));
       else body.pin = values.get('pin');
       const response = await createAction('manual-preorder',`/api/staff/preorders/${reservation.id}/complete`,body);
       if (manualSaleType==='preorder' && version===manualLookupVersion && manualReservation?.id===reservation.id) manualReservation = response.reservation;

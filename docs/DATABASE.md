@@ -2,7 +2,7 @@
 
 코드 기준 갱신일: **2026-11-07 (KST)**. 기준 코드는 [server/db.py](../server/db.py)의 `SCHEMA`, 데이터 처리 코드는 [server/app.py](../server/app.py), 상품 규칙은 [server/catalog.py](../server/catalog.py)입니다.
 
-현재 로컬 코드의 애플리케이션 테이블은 **22개**, 컬럼은 **129개**, 실제 외래키는 **26개**, CHECK 제약은 **31개**, 명시적 인덱스는 **5개**입니다. SQLite 내부 테이블·자동 인덱스는 제외합니다. 전화번호 계정 스키마로 변경하면서 이전 DB는 백업 후 명시적으로 재생성합니다. 구 스키마로 실행하면 초기화를 거부하며 자동 삭제·이전하지 않습니다.
+현재 로컬 코드의 애플리케이션 테이블은 **24개**, 컬럼은 **147개**, 실제 외래키는 **31개**, CHECK 제약은 **39개**, 명시적 인덱스는 **5개**입니다. SQLite 내부 테이블·자동 인덱스는 제외합니다. 전화번호 계정 이전의 구 DB만 명시적 재생성이 필요합니다. 전화번호 계정 DB에는 비회원 주문 구조·임의 지급 테이블을 기존 기록을 유지하며 자동 추가합니다.
 
 ## 1. 실행 환경과 저장 위치
 
@@ -28,7 +28,9 @@
 | 예판 | `reservations` | 예약자 이름·전화번호, 수령 상태, 연결 계정·주문 |
 | 예판 항목 | `reservation_items` | 예약한 상품·수량·예약 당시 가격 |
 | 예판 인증 | `preorder_verifications` | 구매자가 이름·전화번호를 확인한 예약의 조회 유효기간 |
-| 주문 | `orders` | 현장 구매·예판 수령·수기 판매 주문과 승인 상태 |
+| 주문 | `orders` | 회원·비회원 현장 구매·예판 수령·수기 판매 주문과 승인 상태 |
+| 비회원 조회 | `guest_order_access` | 주문별 조회 키 해시와 중복 접수 방지 정보 |
+| 임의 지급 | `manual_event_grants` | 계정·비회원에게 준 빵·상품·점수, 담당자와 사유 |
 | 주문 항목 | `order_items` | 주문 당시 상품명·가격·수량 |
 | 이전 주사위 | `dice_rolls` | 개편 전 1~6 결과 보존 |
 | 주사위 지갑 | `dice_wallet` | 사용자·종류별 남은 수량 |
@@ -49,7 +51,8 @@
 
 ```mermaid
 erDiagram
-    users ||--o{ orders : user_id
+    users o|--o{ orders : user_id
+    orders ||--o| guest_order_access : order_id
     users ||--o| user_profiles : user_id
     users o|--o{ reservations : user_id
     reservations o|--o{ orders : reservation_id
@@ -166,8 +169,8 @@ erDiagram
 | 컬럼 | 타입 | 제약·기본값 | 의미 |
 | --- | --- | --- | --- |
 | `id` | INTEGER | PK, 자동 증가 | 주문 번호 |
-| `user_id` | INTEGER | NN, FK → `users.id` | 주문·주사위를 받는 계정 |
-| `customer_name` | TEXT | NN | 주문 생성 당시 해당 계정 이름 |
+| `user_id` | INTEGER | NULL 허용, FK → `users.id` | 연결 계정. 비회원 주문은 NULL |
+| `customer_name` | TEXT | NN | 주문 당시 계정 닉네임 또는 비회원이 입력한 이름 |
 | `type` | TEXT | NN | `walkin` / `preorder` / `manual` |
 | `status` | TEXT | NN | `pending` / `approved` / `cancelled` |
 | `reservation_id` | INTEGER | NULL 허용, FK → `reservations.id` | 예판 수령의 원래 예약 |
@@ -181,7 +184,7 @@ erDiagram
 
 기본 전환은 `pending → approved` 또는 `pending → cancelled`입니다. 수기 판매·수기 예판 수령은 승인된 상태로 즉시 생성할 수 있습니다. 승인 후 취소와 취소 후 승인은 현재 API에서 거부합니다. 이 전환 규칙과 시각 컬럼의 일관성은 앱이 관리하며 DB CHECK는 상태 값의 종류만 제한합니다.
 
-`dice_quantity`는 DB 컬럼이 아니라 현판·수기 현장은 음료 제외 수량 합, 예판은 빵 포함 시 1개입니다. 예판을 다른 이름의 기존 계정에 연결하면 `customer_name`과 `reservations.name`은 다를 수 있습니다.
+`dice_quantity`는 DB 컬럼이 아니며 비회원 주문은 0입니다. 계정에 연결된 현판·수기 현장은 음료 제외 수량 합, 예판은 빵 포함 시 1개입니다. 예판을 다른 이름의 기존 계정에 연결하면 `customer_name`과 `reservations.name`은 다를 수 있습니다.
 
 ### 4.8 `order_items` — 주문 품목 스냅샷
 
@@ -312,7 +315,7 @@ DB에 `UNIQUE(user_id, threshold)`는 없고 쓰기 잠금·보상 횟수·요�
 
 저장한 프로필이 없는 기존 계정에는 ID를 기준으로 만든 기본 외모를 응답하며 읽기만으로 행을 만들지 않습니다. 로그인한 계정 자신의 프로필만 수정할 수 있고 허용한 선택값만 저장합니다. 계정당 한 행을 UPSERT하므로 반복 저장해도 행을 추가하지 않습니다. 저장은 기존 쓰기 잠금 안에서 처리하며 점수·주사위·보상 횟수는 변경하지 않습니다. 실제 사진 파일이나 외부 이미지 URL은 저장하지 않습니다.
 
-머리핀 소유권은 별도 테이블에 저장하지 않고 승인된 `orders`와 `order_items`의 상품 종류로 계산합니다. 현판·예판·수기 판매를 포함하고 우유는 제외합니다. 저장 및 응답 시 소유권을 확인합니다. `unlocked_hairpins`는 본인 계정과 담당자 구매자 목록에만 제공하며 순위표에는 착용한 외모만 제공합니다. 선글라스 소유권은 `milestone_claims`의 15점 수령 기록으로 확인합니다. 미획득 착용 저장은 403, 응답에서는 미획득 선글라스를 제거합니다. 이전 6항목 JSON은 읽을 수 있고, 다시 저장하면 새 5항목 형식으로 저장합니다.
+머리핀 소유권은 별도 테이블에 저장하지 않고 승인된 `orders`와 `order_items`의 상품 종류로 계산합니다. 현판·예판·수기 판매를 포함하고 우유는 제외합니다. 저장 및 응답 시 소유권을 확인합니다. `unlocked_hairpins`는 본인 계정과 담당자 구매자 목록에만 제공하며 순위표에는 착용한 외모만 제공합니다. 선글라스 소유권은 `milestone_claims`의 15점 수령 기록 또는 `manual_event_grants`의 선글라스 임의 지급 기록으로 확인합니다. 미획득 착용 저장은 403, 응답에서는 미획득 선글라스를 제거합니다. 이전 6항목 JSON은 읽을 수 있고, 다시 저장하면 새 5항목 형식으로 저장합니다.
 
 ### 4.18 `dice_wallet` — 종류별 주사위 지갑
 
@@ -381,13 +384,49 @@ DB에 `UNIQUE(user_id, threshold)`는 없고 쓰기 잠금·보상 횟수·요�
 
 CHECK로 두 원본 중 정확히 하나만 연결하고 각 원본의 UNIQUE로 중복 요청을 막습니다. 빵·오트밀은 생성 시 재고를 확보하여 pending, 음료는 awaiting_choice에서 구매자의 재고 있는 품목 선택 후 pending이 됩니다. 승인 시 재차 차감하지 않고, pending 취소 시 1개 반환합니다. 선택 전 취소는 재고 변화가 없습니다. 동일 처리는 반복 가능하며 승인↔취소 전환은 거부합니다. 취소 후 재추첨·주사위 환급·점수 단계 재사용은 없습니다. 디지털 보상은 이 테이블을 만들지 않습니다. 과거 보상도 소급하여 대기로 생성하지 않습니다.
 
+### 4.23 `guest_order_access` — 비회원 주문 조회
+
+| 컬럼 | 타입 | 제약 | 의미 |
+| --- | --- | --- | --- |
+| `token_hash` | TEXT | PK | 브라우저에서 생성한 임의 요청 키의 SHA-256 해시 |
+| `order_id` | INTEGER | NN, UNIQUE, FK → `orders.id` | 구매 사건별 자동 증가 주문 번호 |
+| `fingerprint` | TEXT | NN | 요청 내용 해시. 같은 키로 다른 주문 제출 시 거부 |
+| `created_at` | TEXT | NN | 접수 시각 |
+
+비회원 계정·세션은 만들지 않습니다. 이름은 `orders.customer_name`에만 저장하며 회원과 같은 주문 번호·재고·승인/취소 흐름을 씁니다. 조회 키는 브라우저에 저장하고 Authorization 헤더로 전송합니다. 주문 번호만 알아서는 조회할 수 없습니다. 수기 판매·예약 수령은 담당자 화면에서만 처리하므로 이 조회 행을 생성하지 않습니다.
+
+전화번호 계정 DB에 적용할 때는 `orders.user_id`를 NULL 허용으로 자동 변경합니다. 기존 주문·품목·계정·세션·주문 번호 증가 값은 유지하며 재초기화하지 않습니다. SQLite는 잠금과 트랜잭션 안에서 테이블을 교체하고 외래키 검사 후 반영합니다.
+
+### 4.24 `manual_event_grants` — 담당자 임의 지급
+
+| 컬럼 | 타입 | 제약 | 의미 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PK, 자동 증가 | 임의 지급 번호 |
+| `user_id` | INTEGER | NULL 허용, FK → `users.id` | 받는 계정. 비회원은 NULL |
+| `customer_name` | TEXT | NN | 당시 닉네임 또는 비회원 이름 |
+| `kind` | TEXT | NN, bread/gift/score | 빵·상품·점수 |
+| `product_id` | INTEGER | NULL 허용, FK → `products.id` | 지급 빵·우유·두유 |
+| `supply_key` | TEXT | NULL 허용, FK → `event_supplies.key` | 오트밀 재고 |
+| `gift_key` | TEXT | NULL 허용 | oatmeal/milk/soymilk/sunglasses/custom |
+| `item_name` | TEXT | NN | 지급 당시 물품명 또는 점수 |
+| `quantity` | INTEGER | NN, 양수 | 지급 수량. 점수·선글라스는 1 |
+| `points` | INTEGER | NN, 기본 0, 0 이상 | 점수 지급량. 물품 지급은 0 |
+| `reason` | TEXT | NN | 담당자가 입력한 지급 사유 |
+| `staff_id` | INTEGER | NN, FK → `users.id` | 지급 담당자 |
+| `staff_name` | TEXT | NN | 당시 담당자 이름 |
+| `created_at` | TEXT | NN | 지급 기록 시각 |
+
+빵·음료는 현판 재고, 오트밀은 해당 물품 재고를 같은 쓰기 트랜잭션에서 차감합니다. 기타 상품은 이름과 수량만 기록합니다. 비회원 점수·프로필 선글라스 지급은 거부합니다. 점수는 `users.score`에 더하고 선글라스는 지급 기록 자체로 착용 권한을 확인합니다. 주사위·매출·구매 기록·점수 보상 수령 기록은 추가하지 않습니다.
+
+담당자 인증, 대상·수량·사유 확인, 재고/점수 변경, 임의 지급 기록과 `idempotency` 기록을 함께 반영합니다. 기존 지급 대기 요청은 자동으로 승인·취소하지 않습니다. 이 테이블 추가에 DB 초기화는 필요하지 않습니다.
+
 ## 5. DB에 저장하지 않고 계산하는 값
 
 | 화면/API 값 | 계산 기준 |
 | --- | --- |
 | 캐릭터 `level` | `min(5, users.rewards_claimed)` |
 | 다음 보상 점수 | 5·10·15·20·30 중 미수령 최저 기준 |
-| 주문 `dice_quantity` | 현판·수기 현장은 음료 제외 수량 합, 예판은 빵 포함 시 1개 |
+| 주문 `dice_quantity` | 비회원은 0. 회원 현판·수기 현장은 음료 제외 수량 합, 예판은 빵 포함 시 1개 |
 | 예약 합계 | `reservation_items.quantity × price`의 합 |
 | 접수 보관 수량 | 해당 품목의 `pending` 주문 항목 수량 합 + `pending` 이벤트 요청 수량 |
 | 재고 표의 매장 예상 | `stock + preorder_stock + 접수 보관` |

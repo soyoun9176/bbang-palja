@@ -15,7 +15,7 @@ import traceback
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from .db import Database
-from .catalog import PRODUCT_IDS, PRODUCT_UNITS, PRODUCT_PHOTOS, MILK_PRODUCT_ID, DRINK_PRODUCT_IDS, REWARD_PRODUCT_IDS, dice_quantity, sync_catalog
+from .catalog import PRODUCT_IDS, PRODUCT_UNITS, PRODUCT_PHOTOS, MILK_PRODUCT_ID, SOYMILK_PRODUCT_ID, DRINK_PRODUCT_IDS, REWARD_PRODUCT_IDS, dice_quantity, sync_catalog
 from .game import DICE, MILESTONES, public_dice, preorder_kind
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,9 +61,17 @@ def profile_rows(tx, rows, user_id=None):
             wallets.setdefault(item['user_id'], []).append({**public_dice(item['kind']), 'quantity': item['quantity']})
     for item in tx.all("SELECT user_id,threshold FROM milestone_claims" + suffix, args):
         claims.setdefault(item['user_id'], []).append(item['threshold'])
+    manual_glasses = {item['user_id'] for item in tx.all(
+        "SELECT DISTINCT user_id FROM manual_event_grants WHERE gift_key='sunglasses'" +
+        (' AND user_id=?' if user_id is not None else ''), args)}
     return [{**row, "unlocked_hairpins": owned.get(row["id"], ["none"]),
              "dice": sorted(wallets.get(row['id'], []), key=lambda d: list(DICE).index(d['kind'])),
-             "claimed_milestones": sorted(claims.get(row['id'], []))} for row in rows]
+             "claimed_milestones": sorted(claims.get(row['id'], [])),
+             "manual_sunglasses": row['id'] in manual_glasses} for row in rows]
+
+
+def has_sunglasses(user):
+    return 15 in user.get('claimed_milestones', []) or user.get('manual_sunglasses', False)
 
 
 def profile_info(row):
@@ -81,7 +89,7 @@ def profile_info(row):
             pass
     if avatar["hairpin"] not in row.get("unlocked_hairpins", ["none"]):
         avatar["hairpin"] = "none"
-    if avatar['glasses'] == 'sunglasses' and 15 not in row.get('claimed_milestones', []):
+    if avatar['glasses'] == 'sunglasses' and not has_sunglasses(row):
         avatar['glasses'] = 'none'
     return {"avatar": avatar, "profile_customized": bool(stored)}
 
@@ -171,7 +179,7 @@ def public_user(row):
     user["unlocked_hairpins"] = row.get("unlocked_hairpins", ["none"])
     user['dice'] = row.get('dice', [])
     user['claimed_milestones'] = row.get('claimed_milestones', [])
-    user['sunglasses_unlocked'] = 15 in user['claimed_milestones']
+    user['sunglasses_unlocked'] = has_sunglasses(row)
     return user
 
 
@@ -185,6 +193,8 @@ def grant_dice(tx, user_id, kind, quantity):
 
 
 def order_dice(order):
+    if 'user_id' in order and order['user_id'] is None:
+        return ('walkin', 0)
     count = dice_quantity(order['items'])
     return (preorder_kind(order['total']), 1 if count else 0) if order['type'] == 'preorder' else ('walkin', count)
 
@@ -389,12 +399,62 @@ def manual_buyer(tx, body, reservation_name=None):
     return buyer
 
 
+def manual_event_grant(tx, body, staff):
+    kind = body.get('kind')
+    check(kind in ('bread','gift','score'), '지급할 항목을 선택해 주세요.')
+    if body.get('guest') is True:
+        check(not any(body.get(key) is not None for key in ('user_id','phone','pin')), '비회원 지급에는 이름만 입력해 주세요.')
+        check(kind != 'score', '점수는 등록된 계정에만 지급할 수 있습니다.')
+        buyer = {'id':None,'name':person_name(body.get('name'))}
+    else:
+        buyer = user_by_id(tx,integer(body.get('user_id'),'구매자 번호',maximum=1_000_000),buyer=True)
+    reason = string(body.get('reason'), '지급 사유', maximum=200)
+    quantity = 1 if kind == 'score' else integer(body.get('quantity'), '지급 수량', maximum=100)
+    points = integer(body.get('points'),'지급 점수',maximum=10000) if kind == 'score' else 0
+    product_id, supply_key, gift_key, item_name = None, None, None, '점수'
+    if kind == 'bread':
+        product_id = integer(body.get('product_id'),'빵 번호',maximum=1_000_000)
+        check(product_id in REWARD_PRODUCT_IDS, '지급할 빵을 선택해 주세요.')
+    elif kind == 'gift':
+        gift_key = body.get('gift')
+        check(gift_key in ('oatmeal','milk','soymilk','sunglasses','custom'), '지급할 상품을 선택해 주세요.')
+        if gift_key in ('milk','soymilk'):
+            product_id = MILK_PRODUCT_ID if gift_key == 'milk' else SOYMILK_PRODUCT_ID
+        elif gift_key == 'oatmeal':
+            supply_key = 'oatmeal'
+            item_name = '오트밀 미니바이트'
+        elif gift_key == 'sunglasses':
+            check(buyer['id'] is not None, '프로필 선글라스는 등록된 계정에만 지급할 수 있습니다.')
+            check(quantity == 1, '프로필 선글라스는 한 번에 1개만 지급할 수 있습니다.')
+            check(not has_sunglasses(buyer), '이미 멋진 선글라스를 보유한 계정입니다.',409)
+            item_name = '멋진 선글라스'
+        else:
+            item_name = string(body.get('gift_name'),'상품 이름',maximum=80)
+    if product_id is not None:
+        product = tx.one('SELECT name FROM products WHERE id=?',(product_id,))
+        check(product is not None, '지급할 품목을 찾을 수 없습니다.',404)
+        item_name = product['name']
+    grant_id = tx.insert('INSERT INTO manual_event_grants(user_id,customer_name,kind,product_id,supply_key,gift_key,item_name,quantity,points,reason,staff_id,staff_name,created_at) '
+                         'VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                         (buyer['id'],buyer['name'],kind,product_id,supply_key,gift_key,item_name,quantity,points,reason,staff['id'],staff['name'],now()))
+    log_reason = f"임의 지급 #{grant_id} · {buyer['name']} · {reason}"
+    if product_id is not None:
+        change_inventory(tx,product_id,'stock',-quantity,log_reason,staff['name'])
+    elif supply_key:
+        change_supply(tx,supply_key,-quantity,log_reason,staff['name'])
+    elif kind == 'score':
+        tx.execute('UPDATE users SET score=score+? WHERE id=?',(points,buyer['id']))
+    return {'grant':tx.one('SELECT * FROM manual_event_grants WHERE id=?',(grant_id,)),
+            'user':public_user(user_by_id(tx,buyer['id'])) if buyer['id'] is not None else None}
+
+
 def approve_order(tx, order):
     if order['status'] == 'approved':
         return order
     check(order['status'] == 'pending', '이미 처리된 주문입니다. 현재 상태를 확인해 주세요.', 409)
     tx.execute("UPDATE orders SET status = 'approved', approved_at = ? WHERE id = ?", (now(),order['id']))
-    grant_dice(tx, order['user_id'], *order_dice(order))
+    if order['user_id'] is not None:
+        grant_dice(tx, order['user_id'], *order_dice(order))
     if order['reservation_id']:
         tx.execute("UPDATE reservations SET status = 'approved' WHERE id = ?", (order['reservation_id'],))
     return order_data(tx, order['id'])
@@ -412,7 +472,7 @@ def insert_order(tx, buyer, items, order_type, actor, approved=False, reservatio
     for item in items:
         tx.insert("INSERT INTO order_items (order_id,product_id,name,quantity,price) VALUES (?,?,?,?,?)",
                   (order_id, item["product_id"], item["name"], item["quantity"], item["price"]))
-    if approved:
+    if approved and buyer['id'] is not None:
         grant_dice(tx, buyer['id'], *order_dice({'items': items, 'type': order_type,
                    'total': sum(i['price'] * i['quantity'] for i in items)}))
     return order_data(tx, order_id)
@@ -560,6 +620,30 @@ class Application:
         if method == "GET" and path == "/api/products":
             with self.db.transaction() as tx:
                 return {"products": products(tx)}
+        if method == 'POST' and path == '/api/guest/orders':
+            name = person_name(body.get('name'))
+            receipt = body.get('request_id')
+            check(isinstance(receipt,str) and re.fullmatch(r'(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})',receipt),
+                  '주문 요청 번호가 올바르지 않습니다. 다시 시도해 주세요.')
+            digest = hashlib.sha256(receipt.encode()).hexdigest()
+            fingerprint = hashlib.sha256(json.dumps(body,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+            with self.db.transaction(write=True) as tx:
+                cached = tx.one('SELECT * FROM guest_order_access WHERE token_hash=?', (digest,))
+                if cached:
+                    check(hmac.compare_digest(cached['fingerprint'],fingerprint), '같은 요청 번호가 다른 내용에 사용되었습니다. 다시 시도해 주세요.',409)
+                    return {'order':order_data(tx,cached['order_id'])}
+                order = insert_order(tx,{'id':None,'name':name},normalize_items(tx,body.get('items')),'walkin',name)
+                tx.execute('INSERT INTO guest_order_access(token_hash,order_id,fingerprint,created_at) VALUES(?,?,?,?)',
+                           (digest,order['id'],fingerprint,now()))
+                return {'order':order}
+        guest_match = re.fullmatch(r'/api/guest/orders/([0-9]+)',path)
+        if method == 'GET' and guest_match:
+            receipt = authorization[7:].strip() if authorization and authorization.startswith('Bearer ') else ''
+            with self.db.transaction() as tx:
+                access = tx.one('SELECT order_id FROM guest_order_access WHERE order_id=? AND token_hash=?',
+                                (int(guest_match.group(1)),hashlib.sha256(receipt.encode()).hexdigest()))
+                check(access is not None, '이 기기의 비회원 주문을 찾을 수 없습니다.',404)
+                return {'order':order_data(tx,access['order_id'])}
         if method == "POST" and path in ("/api/auth/register", "/api/auth/login"):
             phone, pin = phone_number(body.get('phone')), pin_value(body.get('pin'))
             with self.db.transaction(write=True) as tx:
@@ -592,7 +676,7 @@ class Application:
             with self.db.transaction(write=True) as tx:
                 current = user_by_id(tx, user["id"])
                 check(avatar["hairpin"] in current["unlocked_hairpins"], "이 빵의 구매가 승인되면 머리핀을 고를 수 있어요.", 403)
-                check(avatar['glasses'] != 'sunglasses' or 15 in current['claimed_milestones'],
+                check(avatar['glasses'] != 'sunglasses' or has_sunglasses(current),
                       '15점 선글라스 보상을 받은 뒤 착용할 수 있어요.', 403)
                 appearance = json.dumps(avatar, separators=(",", ":"))
                 tx.execute("INSERT INTO user_profiles(user_id,appearance,updated_at) VALUES(?,?,?) "
@@ -744,6 +828,7 @@ class Application:
                 return {"orders": all_orders(tx, include_inventory=True), "products": products(tx), "stats": stats,
                         "event_supplies": tx.all('SELECT * FROM event_supplies ORDER BY key'),
                         'reward_requests': reward_requests(tx),
+                        'manual_grants': tx.all('SELECT * FROM manual_event_grants ORDER BY id DESC LIMIT 300'),
                         "reservations": all_reservations(tx),
                         "users": [{**public_user(row),'phone':row['phone']} for row in profile_rows(tx, tx.all("SELECT u.*,p.appearance FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.role = 'buyer' ORDER BY u.name,u.id"))],
                         "inventory_logs": tx.all("SELECT * FROM inventory_logs ORDER BY id DESC LIMIT 300"),
@@ -761,6 +846,9 @@ class Application:
                     change_supply(tx,'oatmeal',delta,reason,user['name'])
                     return {'supply': tx.one("SELECT * FROM event_supplies WHERE key='oatmeal'")}
                 return idempotent(tx, user, 'event-supply', body, adjust_supply)
+        if method == 'POST' and path == '/api/staff/manual-event-grants':
+            with self.db.transaction(write=True) as tx:
+                return idempotent(tx,user,'manual-event-grant',body,lambda:manual_event_grant(tx,body,user))
         match = re.fullmatch(r'/api/staff/reward-requests/([0-9]+)/(approve|cancel)', path)
         if method == 'POST' and match:
             with self.db.transaction(write=True) as tx:
@@ -820,7 +908,9 @@ class Application:
                         order = order_data(tx,reservation['order_id'])
                         check(order['type'] == 'preorder' and order['reservation_id'] == reservation['id'],
                               '예약에 연결된 주문을 확인할 수 없습니다.', 409)
-                        buyer = user_by_id(tx,order['user_id'],buyer=True)
+                        buyer = user_by_id(tx,order['user_id'],buyer=True) if order['user_id'] is not None else {'id':None,'name':order['customer_name']}
+                        check(body.get('guest') is not True or buyer['id'] is None,
+                              '이미 계정에 연결된 수령 요청입니다. 기존 계정으로 처리해 주세요.',409)
                         if body.get('user_id') is not None:
                             check(integer(body.get('user_id'),'구매자 번호',maximum=1_000_000) == buyer['id'],
                                   '이미 접수된 예약의 구매자 계정과 다릅니다.', 409)
@@ -828,7 +918,9 @@ class Application:
                         order = approve_order(tx,order)
                     else:
                         check(reservation['status'] == 'reserved', '예약 상태를 다시 확인해 주세요.', 409)
-                        buyer = manual_buyer(tx,body,reservation_name=reservation['name'])
+                        buyer = {'id':None,'name':reservation['name']} if body.get('guest') is True else manual_buyer(tx,body,reservation_name=reservation['name'])
+                        check(body.get('guest') is not True or not any(body.get(key) is not None for key in ('user_id','pin')),
+                              '비회원 수령에는 계정을 선택하지 마세요.')
                         items = reservation_data(tx,reservation)['items']
                         check(bool(items), '예약된 품목이 없습니다.', 409)
                         order = insert_order(tx,buyer,items,'preorder',user['name'],approved=True,
@@ -837,15 +929,17 @@ class Application:
                                    (buyer['id'],order['id'],reservation['id']))
                         already_completed = False
                     current = tx.one('SELECT * FROM reservations WHERE id = ?', (reservation['id'],))
-                    return {'order':order,'user':public_user(user_by_id(tx,buyer['id'])),
+                    return {'order':order,'user':public_user(user_by_id(tx,buyer['id'])) if buyer['id'] is not None else None,
                             'reservation':staff_reservation_data(tx,current),'already_completed':already_completed}
                 return idempotent(tx,user,'manual-preorder',body,complete_preorder)
         if method == "POST" and path == "/api/staff/manual-sale":
             with self.db.transaction(write=True) as tx:
                 def manual_sale():
-                    buyer = manual_buyer(tx, body)
+                    guest = body.get('guest') is True
+                    check(not guest or not any(body.get(key) is not None for key in ('user_id','phone','pin')), '비회원 판매에는 이름만 입력해 주세요.')
+                    buyer = {'id':None,'name':person_name(body.get('name'))} if guest else manual_buyer(tx, body)
                     order = insert_order(tx, buyer, normalize_items(tx, body.get("items")), "manual", user["name"], approved=True)
-                    return {"order": order, "user": public_user(user_by_id(tx, buyer["id"]))}
+                    return {"order": order, "user": public_user(user_by_id(tx, buyer["id"])) if buyer['id'] is not None else None}
                 return idempotent(tx, user, "manual-sale", body, manual_sale)
         if method == "POST" and path == "/api/staff/instagram":
             with self.db.transaction(write=True) as tx:

@@ -131,3 +131,7 @@
 .profile-choice-locked>input:disabled+span{opacity:.65;cursor:not-allowed}
 @media(max-width:800px){.profile-button>span{max-width:96px}.profile-button>.profile-avatar{width:30px;height:30px}.leaders li,.rank-row{gap:10px;padding-left:5px;padding-right:5px}.profile-name{gap:7px}.profile-name>.profile-avatar{width:33px;height:33px}.leaders strong,.rank-row strong{font-size:13px}.profile-preview-picture{width:104px;height:104px}.profile-choice-picture{width:48px;height:48px}}
 @media(max-width:360px){.profile-button>span{max-width:72px}.profile-button>.profile-avatar{width:27px;height:27px}}
+
+.guest-entry{border-top:1px solid var(--line);margin-top:24px;padding-top:20px;display:grid;gap:10px}.guest-name-card{margin-bottom:20px;max-width:700px}.guest-name-card .field{margin-bottom:0}.guest-name-card .form-hint{margin-top:10px}.guest-order-name{margin:12px 0;color:var(--muted);font-size:14px}
+
+.manual-grant-history{margin-top:28px}.manual-grant-history h2{margin-bottom:14px}#admin-manual-grant>.form-hint{margin:0 0 18px}

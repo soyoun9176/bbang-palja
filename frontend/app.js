@@ -3,7 +3,9 @@ import {profileAvatar, profileEditor, profileHairpins, normalizeAvatar} from './
 
 const isAdmin = /^\/admin(?:\/|$)/.test(location.pathname);
 const tokenKey = `kambo.${isAdmin ? 'staff' : 'buyer'}.token`;
-const state = {isAdmin,token:localStorage.getItem(tokenKey),user:null,config:{},products:[],orders:[],rewards:[],rewardRequests:[],leaderboard:null,staffData:null,route:location.hash.slice(1)||(isAdmin?'queue':'shop'),cart:{},reservation:null,authMode:'login',rolling:false,leveling:false,lastRoll:null,selectedDice:null};
+function loadGuestReceipts(){try{const saved=JSON.parse(localStorage.getItem('kambo.guest.orders')||'[]');return Array.isArray(saved)?saved.filter(r=>Number.isSafeInteger(r.id)&&r.id>0&&typeof r.token==='string'):[];}catch{return [];}}
+const state = {isAdmin,token:localStorage.getItem(tokenKey),user:null,config:{},products:[],orders:[],rewards:[],rewardRequests:[],leaderboard:null,staffData:null,route:location.hash.slice(1)||(isAdmin?'queue':'shop'),cart:{},reservation:null,authMode:'login',rolling:false,leveling:false,lastRoll:null,selectedDice:null,guestName:sessionStorage.getItem('kambo.guest.name')||'',guestReceipts:isAdmin?[]:loadGuestReceipts()};
+function guestPurchase(){return !isAdmin&&!state.user&&['guest','guest-orders'].includes(state.route);}
 const paths={shop:'M3 10h18M5 10v10h14V10M3 10l2-6h14l2 6M9 20v-6h6v6M2 10c0 3 4 3 4 0 0 3 4 3 4 0 0 3 4 3 4 0 0 3 4 3 4 0 0 3 4 3 4 0',bag:'M5 7h14l1 14H4L5 7ZM8 8V6a4 4 0 0 1 8 0v2',dice:'M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3ZM8 8h.01M16 8h.01M12 12h.01M8 16h.01M16 16h.01',trophy:'M8 3h8v7a4 4 0 0 1-8 0V3ZM8 5H4v3a4 4 0 0 0 4 4m8-7h4v3a4 4 0 0 1-4 4M12 14v6M8 21h8',clock:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM12 7v5l3 2',arrow:'M4 12h15m-5-5 5 5-5 5',plus:'M12 5v14M5 12h14',minus:'M5 12h14',x:'m6 6 12 12M18 6 6 18',check:'m5 12 4 4L19 6',info:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM12 11v6M12 7h.01',bread:'M5 11C-1 4 9 0 12 5c5-6 15 1 7 6v9H5v-9ZM9 11v4m6-4v4',user:'M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM4 21v-2a8 8 0 0 1 16 0v2',users:'M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM2 21v-2a7 7 0 0 1 14 0v2M17 4a4 4 0 0 1 0 7m2 4a6 6 0 0 1 3 5',shield:'m12 2 8 3v6c0 6-8 11-8 11S4 17 4 11V5l8-3ZM8 11l3 3 5-6',box:'m3 7 9-4 9 4v11l-9 4-9-4V7Zm0 0 9 4 9-4M12 11v11M7 5l9 4',note:'M5 3h14v13l-5 5H5V3Zm9 18v-5h5M8 8h8M8 12h5',calendar:'M4 5h16v16H4V5ZM8 3v4m8-4v4M4 10h16M8 14h2m4 0h2m-8 3h2',spark:'m12 2 2.5 7.5L22 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5L12 2Z',logout:'M9 3H4v18h5m4-15 6 6-6 6m-5-6h11',chevron:'m9 5 7 7-7 7',heart:'M12 21 3 12C-2 6 6 0 12 6c6-6 14 0 9 6l-9 9Z',search:'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm5 12 6 6',milk:'M9 3h6v4l3 4v10H6V11l3-4V3Zm0 4h6M6 12h12',upload:'M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6',edit:'m15 4 5 5M4 20l5-1L21 7l-5-5L4 14v6Z'};
 function icon(name){return `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name]||paths.bread}"/></svg>`}
 function esc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -30,15 +32,15 @@ function shell(content) {
   const eventPage=!isAdmin&&['dice','ranking'].includes(state.route);
   return `<div class="shell ${isAdmin?'admin':eventPage?'event-space':'purchase-space'} ${state.user?'signed-in':''}">
     <header class="app-header"><a href="${isAdmin?'/admin/':'/'}" aria-label="캄보딜라이트 홈">${brand()}</a>
-    ${state.user?`<button class="profile-button" data-action="profile" aria-label="${esc(state.user.name)} 계정 관리">${profileAvatar(state.user)}<span>${esc(state.user.name)}${isAdmin?' · 담당자':''}</span> ${icon('chevron')}</button>`:isAdmin?'<span class="muted">담당자 로그인</span>':''}</header>
+    ${state.user?`<button class="profile-button" data-action="profile" aria-label="${esc(state.user.name)} 계정 관리">${profileAvatar(state.user)}<span>${esc(state.user.name)}${isAdmin?' · 담당자':''}</span> ${icon('chevron')}</button>`:isAdmin?'<span class="muted">담당자 로그인</span>':guestPurchase()?'<button class="text-button" data-action="guest-exit">로그인</button>':''}</header>
     ${state.user?`<nav class="primary-nav" aria-label="${isAdmin?'담당자 메뉴':'주요 메뉴'}">${(isAdmin?staffNav:buyerNav).map(x=>navButton(x)).join('')}</nav>`:''}
     <main class="main">${content}</main>
-    ${!isAdmin&&state.user&&state.route==='shop'&&cartCount()?`<button class="mobile-cart" data-action="open-cart">선택 수량 ${cartCount()} <strong>${money(cartTotal())}원 · 구매하기 ${icon('arrow')}</strong></button>`:''}
+    ${!isAdmin&&(state.user&&state.route==='shop'||guestPurchase()&&state.route==='guest')&&cartCount()?`<button class="mobile-cart" data-action="open-cart">선택 수량 ${cartCount()} <strong>${money(cartTotal())}원 · 구매하기 ${icon('arrow')}</strong></button>`:''}
   </div>`;
 }
 function pageHeading(title,desc='') { return `<div class="page-heading"><div><h1>${title}</h1>${desc?`<p>${desc}</p>`:''}</div></div>`; }
 function subnav(items) { return `<nav class="subnav" aria-label="${['dice','ranking'].includes(state.route)?'이벤트 메뉴':'구매 메뉴'}">${items.map(([route,label])=>`<button class="${state.route===route?'active':''}" data-action="navigate" data-route="${route}" ${state.route===route?'aria-current="page"':''}>${label}</button>`).join('')}</nav>`; }
-function purchaseHeading() { return `${pageHeading('빵 구매','예약한 빵 수령 또는 현장 구매를 선택해 주세요.')}${subnav([['shop','현장 구매'],['pickup','예약한 빵 수령'],['orders','주문 내역']])}`; }
+function purchaseHeading() { return guestPurchase()?`${pageHeading('빵 구매','계정 없이 이름만 입력하고 주문하세요.')}${subnav([['guest','현장 구매'],['guest-orders','주문 내역']])}`:`${pageHeading('빵 구매','예약한 빵 수령 또는 현장 구매를 선택해 주세요.')}${subnav([['shop','현장 구매'],['pickup','예약한 빵 수령'],['orders','주문 내역']])}`; }
 function eventHeading() { return pageHeading('이벤트 참여','주사위를 굴리고, 최고의 연금술사에 도전해요.'); }
 function prototypeNotice() { return window.KAMBO_CONFIG?.prototype||state.config.demo?'<p class="prototype-note">가안 테스트 · 샘플 데이터입니다.</p>':''; }
 function cartCount(){return Object.values(state.cart).reduce((s,v)=>s+v,0);}
@@ -54,14 +56,14 @@ function renderBasket() {
   <p class="form-hint">담당자에게 입금 내역을 보여주고 승인을 받아주세요.</p></section>`;
 }
 function renderShop() {
-  return `${purchaseHeading()}<div class="shop-layout"><section class="product-list" aria-label="현판 빵 목록">${state.products.map(p=>`<article class="product-row ${p.stock<=0?'sold-out':''}" ${p.stock<=0?'aria-disabled="true"':''}>
+  return `${purchaseHeading()}${guestPurchase()?`<section class="content-card guest-name-card"><div class="field"><label for="guest-name">구매자 이름</label><input id="guest-name" name="guest_name" autocomplete="name" maxlength="30" placeholder="담당자에게 알려줄 이름" value="${esc(state.guestName)}" required></div><p class="form-hint">비회원 구매에는 이벤트 주사위가 지급되지 않아요.</p></section>`:''}<div class="shop-layout"><section class="product-list" aria-label="현판 빵 목록">${state.products.map(p=>`<article class="product-row ${p.stock<=0?'sold-out':''}" ${p.stock<=0?'aria-disabled="true"':''}>
     ${productPhoto(p)}
     <div class="product-info"><h2>${esc(p.name)}</h2>${p.subtitle?`<span class="menu-concept">${esc(p.subtitle)}</span>`:''}<div class="product-price"><strong>${money(p.price)}원</strong>${p.dice_per_unit===0?'<span class="menu-concept">주사위 미지급</span>':''}${p.stock<=0?'<span class="sold-out-label">품절</span>':''}</div></div>
     <div class="product-count"><button class="quantity-button" data-action="cart-minus" data-id="${p.id}" ${p.stock<=0||!state.cart[p.id]?'disabled':''} aria-label="${esc(p.name)} 수량 줄이기">${icon('minus')}</button><span aria-label="${esc(p.name)} 선택 수량">${state.cart[p.id]||0}</span><button class="quantity-button" data-action="cart-plus" data-id="${p.id}" ${p.stock<=0||(state.cart[p.id]||0)>=p.stock?'disabled':''} aria-label="${esc(p.name)} 수량 늘리기">${icon('plus')}</button></div>
     </article>`).join('')}</section><aside class="desktop-basket">${renderBasket()}</aside></div>`;
 }
 function authRequired() { return renderBuyerLogin(); }
-function orderDice(order){return order.dice_quantity??order.quantity;}
+function orderDice(order){return order.user_id===null?0:order.dice_quantity??order.quantity;}
 function orderLines(order){return `<div class="order-lines">${order.items.map(i=>`<div class="order-line"><span>${esc(i.name)} <span>× ${i.quantity}</span></span><span>${money(i.price*i.quantity)}원</span></div>`).join('')}</div>`;}
 function orderStatus(status){return `<span class="status ${status}">${icon(status==='approved'?'check':status==='cancelled'?'x':'clock')}${{pending:'담당자 확인 중',approved:'수령 완료',cancelled:'취소 완료'}[status]||status}</span>`;}
 function renderPickup() {
@@ -69,8 +71,8 @@ function renderPickup() {
   ${state.reservation?`<div class="reservation-result"><h3>${esc(state.reservation.name)} 님의 예약</h3>${orderLines(state.reservation)}<div class="basket-total"><span>예약 금액</span><strong>${money(state.reservation.total)}원</strong></div><button class="primary-button full" data-action="claim-preorder" data-id="${state.reservation.id}">담당자에게 수령 요청</button><p class="form-hint">담당자가 예약한 빵을 전달하고 승인하면 완료됩니다.</p></div>`:''}</section>`;
 }
 function renderOrders() {
-  return `${purchaseHeading()}<div class="narrow">${state.orders.length?state.orders.map(o=>`<article class="order-card"><div class="order-top"><strong>${{walkin:'현장 구매',preorder:'예약한 빵 수령',manual:'수기 판매'}[o.type]} #${String(o.id).padStart(3,'0')}</strong>${orderStatus(o.status)}</div>${orderLines(o)}<div class="order-bottom"><span>${time(o.created_at)}</span><strong>${money(o.total)}원</strong></div>
-  ${o.status==='pending'?`<p class="callout">${o.type==='preorder'?'담당자에게 예약 내역을 보여주고 빵을 받아주세요.':'담당자에게 주문과 입금 내역을 보여주세요.'} 승인 대기 중입니다.</p>`:o.status==='approved'?`<div class="callout"><span>구매 완료 · ${orderDice(o)?`주사위 ${orderDice(o)}개 지급`:'음료는 주사위 미지급'}</span><button class="text-button" data-action="navigate" data-route="ranking">이벤트 참여하기 ${icon('arrow')}</button></div>`:''}</article>`).join(''):'<div class="empty-state"><h2>주문 내역이 없습니다.</h2><button class="primary-button" data-action="navigate" data-route="shop">현장 구매하기</button></div>'}</div>`;
+  return `${purchaseHeading()}<div class="narrow">${guestPurchase()?'<p class="form-hint">이 기기에서 접수한 비회원 주문입니다. 담당자에게 주문 번호와 이름을 보여주세요.</p>':''}${state.orders.length?state.orders.map(o=>`<article class="order-card"><div class="order-top"><strong>${{walkin:'현장 구매',preorder:'예약한 빵 수령',manual:'수기 판매'}[o.type]} #${String(o.id).padStart(3,'0')}</strong>${orderStatus(o.status)}</div>${guestPurchase()?`<p class="guest-order-name">${esc(o.customer_name)} 님</p>`:''}${orderLines(o)}<div class="order-bottom"><span>${time(o.created_at)}</span><strong>${money(o.total)}원</strong></div>
+  ${o.status==='pending'?`<p class="callout">${o.type==='preorder'?'담당자에게 예약 내역을 보여주고 빵을 받아주세요.':'담당자에게 주문과 입금 내역을 보여주세요.'} 승인 대기 중입니다.</p>`:o.status==='approved'?guestPurchase()?'<p class="callout">구매가 완료됐어요. 감사합니다!</p>':`<div class="callout"><span>구매 완료 · ${orderDice(o)?`주사위 ${orderDice(o)}개 지급`:'음료는 주사위 미지급'}</span><button class="text-button" data-action="navigate" data-route="ranking">이벤트 참여하기 ${icon('arrow')}</button></div>`:''}</article>`).join(''):`<div class="empty-state"><h2>주문 내역이 없습니다.</h2><button class="primary-button" data-action="navigate" data-route="${guestPurchase()?'guest':'shop'}">현장 구매하기</button></div>`}</div>`;
 }
 const dieDots={1:[5],2:[1,9],3:[1,5,9],4:[1,3,7,9],5:[1,3,5,7,9],6:[1,3,4,6,7,9]};
 function die(value=1,color='plain'){
@@ -183,7 +185,7 @@ function render() {
   if(!isAdmin&&state.route==='dice'){state.route='ranking';history.replaceState(null,'','#ranking');}
   let content;
   if(isAdmin)content=state.user?renderAdmin():renderStaffLogin();
-  else content=state.user?({shop:renderShop,pickup:renderPickup,orders:renderOrders,ranking:renderEvent}[state.route]||renderShop)():renderBuyerLogin();
+  else content=state.user?({shop:renderShop,pickup:renderPickup,orders:renderOrders,ranking:renderEvent}[state.route]||renderShop)():guestPurchase()?(state.route==='guest-orders'?renderOrders():renderShop()):renderBuyerLogin();
   const expanded=[...document.querySelectorAll('#app details[open]')].map(node=>node.id).filter(Boolean);
   document.querySelector('#app').innerHTML=shell(prototypeNotice()+content);
   const trackFill=document.querySelector('.milestone-track-bar > span');
@@ -191,10 +193,31 @@ function render() {
     trackFill.animate([{width:previousTrackWidth},{width:trackFill.style.width}],{duration:650,easing:'ease-out'});
   }
   expanded.forEach(id=>{const node=document.getElementById(id);if(node)node.open=true;});
-  document.title=`${isAdmin?'담당자':!state.user?'로그인':['dice','ranking'].includes(state.route)?'이벤트 참여':'빵 구매'} · 캄보딜라이트`;
+  document.title=`${isAdmin?'담당자':guestPurchase()?'비회원 빵 구매':!state.user?'로그인':['dice','ranking'].includes(state.route)?'이벤트 참여':'빵 구매'} · 캄보딜라이트`;
 }
 let refreshVersion=0;
-async function refresh(){const version=++refreshVersion,token=state.token;try{const get=path=>api(path,{token});const jobs=[get('/api/config'),get('/api/products')];if(token)jobs.push(get('/api/auth/me'));const results=await Promise.all(jobs);let extra;if(token){const user=results[2].user;if((isAdmin&&user.role!=='staff')||(!isAdmin&&user.role!=='buyer')){if(state.token===token){localStorage.removeItem(tokenKey);state.token=null;state.user=null;}return;}extra=isAdmin?await get('/api/staff/dashboard'):await Promise.all([get('/api/orders'),get('/api/rewards'),get('/api/leaderboard')]);}if(state.token!==token||version!==refreshVersion)return;state.config=results[0];state.products=results[1].products;if(token){state.user=results[2].user;if(isAdmin)state.staffData=extra;else{state.orders=extra[0].orders;state.rewards=extra[1].rewards;state.rewardRequests=extra[1].requests||[];state.leaderboard=extra[2];}syncProfileHairpins();}}catch(error){if(token!==state.token||version!==refreshVersion)return;throw error;}}
+async function refresh(){
+  const version=++refreshVersion,token=state.token,guest=guestPurchase();
+  try{
+    const get=path=>api(path,{token}),jobs=[get('/api/config'),get('/api/products')];
+    if(token)jobs.push(get('/api/auth/me'));
+    const results=await Promise.all(jobs);let extra,guestResults;
+    if(token){
+      const user=results[2].user;
+      if((isAdmin&&user.role!=='staff')||(!isAdmin&&user.role!=='buyer')){if(state.token===token){localStorage.removeItem(tokenKey);state.token=null;state.user=null;}return;}
+      extra=isAdmin?await get('/api/staff/dashboard'):await Promise.all([get('/api/orders'),get('/api/rewards'),get('/api/leaderboard')]);
+    }else if(guest){
+      guestResults=await Promise.all(state.guestReceipts.map(async receipt=>{
+        try{return {receipt,order:(await api(`/api/guest/orders/${receipt.id}`,{token:receipt.token})).order};}
+        catch(error){if(error.status===404)return {receipt,missing:true};throw error;}
+      }));
+    }
+    if(state.token!==token||version!==refreshVersion||guest!==guestPurchase())return;
+    state.config=results[0];state.products=results[1].products;
+    if(token){state.user=results[2].user;if(isAdmin)state.staffData=extra;else{state.orders=extra[0].orders;state.rewards=extra[1].rewards;state.rewardRequests=extra[1].requests||[];state.leaderboard=extra[2];}syncProfileHairpins();}
+    else if(guestResults){state.orders=guestResults.filter(r=>r.order).map(r=>r.order).sort((a,b)=>b.id-a.id);if(guestResults.some(r=>r.missing)){state.guestReceipts=guestResults.filter(r=>!r.missing).map(r=>r.receipt);localStorage.setItem('kambo.guest.orders',JSON.stringify(state.guestReceipts));}}
+  }catch(error){if(token!==state.token||version!==refreshVersion)return;throw error;}
+}
 
 initAdmin({state,api,icon,esc,money,time,toast,modal,closeModal,render,refresh,requestId,submitButton,profileAvatar,normalizePhone});
 
@@ -205,7 +228,8 @@ function normalizePhone(value){
 function buyerAuthForm(mode='login') {
   return `<div class="auth-switch"><button class="${mode==='login'?'active':''}" data-action="auth-mode" data-mode="login">로그인</button><button class="${mode==='register'?'active':''}" data-action="auth-mode" data-mode="register">계정 만들기</button></div><form id="buyer-auth" data-mode="${mode}">${mode==='register'?'<div class="field"><label for="auth-name">이름(닉네임)</label><input id="auth-name" name="name" autocomplete="nickname" maxlength="30" required></div>':''}<div class="field"><label for="auth-phone">전화번호</label><input id="auth-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="010-1234-5678" minlength="11" maxlength="13" pattern="010(?:[0-9]{8}|-[0-9]{4}-[0-9]{4})" title="01012345678 또는 010-1234-5678" data-phone-input required></div><div class="field"><label for="auth-pin">숫자 4자리 비밀번호</label><input id="auth-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="${mode==='register'?'new-password':'current-password'}" required></div>${mode==='register'?'<p class="form-hint">전화번호당 계정 하나를 만들 수 있어요. 화면에는 닉네임만 보여요.</p>':''}<button type="submit" class="primary-button full">${mode==='register'?'계정 만들기':'로그인'}</button></form>`;
 }
-function renderBuyerLogin() { return `<section class="login-card content-card"><h1>전화번호와 비밀번호를 입력해 주세요.</h1><p class="form-hint">처음이라면 계정을 만들어 주세요.</p>${buyerAuthForm(state.authMode)}</section>`; }
+function guestEntry(){return `<div class="guest-entry"><button class="secondary-button full" data-action="guest-start">계정 없이 빵만 구매</button>${state.guestReceipts.length?'<button class="text-button full" data-action="guest-orders">비회원 주문 내역</button>':''}</div>`;}
+function renderBuyerLogin() { return `<section class="login-card content-card"><h1>전화번호와 비밀번호를 입력해 주세요.</h1><p class="form-hint">처음이라면 계정을 만들어 주세요.</p>${buyerAuthForm(state.authMode)}${guestEntry()}</section>`; }
 let profileSaving=false;
 function openProfile(onboarding=false) {
   if(!state.user||profileSaving)return;
@@ -277,9 +301,24 @@ async function saveProfile(form,data) {
     }
   }
 }
-function openAuth(mode='login') { modal(`<h2>로그인</h2>${buyerAuthForm(mode)}`); }
+function openAuth(mode='login') { modal(`<h2>로그인</h2>${buyerAuthForm(mode)}${guestEntry()}`); }
 
-async function checkout(button){if(!cartCount())return;if(!state.user){openAuth();return;}const items=Object.entries(state.cart).map(([product_id,quantity])=>({product_id:Number(product_id),quantity}));const op=operation('checkout',items);button.disabled=true;try{const {order}=await api('/api/orders',{method:'POST',body:{items,request_id:op.id}});state.cart={};op.done();if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);await refreshAfterAction();state.route='orders';history.replaceState(null,'','#orders');render();modal(`<div class="order-success"><div class="success-icon">${icon('check')}</div><h2>빵 구매 요청을 보냈어요!</h2><p>담당자에게 주문을 보여 주고<br>안내받은 계좌로 입금해 주세요.</p><div class="success-box">주문 #${String(order.id).padStart(3,'0')} · 선택 수량 ${order.quantity}<strong>${money(order.total)}원</strong>${orderDice(order)?`확인 후 주사위 ${orderDice(order)}개가 지급돼요.`:'음료 구매에는 주사위가 지급되지 않아요.'}</div><button class="primary-button full" data-action="close-modal">주문 내역 확인하기 ${icon('arrow')}</button></div>`);}catch(error){if(error.status>=400&&error.status<500)op.done();button.disabled=false;toast(error.message,'error');await refresh().catch(()=>{});render();}}
+async function checkout(button){
+  if(!cartCount())return;
+  const guest=guestPurchase(),name=state.guestName.trim();
+  if(!state.user&&!guest){openAuth();return;}
+  if(guest&&!name){closeModal();toast('구매자 이름을 입력해 주세요.','error');document.querySelector('#guest-name')?.focus();return;}
+  const items=Object.entries(state.cart).map(([product_id,quantity])=>({product_id:Number(product_id),quantity}));
+  const body=guest?{name,items}:{items},op=operation(guest?'guest-checkout':'checkout',guest?body:items);
+  button.disabled=true;
+  try{
+    const {order}=await api(guest?'/api/guest/orders':'/api/orders',{method:'POST',body:{...body,request_id:op.id},...(guest?{token:null}:{})});
+    if(guest){state.guestReceipts=[...state.guestReceipts.filter(r=>r.id!==order.id),{id:order.id,token:op.id}];localStorage.setItem('kambo.guest.orders',JSON.stringify(state.guestReceipts));}
+    state.cart={};op.done();if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);
+    await refreshAfterAction();state.route=guest?'guest-orders':'orders';history.replaceState(null,'',`#${state.route}`);render();
+    modal(`<div class="order-success"><div class="success-icon">${icon('check')}</div><h2>빵 구매 요청을 보냈어요!</h2><p>담당자에게 주문을 보여 주고<br>안내받은 계좌로 입금해 주세요.</p><div class="success-box">주문 #${String(order.id).padStart(3,'0')}${guest?` · ${esc(order.customer_name)}`:''} · 선택 수량 ${order.quantity}<strong>${money(order.total)}원</strong>${guest?'':orderDice(order)?`확인 후 주사위 ${orderDice(order)}개가 지급돼요.`:'음료 구매에는 주사위가 지급되지 않아요.'}</div><button class="primary-button full" data-action="close-modal">주문 내역 확인하기 ${icon('arrow')}</button></div>`);
+  }catch(error){if(error.status>=400&&error.status<500)op.done();button.disabled=false;toast(error.message,'error');await refresh().catch(()=>{});render();}
+}
 function openLevelUp() {
   const {target,eligible}=eventProgress();
   if(eligible)openMilestone(target);
@@ -313,12 +352,14 @@ async function claimReward(button) {
     if(error.status>=400&&error.status<500)op.done();state.leveling=false;button.disabled=false;toast(error.message,'error');
   }
 }
-document.addEventListener('input',event=>{if(event.target.matches?.('[data-phone-input]'))event.target.setCustomValidity('');});
+document.addEventListener('input',event=>{if(event.target.matches?.('[data-phone-input]'))event.target.setCustomValidity('');if(event.target.id==='guest-name'){state.guestName=event.target.value;sessionStorage.setItem('kambo.guest.name',state.guestName);}});
 document.addEventListener('focusout',event=>{const input=event.target;if(!input.matches?.('[data-phone-input]')||!input.value)return;try{input.value=normalizePhone(input.value);input.setCustomValidity('');}catch(error){input.setCustomValidity(error.message);}});
 document.addEventListener('error',event=>{if(event.target.matches?.('.product-photo img'))event.target.remove();},true);
 document.addEventListener('change',event=>{const form=event.target.closest?.('#profile-editor');if(form)updateProfilePreview(form);});
 document.addEventListener('click',async event=>{const el=event.target.closest('[data-action]');if(!el)return;const action=el.dataset.action;try{
 if(action==='navigate'){state.route=el.dataset.route;location.hash=state.route;render();window.scrollTo({top:0,behavior:'instant'});}
+else if(action==='guest-start'||action==='guest-orders'){closeModal();state.route=action==='guest-start'?'guest':'guest-orders';location.hash=state.route;await refreshAfterAction();render();window.scrollTo({top:0,behavior:'instant'});}
+else if(action==='guest-exit'){state.route='shop';location.hash='shop';state.orders=[];render();}
 else if(action==='login')isAdmin?document.querySelector('#staff-login input')?.focus():openAuth();
 else if(action==='auth-mode'){state.authMode=el.dataset.mode;if(document.querySelector('.modal'))openAuth(el.dataset.mode);else render();}
 else if(action==='close-modal'){if(!profileSaving)closeModal();}
@@ -349,6 +390,6 @@ window.addEventListener('hashchange',()=>{state.route=location.hash.slice(1)||(i
 let polling=false,pendingRender=false;
 function snapshot(){return JSON.stringify([state.user,state.products,state.orders,state.staffData,state.leaderboard,state.rewards,state.rewardRequests]);}
 function safeToRender(){return !document.querySelector('.modal')&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)&&!state.rolling&&!state.leveling;}
-setInterval(async()=>{if(polling||state.rolling||state.leveling||document.hidden)return;polling=true;try{const before=snapshot();const oldOrders=isAdmin?state.staffData?.orders||[]:state.orders,oldRewards=state.staffData?.reward_requests||[];await refresh();const newOrders=isAdmin?state.staffData?.orders||[]:state.orders;if(isAdmin){const freshRewards=(state.staffData?.reward_requests||[]).filter(r=>r.status==='pending'&&!oldRewards.some(old=>old.id===r.id&&old.status==='pending'));if(freshRewards.length)toast(`${freshRewards[0].customer_name} 님의 이벤트 지급 요청이 도착했어요.`);const fresh=newOrders.filter(o=>o.status==='pending'&&!oldOrders.some(old=>old.id===o.id));if(fresh.length)toast(`${fresh[0].customer_name} 님의 새 주문이 도착했어요.`);}else{const newlyApproved=newOrders.find(o=>o.status==='approved'&&oldOrders.find(old=>old.id===o.id&&old.status==='pending'));if(newlyApproved)toast(`주문이 승인됐어요. ${orderDice(newlyApproved)?`주사위 ${orderDice(newlyApproved)}개가 도착했어요!`:'음료 구매에는 주사위가 지급되지 않아요.'}`);}if(before!==snapshot())pendingRender=true;if(pendingRender&&safeToRender()){render();pendingRender=false;}}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;render();toast('다시 로그인해 주세요.','error');}}finally{polling=false;}},4000);
+setInterval(async()=>{if(polling||state.rolling||state.leveling||document.hidden)return;polling=true;try{const before=snapshot();const oldOrders=isAdmin?state.staffData?.orders||[]:state.orders,oldRewards=state.staffData?.reward_requests||[];await refresh();const newOrders=isAdmin?state.staffData?.orders||[]:state.orders;if(isAdmin){const freshRewards=(state.staffData?.reward_requests||[]).filter(r=>r.status==='pending'&&!oldRewards.some(old=>old.id===r.id&&old.status==='pending'));if(freshRewards.length)toast(`${freshRewards[0].customer_name} 님의 이벤트 지급 요청이 도착했어요.`);const fresh=newOrders.filter(o=>o.status==='pending'&&!oldOrders.some(old=>old.id===o.id));if(fresh.length)toast(`${fresh[0].customer_name} 님의 새 주문이 도착했어요.`);}else{const newlyApproved=newOrders.find(o=>o.status==='approved'&&oldOrders.find(old=>old.id===o.id&&old.status==='pending'));if(newlyApproved)toast(newlyApproved.user_id===null?'주문이 승인됐어요. 빵을 받아주세요.':`주문이 승인됐어요. ${orderDice(newlyApproved)?`주사위 ${orderDice(newlyApproved)}개가 도착했어요!`:'음료 구매에는 주사위가 지급되지 않아요.'}`);}if(before!==snapshot())pendingRender=true;if(pendingRender&&safeToRender()){render();pendingRender=false;}}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;render();toast('다시 로그인해 주세요.','error');}}finally{polling=false;}},4000);
 async function boot(){try{await refresh();render();}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;await refresh();render();}else document.querySelector('#app').innerHTML=`<div class="connection-error">${brand()}<h1>빵집에 연결하고 있어요</h1><p>잠시 후 다시 연결해 주세요.<br>${esc(error.message)}</p><button class="primary-button" data-action="retry">다시 연결하기 ${icon('arrow')}</button></div>`;}}
 boot();

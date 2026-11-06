@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS preorder_verifications (
 );
 CREATE TABLE IF NOT EXISTS orders (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
- user_id INTEGER NOT NULL REFERENCES users(id),
+ user_id INTEGER REFERENCES users(id),
  customer_name TEXT NOT NULL,
  type TEXT NOT NULL CHECK (type IN ('walkin','preorder','manual')),
  status TEXT NOT NULL CHECK (status IN ('pending','approved','cancelled')),
@@ -77,6 +77,12 @@ CREATE TABLE IF NOT EXISTS orders (
  created_at TEXT NOT NULL,
  approved_at TEXT,
  cancelled_at TEXT
+);
+CREATE TABLE IF NOT EXISTS guest_order_access (
+ token_hash TEXT PRIMARY KEY,
+ order_id INTEGER NOT NULL UNIQUE REFERENCES orders(id),
+ fingerprint TEXT NOT NULL,
+ created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS order_items (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -148,6 +154,29 @@ CREATE TABLE IF NOT EXISTS event_supplies (
  key TEXT PRIMARY KEY,
  name TEXT NOT NULL,
  stock INTEGER NOT NULL CHECK (stock >= 0)
+);
+CREATE TABLE IF NOT EXISTS manual_event_grants (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ user_id INTEGER REFERENCES users(id),
+ customer_name TEXT NOT NULL,
+ kind TEXT NOT NULL CHECK (kind IN ('bread','gift','score')),
+ product_id INTEGER REFERENCES products(id),
+ supply_key TEXT REFERENCES event_supplies(key),
+ gift_key TEXT CHECK (gift_key IN ('oatmeal','milk','soymilk','sunglasses','custom')),
+ item_name TEXT NOT NULL,
+ quantity INTEGER NOT NULL CHECK (quantity > 0),
+ points INTEGER NOT NULL DEFAULT 0 CHECK (points >= 0),
+ reason TEXT NOT NULL,
+ staff_id INTEGER NOT NULL REFERENCES users(id),
+ staff_name TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ CHECK ((kind='score' AND user_id IS NOT NULL AND points>0 AND quantity=1)
+     OR (kind IN ('bread','gift') AND points=0)),
+ CHECK ((kind='bread' AND product_id IS NOT NULL AND supply_key IS NULL AND gift_key IS NULL)
+     OR (kind='gift' AND gift_key IS NOT NULL)
+     OR (kind='score' AND product_id IS NULL AND supply_key IS NULL AND gift_key IS NULL)),
+ CHECK (product_id IS NULL OR supply_key IS NULL),
+ CHECK (gift_key!='sunglasses' OR (user_id IS NOT NULL AND quantity=1))
 );
 CREATE TABLE IF NOT EXISTS reward_requests (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -277,9 +306,46 @@ class Database:
                 conn.execute("PRAGMA journal_mode = WAL")
             finally:
                 conn.close()
+        self.allow_guest_orders()
         schema = SCHEMA.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY") if self.postgres else SCHEMA
         with self.transaction(write=True) as tx:
             for statement in schema.split(";"):
                 if statement.strip():
                     tx.execute(statement)
             tx.execute("INSERT INTO settings(key,value) VALUES('schema_version','phone_accounts_v1') ON CONFLICT(key) DO NOTHING")
+
+    def allow_guest_orders(self):
+        """Make the existing order owner optional, preserving records and IDs."""
+        if self.postgres:
+            with self.transaction(write=True) as tx:
+                if tx.one("SELECT 1 FROM information_schema.tables WHERE table_schema=current_schema() AND table_name='orders'"):
+                    tx.execute('ALTER TABLE orders ALTER COLUMN user_id DROP NOT NULL')
+            return
+        conn = self.connect()
+        try:
+            # SQLite requires a table rebuild to remove NOT NULL. Disable FK
+            # enforcement only on this connection, before the atomic rebuild.
+            conn.execute('PRAGMA foreign_keys=OFF')
+            conn.execute('BEGIN IMMEDIATE')
+            columns = conn.execute('PRAGMA table_info(orders)').fetchall()
+            if any(row['name']=='user_id' and row['notnull'] for row in columns):
+                sequence = conn.execute("SELECT seq FROM sqlite_sequence WHERE name='orders'").fetchone()
+                objects = conn.execute("SELECT sql FROM sqlite_master WHERE tbl_name='orders' AND type IN ('index','trigger') AND sql IS NOT NULL").fetchall()
+                ddl = SCHEMA[SCHEMA.index('CREATE TABLE IF NOT EXISTS orders ('):].split(';',1)[0]
+                conn.execute(ddl.replace('IF NOT EXISTS orders', 'orders_guest_upgrade'))
+                fields = ','.join(row['name'] for row in columns)
+                conn.execute(f'INSERT INTO orders_guest_upgrade ({fields}) SELECT {fields} FROM orders')
+                conn.execute('DROP TABLE orders')
+                conn.execute('ALTER TABLE orders_guest_upgrade RENAME TO orders')
+                if sequence:
+                    conn.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='orders'", (sequence['seq'],))
+                for row in objects:
+                    conn.execute(row['sql'])
+                if conn.execute('PRAGMA foreign_key_check').fetchone():
+                    raise RuntimeError('비회원 주문 구조 업데이트 중 외래키 검사에 실패했습니다. 기존 DB를 유지합니다.')
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
