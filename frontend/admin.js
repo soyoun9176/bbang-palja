@@ -81,7 +81,7 @@ function updateStaffSearch(key,value) {
     const preview=document.querySelector('#admin-manual-preorder-complete [data-selected-profile]');
     if(preview)preview.innerHTML='';
     const count=document.querySelector('#pickup-account-count');
-    if(count)count.textContent=`검색된 계정 ${list('users').filter(u=>matchesSearch(value,u.name)).length}명`;
+    if(count)count.textContent=`검색된 계정 ${list('users').filter(u=>matchesSearch(value,u.name,u.phone)).length}명`;
     return;
   }
   const views={inventory:['#inventory-preorder-results',preorderStatusResults],pickup:['#manual-preorder-matches',manualPreorderMatches],queue:['#admin-queue-results',queueResults],events:['#admin-event-results',eventResults]};
@@ -155,8 +155,8 @@ function inventoryPage() {
 }
 
 function buyerOptions(selected='',placeholder='구매자 선택',query='') {
-  const users=list('users').filter(u=>matchesSearch(query,u.name));
-  return `<option value="">${escape(placeholder)}</option>${users.map(u=>`<option value="${u.id}" ${String(selected)===String(u.id)?'selected':''}>${escape(u.name)}</option>`).join('')}${!users.length?'<option value="" disabled>검색된 계정이 없습니다.</option>':''}`;
+  const users=list('users').filter(u=>matchesSearch(query,u.name,u.phone));
+  return `<option value="">${escape(placeholder)}</option>${users.map(u=>`<option value="${u.id}" ${String(selected)===String(u.id)?'selected':''}>${escape(u.name)}${u.phone?` · ${escape(u.phone)}`:''}</option>`).join('')}${!users.length?'<option value="" disabled>검색된 계정이 없습니다.</option>':''}`;
 }
 
 function manualPreorderMatches() {
@@ -187,10 +187,10 @@ function manualPickupAccount(reservation, order) {
     const name=order.customer_name || list('users').find(u=>u.id===order.user_id)?.name || reservation.name;
     return `<input type="hidden" name="user_id" value="${order.user_id}"><p class="callout">수령 계정: ${buyerIdentity(order.user_id,name)}<span>이미 접수한 계정에 주사위를 추가합니다.</span></p>`;
   }
-  const sameName=list('users').some(u=>u.name===reservation.name);
-  const existing=manualPickupMode!=='new'||sameName;
-  return `<div class="admin-subtabs" role="group" aria-label="예약 수령 계정"><button class="tab-chip ${existing?'active':''}" data-action="admin-pickup-mode" data-mode="existing" type="button" aria-pressed="${existing}" ${!list('users').length?'disabled':''}>기존 계정에 추가</button><button class="tab-chip ${!existing?'active':''}" data-action="admin-pickup-mode" data-mode="new" type="button" aria-pressed="${!existing}" ${sameName?'disabled':''}>새 계정 만들기</button></div>
-    ${existing?`${searchField('users','admin-pickup-user-search','기존 계정 검색','계정 이름 검색')}<div class="field"><label for="admin-pickup-user">수령할 구매자 계정</label><select id="admin-pickup-user" name="user_id" required>${buyerOptions(manualPickupUser,'수령 계정 선택',staffSearch.users)}</select><div class="selected-profile" data-selected-profile>${manualPickupUser?buyerIdentity(Number(manualPickupUser)):''}</div><p id="pickup-account-count" class="search-count" role="status">검색된 계정 ${list('users').filter(u=>matchesSearch(staffSearch.users,u.name)).length}명</p><p class="form-hint">검색 후 수령 계정을 선택해 주세요. 주사위는 선택한 계정에 추가됩니다.</p></div>`:`<p class="form-hint">${escape(reservation.name)} 님의 계정을 함께 만듭니다. 아래 비밀번호를 구매자에게 알려주세요.</p><div class="field"><label for="admin-pickup-pin">새 구매자 숫자 4자리 비밀번호</label><input id="admin-pickup-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" required autocomplete="new-password"></div>`}`;
+  const samePhone=list('users').some(u=>u.phone===reservation.phone);
+  const existing=manualPickupMode!=='new'||samePhone;
+  return `<div class="admin-subtabs" role="group" aria-label="예약 수령 계정"><button class="tab-chip ${existing?'active':''}" data-action="admin-pickup-mode" data-mode="existing" type="button" aria-pressed="${existing}" ${!list('users').length?'disabled':''}>기존 계정에 추가</button><button class="tab-chip ${!existing?'active':''}" data-action="admin-pickup-mode" data-mode="new" type="button" aria-pressed="${!existing}" ${samePhone?'disabled':''}>새 계정 만들기</button></div>
+    ${existing?`${searchField('users','admin-pickup-user-search','기존 계정 검색','닉네임 · 전화번호 검색')}<div class="field"><label for="admin-pickup-user">수령할 구매자 계정</label><select id="admin-pickup-user" name="user_id" required>${buyerOptions(manualPickupUser,'수령 계정 선택',staffSearch.users)}</select><div class="selected-profile" data-selected-profile>${manualPickupUser?buyerIdentity(Number(manualPickupUser)):''}</div><p id="pickup-account-count" class="search-count" role="status">검색된 계정 ${list('users').filter(u=>matchesSearch(staffSearch.users,u.name,u.phone)).length}명</p><p class="form-hint">검색 후 수령 계정을 선택해 주세요. 주사위는 선택한 계정에 추가됩니다.</p></div>`:`<p class="form-hint">${escape(reservation.name)} 님의 예약 전화번호로 계정을 함께 만듭니다. 아래 비밀번호를 구매자에게 알려주세요.</p><div class="field"><label for="admin-pickup-pin">새 구매자 숫자 4자리 비밀번호</label><input id="admin-pickup-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" required autocomplete="new-password"></div>`}`;
 }
 
 function manualPreorderPage() {
@@ -209,7 +209,7 @@ function salesPage() {
   const intro = `${heading('수기판매','구매자가 직접 입력하기 어려울 때 사용합니다.')}<div class="admin-subtabs" role="group" aria-label="수기 판매 유형">${[['walkin','현장 구매'],['preorder','예약한 빵 수령']].map(([key,label])=>`<button class="tab-chip ${manualSaleType===key?'active':''}" data-action="admin-sale-type" data-type="${key}" aria-pressed="${manualSaleType===key}">${label}</button>`).join('')}</div>`;
   if (manualSaleType==='preorder') return intro+manualPreorderPage();
   return `${intro}${help('수기 판매 방법','입금과 빵 전달을 먼저 확인합니다. 구매자와 수량을 입력한 뒤 판매 완료를 누르면 즉시 승인되고 빵 개수만큼 주사위가 지급됩니다. 음료는 제외합니다.')}<section class="content-card narrow"><div class="admin-subtabs"><button class="tab-chip ${customerMode==='existing'?'active':''}" data-action="admin-customer-mode" data-mode="existing">기존 구매자</button><button class="tab-chip ${customerMode==='new'?'active':''}" data-action="admin-customer-mode" data-mode="new">새 구매자</button></div><form id="admin-manual-sale">
-  ${customerMode==='existing'?`<div class="field"><label for="admin-sale-user">구매자</label><select id="admin-sale-user" name="user_id" required>${buyerOptions()}</select><div class="selected-profile" data-selected-profile></div></div>`:`<div class="form-grid"><div class="field"><label for="admin-sale-name">구매자 이름</label><input id="admin-sale-name" name="name" maxlength="30" required autocomplete="off"></div><div class="field"><label for="admin-sale-pin">숫자 4자리 비밀번호</label><input id="admin-sale-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" required autocomplete="new-password"></div></div>`}
+  ${customerMode==='existing'?`<div class="field"><label for="admin-sale-user">구매자</label><select id="admin-sale-user" name="user_id" required>${buyerOptions()}</select><div class="selected-profile" data-selected-profile></div></div>`:`<div class="form-grid"><div class="field"><label for="admin-sale-name">구매자 이름</label><input id="admin-sale-name" name="name" maxlength="30" required autocomplete="off"></div><div class="field"><label for="admin-sale-phone">구매자 전화번호</label><input id="admin-sale-phone" name="phone" type="tel" inputmode="tel" placeholder="010-1234-5678" maxlength="13" pattern="010(?:[0-9]{8}|-[0-9]{4}-[0-9]{4})" data-phone-input required></div><div class="field"><label for="admin-sale-pin">숫자 4자리 비밀번호</label><input id="admin-sale-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" required autocomplete="new-password"></div></div>`}
   ${productList().map(p=>`<div class="qty-input"><label for="admin-sale-qty-${p.id}">${escape(p.name)}<small>${won(p.price)} · 재고 ${p.stock}</small></label><input id="admin-sale-qty-${p.id}" type="number" name="quantity_${p.id}" min="0" max="${Math.min(p.stock,100)}" step="1" value="0" data-sale-product="${p.id}" data-price="${p.price}" aria-label="${escape(p.name)} 구매 수량" ${p.stock<1?'disabled':''}></div>`).join('')}
   <div class="form-total"><span>총 금액</span><strong><span data-sale-total>0</span>원</strong></div><button class="primary-button full" type="submit">판매 완료</button></form></section>`;
 }
@@ -260,7 +260,7 @@ function adjustmentModal(productId, bucket = 'stock') {
 }
 
 function importModal() {
-  helpers.modal(`<h2>예판 예약 등록</h2><p class="form-hint">예약 수량은 현판에서 예판 재고로 이동합니다.</p><form id="admin-preorder-import"><div class="form-grid"><div class="field"><label for="reservation-name">예약자 이름</label><input id="reservation-name" name="name" maxlength="30" required></div><div class="field"><label for="reservation-phone">전화번호</label><input id="reservation-phone" name="phone" type="tel" required></div></div>${productList().map(p=>`<div class="qty-input"><label for="reservation-qty-${p.id}">${escape(p.name)}<small>현판 가능 ${p.stock}개</small></label><input id="reservation-qty-${p.id}" type="number" min="0" max="${Math.min(p.stock,100)}" value="0" step="1" data-reservation-product="${p.id}" aria-label="${escape(p.name)} 예약 수량"></div>`).join('')}<button class="primary-button full" type="submit">예판 등록</button></form>`,{wide:true});
+  helpers.modal(`<h2>예판 예약 등록</h2><p class="form-hint">예약 수량은 현판에서 예판 재고로 이동합니다.</p><form id="admin-preorder-import"><div class="form-grid"><div class="field"><label for="reservation-name">예약자 이름</label><input id="reservation-name" name="name" maxlength="30" required></div><div class="field"><label for="reservation-phone">전화번호</label><input id="reservation-phone" name="phone" type="tel" maxlength="13" pattern="010(?:[0-9]{8}|-[0-9]{4}-[0-9]{4})" data-phone-input required></div></div>${productList().map(p=>`<div class="qty-input"><label for="reservation-qty-${p.id}">${escape(p.name)}<small>현판 가능 ${p.stock}개</small></label><input id="reservation-qty-${p.id}" type="number" min="0" max="${Math.min(p.stock,100)}" value="0" step="1" data-reservation-product="${p.id}" aria-label="${escape(p.name)} 예약 수량"></div>`).join('')}<button class="primary-button full" type="submit">예판 등록</button></form>`,{wide:true});
 }
 
 function memoModal() {
@@ -376,7 +376,7 @@ export async function handleAdminSubmit(form) {
       if (!items.length) throw new Error('구매한 품목을 한 개 이상 입력해 주세요.');
       const body = { items };
       if (values.has('user_id')) body.user_id = Number(values.get('user_id'));
-      else { body.name = values.get('name'); body.pin = values.get('pin'); }
+      else { body.name = values.get('name'); body.phone = helpers.normalizePhone(values.get('phone')); body.pin = values.get('pin'); }
       const {order} = await createAction('manual-sale', '/api/staff/manual-sale', body);
       message = order.dice_quantity ? `수기 판매를 등록하고 주사위 ${order.dice_quantity}개를 지급했어요.` : '수기 판매를 등록했어요. 우유·두유는 주사위를 지급하지 않아요.';
     } else if (form.id === 'admin-manual-preorder-complete') {

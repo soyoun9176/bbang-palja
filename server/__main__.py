@@ -21,7 +21,7 @@ def main():
         parser.exit(1, f"서버 시작 실패 ({args.host}:{args.port}): {exc}\n")
     print(f"Kambodelight: http://{args.host}:{args.port} · staff /admin · database {'PostgreSQL' if app.db.postgres else app.db.path}", flush=True)
     if app.demo:
-        print("로컬 데모 · 구매자 김소연 / 1234 · 예판 전화번호 01012345678", flush=True)
+        print("로컬 데모 · 구매자 010-1234-5678 / 1234 · 닉네임 김소연", flush=True)
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:

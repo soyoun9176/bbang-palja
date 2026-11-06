@@ -8,6 +8,8 @@ import unittest
 import uuid
 from unittest.mock import patch
 
+from account_support import account_payload, phone_for
+
 from server.app import APIError, Application
 from server.catalog import MILK_PRODUCT_ID
 
@@ -26,7 +28,7 @@ class MilkTests(unittest.TestCase):
         self.staff=self.request('POST','/api/staff/login',{'name':'우유담당','password':'milk-test-password'})['token']
 
     def request(self,method,path,body=None,token=None):
-        return self.app.handle(method,path,{},body or {},'Bearer '+token if token else None)
+        return self.app.handle(method,path,{},account_payload(path,body) or {},'Bearer '+token if token else None)
 
     def buyer(self):
         return self.request('POST','/api/auth/register',{'name':'우유'+uuid.uuid4().hex[:8],'pin':'1234'})
@@ -93,11 +95,11 @@ class MilkTests(unittest.TestCase):
         self.stock(3);self.stock(2,101)
         buyer=self.buyer()
         self.request('POST','/api/staff/preorders/import',{'reservations':[{
-            'name':buyer['user']['name'],'phone':'01012345678',
+            'name':buyer['user']['name'],'phone':phone_for(buyer['user']['name']),
             'items':[{'product_id':MILK_PRODUCT_ID,'quantity':2},{'product_id':101,'quantity':1}]}]},self.staff)
         self.assertEqual((self.product()['stock'],self.product()['preorder_stock']),(1,2))
         from urllib.parse import parse_qs,urlencode
-        query=parse_qs(urlencode({'name':buyer['user']['name'],'phone':'01012345678'}))
+        query=parse_qs(urlencode({'name':buyer['user']['name'],'phone':phone_for(buyer['user']['name'])}))
         reservation=self.app.handle('GET','/api/preorders/lookup',query,{},'Bearer '+buyer['token'])['reservation']
         def claim():
             return self.request('POST',f"/api/preorders/{reservation['id']}/claim",

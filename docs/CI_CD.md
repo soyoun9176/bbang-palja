@@ -73,3 +73,7 @@ sudo python3 ops/install-autodeploy.py
 현재 자동 백업은 SQLite용입니다. PostgreSQL로 전환하면 제어기가 배포를 거부하므로 먼저 `pg_dump` 백업·복구 절차를 구현해야 합니다. 저장소를 비공개로 전환해도 현재 공개 API 확인이 실패하므로 읽기 인증을 별도로 설계해야 합니다.
 
 관련 공식 문서: [GitHub workflow runs API](https://docs.github.com/en/rest/actions/workflow-runs), [Pages 빌드 설정](https://developers.cloudflare.com/pages/configuration/build-configuration/).
+
+## 전화번호 계정 DB 재생성 (2026-11-07)
+
+이 변경은 구 DB 자동 이전을 하지 않습니다. 기존 스키마에서는 API 초기화가 실패하므로 운영은 배포 타이머 중지 → CI 확인·새 체크아웃 준비 → 해당 API 중지 → `sudo python3 ops/reset-db.py --yes --env-file /etc/bbang-palja/api.env --backup-dir /var/backups/bbang-palja` → 새 release 배포 → API/Pages SHA 확인 → 타이머 재개 순서로 전환합니다. 다른 서비스와 터널은 중지하지 않습니다. 백업은 보관하고, 이전 코드로 복구할 때는 해당 스키마 백업도 함께 검토합니다. 개발용 기존 clone은 README 절차를 따릅니다. 이후 일반 배포는 DB를 다시 초기화하지 않습니다.

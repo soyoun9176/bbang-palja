@@ -2,7 +2,7 @@
 
 코드 기준 갱신일: **2026-11-07 (KST)**. 기준 코드는 [server/db.py](../server/db.py)의 `SCHEMA`, 데이터 처리 코드는 [server/app.py](../server/app.py), 상품 규칙은 [server/catalog.py](../server/catalog.py)입니다.
 
-현재 로컬 코드의 애플리케이션 테이블은 **22개**, 컬럼은 **128개**, 실제 외래키는 **26개**, CHECK 제약은 **29개**, 명시적 조회 인덱스는 **4개**입니다. SQLite 내부 테이블·자동 인덱스는 제외합니다. 공개 서버에는 프로필·새 주사위/보상 개편을 아직 배포하지 않았습니다. 새 코드는 추가 테이블만 생성하며 기존 계정·세션·주문·예약·재고·과거 이력을 보존합니다.
+현재 로컬 코드의 애플리케이션 테이블은 **22개**, 컬럼은 **129개**, 실제 외래키는 **26개**, CHECK 제약은 **31개**, 명시적 인덱스는 **5개**입니다. SQLite 내부 테이블·자동 인덱스는 제외합니다. 전화번호 계정 스키마로 변경하면서 이전 DB는 백업 후 명시적으로 재생성합니다. 구 스키마로 실행하면 초기화를 거부하며 자동 삭제·이전하지 않습니다.
 
 ## 1. 실행 환경과 저장 위치
 
@@ -74,7 +74,8 @@ erDiagram
 | 컬럼 | 타입 | 제약·기본값 | 의미 |
 | --- | --- | --- | --- |
 | `id` | INTEGER | PK, 자동 증가 | 사용자 번호 |
-| `name` | TEXT | NN | 로그인 이름 |
+| `name` | TEXT | NN | 화면에 보이는 닉네임 (구매자는 중복 허용) |
+| `phone` | TEXT | UNIQUE, 구매자 필수·담당자 NULL | 010-NNNN-NNNN 계정 식별자 |
 | `role` | TEXT | NN, `buyer` / `staff` | 구매자 또는 담당자 |
 | `password_hash` | TEXT | NN | 구매자 PIN 해시. 담당자 행은 빈 문자열 |
 | `score` | INTEGER | NN, 기본 0, 0 이상 | 누적 주사위 점수 |
@@ -82,10 +83,10 @@ erDiagram
 | `rewards_claimed` | INTEGER | NN, 기본 0, 0 이상 | 성공적으로 받은 점수 보상 횟수 (이전 빵 보상 포함) |
 | `created_at` | TEXT | NN | 계정 생성 시각 |
 
-- `UNIQUE(name, role)`: 같은 역할 안에서는 이름이 중복될 수 없습니다. 구매자와 담당자가 같은 이름인 것은 가능합니다.
+- 구매자 식별자는 UNIQUE phone입니다. 닉네임은 중복 가능하며 담당자 이름만 부분 UNIQUE 인덱스 idx_staff_name으로 제한합니다. CHECK로 구매자 전화번호 필수·담당자 NULL과 정해진 ASCII 숫자/대시 형식을 검사합니다.
 - 구매자 PIN은 숫자 네 자리이며 PBKDF2-HMAC-SHA256, 임의 salt, 160,000회 반복으로 저장합니다.
 - 담당자 공용 비밀번호는 이 테이블에 저장하지 않고 `STAFF_PASSWORD` 환경 변수로 확인합니다.
-- 전화번호는 사용자 테이블에 없습니다. 예약자의 전화번호는 `reservations.phone`에 있습니다.
+- 가입·로그인은 전화번호를 정규화하고 사용자 응답/순위/프로필에는 번호를 넣지 않습니다. 담당자 구매자 목록에만 번호를 제공합니다. 예약 번호도 같은 형식으로 저장하며 본인 조회는 가입 번호와 일치해야 합니다.
 - 캐릭터 레벨은 별도 컬럼 없이 `min(5, rewards_claimed)`로 계산합니다.
 
 ### 4.2 `sessions` — 로그인 세션
@@ -425,7 +426,7 @@ CHECK로 두 원본 중 정확히 하나만 연결하고 각 원본의 UNIQUE로
 
 ### DB가 직접 보장하는 것
 
-- 기본키, 선언된 외래키 26개, 이름·역할 / 예약 이름·전화번호 / 계정·이벤트 종류의 UNIQUE 제약.
+- 기본키, 선언된 외래키 26개, 구매자 전화번호·담당자 이름 / 예약 이름·전화번호 / 계정·이벤트 종류의 UNIQUE 제약.
 - 재고·점수·주사위·보상 횟수의 음수 금지, 항목 수량 1 이상, 이전 주사위 1~6·새 결과 0~22·보상 기준 등의 CHECK.
 - 조회 확인 및 요청 재시도 기록의 복합 기본키.
 - 외래키 삭제·수정 정책은 기본 `NO ACTION`이며 CASCADE 삭제는 선언하지 않습니다.
@@ -449,6 +450,7 @@ SQLite 쓰기는 `BEGIN IMMEDIATE`, 읽기는 `BEGIN`을 사용합니다. 연결
 | `idx_order_items_order` | `order_items(order_id)` | 주문 품목 조회 |
 | `idx_reservation_items_parent` | `reservation_items(reservation_id)` | 예약 품목 조회 |
 | `idx_sessions_expiry` | `sessions(expires_at)` | 만료 세션 정리 |
+| `idx_staff_name` | `users(name) WHERE role=staff` | 담당자 이름 UNIQUE |
 
 PK·UNIQUE용 인덱스는 SQLite가 별도로 생성합니다. 관리자 이름·전화번호·메뉴 검색은 현재 대시보드 데이터를 브라우저에서 필터링하므로 전용 DB 검색 인덱스나 FTS 테이블은 없습니다.
 
@@ -461,3 +463,5 @@ PK·UNIQUE용 인덱스는 SQLite가 별도로 생성합니다. 관리자 이름
 이전 별도 이벤트 `products.reward_stock`은 시작 시 `stock`으로 합친 뒤 0으로 닫고 재고 이력을 남깁니다. 이전 우유 `settings.milk_stock`도 112번 상품의 `stock`으로 합친 뒤 0으로 닫습니다. 같은 DB에서 이미 이전한 잔량은 재시작 때 다시 더하지 않습니다.
 
 자동 배포는 코드 교체 전에 SQLite 온라인 백업 API로 일관된 백업을 만들고 무결성을 확인합니다. 공개 서버 백업 위치는 `/var/backups/bbang-palja/`입니다. 자세한 운영 절차는 [Quick Tunnel 운영 매뉴얼](QUICK_TUNNEL_RUNBOOK.md), 배포 연계는 [CI/CD 문서](CI_CD.md), API 계약은 [server/API.md](../server/API.md)를 참고하세요.
+
+전화번호 계정 전환: API를 멈추고 `python3 ops/reset-db.py --yes`를 실행합니다. 기존 SQLite를 무결성 확인 후 백업하고 빈 새 DB를 검증한 다음 파일을 교체합니다. 계정·세션·주문·예약·점수·재고는 초기화되며 메뉴 13종은 수량 0입니다. `--env-file`·`--backup-dir`로 경로를 지정할 수 있습니다. PostgreSQL은 이 명령에서 거부합니다.

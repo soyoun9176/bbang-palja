@@ -65,7 +65,7 @@ function orderDice(order){return order.dice_quantity??order.quantity;}
 function orderLines(order){return `<div class="order-lines">${order.items.map(i=>`<div class="order-line"><span>${esc(i.name)} <span>× ${i.quantity}</span></span><span>${money(i.price*i.quantity)}원</span></div>`).join('')}</div>`;}
 function orderStatus(status){return `<span class="status ${status}">${icon(status==='approved'?'check':status==='cancelled'?'x':'clock')}${{pending:'담당자 확인 중',approved:'수령 완료',cancelled:'취소 완료'}[status]||status}</span>`;}
 function renderPickup() {
-  return `${purchaseHeading()}<section class="content-card narrow"><h2>예약 내역 조회</h2><form id="preorder-lookup"><div class="field"><label for="preorder-name">예약자 이름</label><input id="preorder-name" name="name" value="${esc(state.user.name)}" readonly required></div><div class="field"><label for="preorder-phone">예약 전화번호</label><input id="preorder-phone" type="tel" name="phone" inputmode="tel" autocomplete="tel" placeholder="01012345678" required maxlength="20"></div><button class="primary-button full" type="submit">예약 조회</button></form>
+  return `${purchaseHeading()}<section class="content-card narrow"><h2>예약 내역 조회</h2><form id="preorder-lookup"><div class="field"><label for="preorder-name">예약자 이름</label><input id="preorder-name" name="name" placeholder="예약할 때 사용한 이름" required maxlength="30"></div><p class="form-hint">가입한 전화번호의 예약만 조회합니다.</p><button class="primary-button full" type="submit">예약 조회</button></form>
   ${state.reservation?`<div class="reservation-result"><h3>${esc(state.reservation.name)} 님의 예약</h3>${orderLines(state.reservation)}<div class="basket-total"><span>예약 금액</span><strong>${money(state.reservation.total)}원</strong></div><button class="primary-button full" data-action="claim-preorder" data-id="${state.reservation.id}">담당자에게 수령 요청</button><p class="form-hint">담당자가 예약한 빵을 전달하고 승인하면 완료됩니다.</p></div>`:''}</section>`;
 }
 function renderOrders() {
@@ -196,12 +196,16 @@ function render() {
 let refreshVersion=0;
 async function refresh(){const version=++refreshVersion,token=state.token;try{const get=path=>api(path,{token});const jobs=[get('/api/config'),get('/api/products')];if(token)jobs.push(get('/api/auth/me'));const results=await Promise.all(jobs);let extra;if(token){const user=results[2].user;if((isAdmin&&user.role!=='staff')||(!isAdmin&&user.role!=='buyer')){if(state.token===token){localStorage.removeItem(tokenKey);state.token=null;state.user=null;}return;}extra=isAdmin?await get('/api/staff/dashboard'):await Promise.all([get('/api/orders'),get('/api/rewards'),get('/api/leaderboard')]);}if(state.token!==token||version!==refreshVersion)return;state.config=results[0];state.products=results[1].products;if(token){state.user=results[2].user;if(isAdmin)state.staffData=extra;else{state.orders=extra[0].orders;state.rewards=extra[1].rewards;state.rewardRequests=extra[1].requests||[];state.leaderboard=extra[2];}syncProfileHairpins();}}catch(error){if(token!==state.token||version!==refreshVersion)return;throw error;}}
 
-initAdmin({state,api,icon,esc,money,time,toast,modal,closeModal,render,refresh,requestId,submitButton,profileAvatar});
+initAdmin({state,api,icon,esc,money,time,toast,modal,closeModal,render,refresh,requestId,submitButton,profileAvatar,normalizePhone});
 
-function buyerAuthForm(mode='login') {
-  return `<div class="auth-switch"><button class="${mode==='login'?'active':''}" data-action="auth-mode" data-mode="login">로그인</button><button class="${mode==='register'?'active':''}" data-action="auth-mode" data-mode="register">계정 만들기</button></div><form id="buyer-auth" data-mode="${mode}"><div class="field"><label for="auth-name">이름</label><input id="auth-name" name="name" autocomplete="username" maxlength="30" required></div><div class="field"><label for="auth-pin">숫자 4자리 비밀번호</label><input id="auth-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="${mode==='register'?'new-password':'current-password'}" required></div>${mode==='register'?'<p class="form-hint">이미 사용 중인 이름으로는 가입할 수 없습니다.</p>':''}<button type="submit" class="primary-button full">${mode==='register'?'계정 만들기':'로그인'}</button></form>`;
+function normalizePhone(value){
+  if(typeof value!=='string'||/[^0-9-]/.test(value)||!/^(?:010[0-9]{8}|010-[0-9]{4}-[0-9]{4})$/.test(value))throw new Error('전화번호는 01012345678 또는 010-1234-5678 형식으로 입력해 주세요. 숫자와 정해진 위치의 대시만 사용할 수 있어요.');
+  const digits=value.replaceAll('-','');return `${digits.slice(0,3)}-${digits.slice(3,7)}-${digits.slice(7)}`;
 }
-function renderBuyerLogin() { return `<section class="login-card content-card"><h1>이름과 비밀번호를 입력해 주세요.</h1><p class="form-hint">처음이라면 계정을 만들어 주세요.</p>${buyerAuthForm(state.authMode)}</section>`; }
+function buyerAuthForm(mode='login') {
+  return `<div class="auth-switch"><button class="${mode==='login'?'active':''}" data-action="auth-mode" data-mode="login">로그인</button><button class="${mode==='register'?'active':''}" data-action="auth-mode" data-mode="register">계정 만들기</button></div><form id="buyer-auth" data-mode="${mode}">${mode==='register'?'<div class="field"><label for="auth-name">이름(닉네임)</label><input id="auth-name" name="name" autocomplete="nickname" maxlength="30" required></div>':''}<div class="field"><label for="auth-phone">전화번호</label><input id="auth-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="010-1234-5678" minlength="11" maxlength="13" pattern="010(?:[0-9]{8}|-[0-9]{4}-[0-9]{4})" title="01012345678 또는 010-1234-5678" data-phone-input required></div><div class="field"><label for="auth-pin">숫자 4자리 비밀번호</label><input id="auth-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="${mode==='register'?'new-password':'current-password'}" required></div>${mode==='register'?'<p class="form-hint">전화번호당 계정 하나를 만들 수 있어요. 화면에는 닉네임만 보여요.</p>':''}<button type="submit" class="primary-button full">${mode==='register'?'계정 만들기':'로그인'}</button></form>`;
+}
+function renderBuyerLogin() { return `<section class="login-card content-card"><h1>전화번호와 비밀번호를 입력해 주세요.</h1><p class="form-hint">처음이라면 계정을 만들어 주세요.</p>${buyerAuthForm(state.authMode)}</section>`; }
 let profileSaving=false;
 function openProfile(onboarding=false) {
   if(!state.user||profileSaving)return;
@@ -233,7 +237,7 @@ function syncProfileHairpins() {
   if(focused)updated.querySelector(`input[value="${focused}"]`)?.focus({preventScroll:true});
 }
 async function signInBuyer(form,data) {
-  const result=await api(`/api/auth/${form.dataset.mode}`,{method:'POST',body:{name:data.name.trim(),pin:data.pin}});
+  const result=await api(`/api/auth/${form.dataset.mode}`,{method:'POST',body:{...(form.dataset.mode==='register'?{name:data.name.trim()}:{}),phone:normalizePhone(data.phone),pin:data.pin}});
   state.token=result.token;state.user=result.user;state.lastRoll=null;state.selectedDice=null;localStorage.setItem(tokenKey,result.token);
   await refresh();closeModal();render();
   if(state.user.profile_customized===false)openProfile(true);
@@ -309,6 +313,8 @@ async function claimReward(button) {
     if(error.status>=400&&error.status<500)op.done();state.leveling=false;button.disabled=false;toast(error.message,'error');
   }
 }
+document.addEventListener('input',event=>{if(event.target.matches?.('[data-phone-input]'))event.target.setCustomValidity('');});
+document.addEventListener('focusout',event=>{const input=event.target;if(!input.matches?.('[data-phone-input]')||!input.value)return;try{input.value=normalizePhone(input.value);input.setCustomValidity('');}catch(error){input.setCustomValidity(error.message);}});
 document.addEventListener('error',event=>{if(event.target.matches?.('.product-photo img'))event.target.remove();},true);
 document.addEventListener('change',event=>{const form=event.target.closest?.('#profile-editor');if(form)updateProfilePreview(form);});
 document.addEventListener('click',async event=>{const el=event.target.closest('[data-action]');if(!el)return;const action=el.dataset.action;try{

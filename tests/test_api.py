@@ -18,6 +18,8 @@ import uuid
 from unittest.mock import patch
 
 
+from account_support import account_payload, phone_for
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -100,6 +102,7 @@ class APIIntegrationTests(unittest.TestCase):
 
     @classmethod
     def call(cls, method, path, body=None, token=None, headers=None):
+        body=account_payload(path,body)
         request_headers = dict(headers or {})
         data = None
         if body is not None:
@@ -242,7 +245,7 @@ class APIIntegrationTests(unittest.TestCase):
 
     def test_preorder_import_cancel_and_reclaim(self):
         token, user = self.buyer()
-        phone = "010" + str(int(uuid.uuid4().hex[:8], 16) % 100000000).zfill(8)
+        phone = phone_for(user["name"])
         self.set_stock("stock", 10)
         before_reserved = self.product()["preorder_stock"]
         self.ok(
@@ -284,7 +287,7 @@ class APIIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 403)
         wrong = urllib.parse.urlencode({"name": "김소연", "phone": "01000000000"})
         status, _ = self.call("GET", "/api/preorders/lookup?" + wrong, token=token)
-        self.assertEqual(status, 404)
+        self.assertEqual(status, 403)
         status, _ = self.call("POST", path, {"request_id": request_id()}, token)
         self.assertEqual(status, 403)
         correct = urllib.parse.urlencode({"name": "김소연", "phone": "01012345678"})
@@ -320,16 +323,16 @@ class APIIntegrationTests(unittest.TestCase):
         status, _ = self.call(
             "POST", "/api/staff/preorders/import",
             {"reservations": [
-                {"name": user["name"], "phone": "01011112222",
+                {"name": user["name"], "phone": phone_for(user["name"]),
                  "items": [{"product_id": self.product_id, "quantity": 2}]},
-                {"name": other["name"], "phone": "01033334444",
+                {"name": other["name"], "phone": phone_for(other["name"]),
                  "items": [{"product_id": self.product_id, "quantity": 2}]},
             ]}, self.staff_token,
         )
         self.assertEqual(status, 409)
         self.assertEqual(self.product()["stock"], 3)
         self.assertEqual(self.product()["preorder_stock"], reserved_before)
-        query = urllib.parse.urlencode({"name": user["name"], "phone": "01011112222"})
+        query = urllib.parse.urlencode({"name": user["name"], "phone": phone_for(user["name"])})
         status, _ = self.call("GET", "/api/preorders/lookup?" + query, token=token)
         self.assertEqual(status, 404)
         status, _ = self.call(
@@ -478,7 +481,7 @@ class CatalogMigrationTests(unittest.TestCase):
                 db.initialize()
                 with db.transaction(write=True) as tx:
                     tx.execute("INSERT INTO products VALUES (1,'이전 시연 빵','이전 설명',2500,9,2,4,'이전','salt-bread')")
-                    buyer = tx.insert("INSERT INTO users (name,role,password_hash,score,created_at) VALUES ('기존구매자','buyer',?,7,'2026-11-01')", (hash_pin('1234'),))
+                    buyer = tx.insert("INSERT INTO users (name,phone,role,password_hash,score,created_at) VALUES ('기존구매자','010-0000-0000','buyer',?,7,'2026-11-01')", (hash_pin('1234'),))
                     order = tx.insert("INSERT INTO orders (user_id,customer_name,type,status,total,quantity,created_at) VALUES (?,'기존구매자','walkin','pending',2500,1,'2026-11-01')", (buyer,))
                     tx.execute("INSERT INTO order_items (order_id,product_id,name,quantity,price) VALUES (?,1,'이전 시연 빵',1,2500)", (order,))
                     reservation = tx.insert("INSERT INTO reservations (name,phone,created_at) VALUES ('기존구매자','01000000000','2026-11-01')")
@@ -498,7 +501,7 @@ class CatalogMigrationTests(unittest.TestCase):
                     sync_catalog(tx, demo=True)
                     self.assertEqual(tx.one('SELECT stock FROM products WHERE id=101')['stock'], 5)
                     tx.execute('UPDATE products SET stock=0 WHERE id=101')
-                login = app.handle('POST', '/api/auth/login', {}, {'name':'기존구매자','pin':'1234'}, None)
+                login = app.handle('POST', '/api/auth/login', {}, {'phone':'01000000000','pin':'1234'}, None)
                 # Historical products remain outside the current menu, even after stock is merged.
                 with self.assertRaises(APIError) as error:
                     app.handle('POST', '/api/rewards/claim', {}, {'request_id':request_id()}, 'Bearer '+login['token'])
