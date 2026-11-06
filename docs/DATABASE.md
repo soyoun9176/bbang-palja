@@ -1,8 +1,8 @@
 # 현재 DB 구조
 
-확인일: **2026-11-03 (KST)**. 기준 코드는 [server/db.py](../server/db.py)의 `SCHEMA`, 데이터 처리 코드는 [server/app.py](../server/app.py), 상품 규칙은 [server/catalog.py](../server/catalog.py)입니다.
+코드 기준 갱신일: **2026-11-07 (KST)**. 기준 코드는 [server/db.py](../server/db.py)의 `SCHEMA`, 데이터 처리 코드는 [server/app.py](../server/app.py), 상품 규칙은 [server/catalog.py](../server/catalog.py)입니다.
 
-소스 DDL로 만든 메모리 DB, 현재 로컬 미리보기 DB, 공개 Oracle 서버 DB의 **컬럼·기본값·기본키·외래키·CHECK·인덱스 메타데이터가 일치**하는 것을 확인했습니다. 애플리케이션 테이블은 **16개**, 컬럼은 **93개**, 실제 외래키는 **16개**, CHECK 제약은 **21개**, 코드에서 명시적으로 생성하는 조회용 인덱스는 **4개**입니다. SQLite 내부 테이블 `sqlite_sequence`와 PK·UNIQUE용 자동 인덱스는 이 테이블·조회용 인덱스 개수에서 제외합니다.
+현재 로컬 코드의 애플리케이션 테이블은 **22개**, 컬럼은 **128개**, 실제 외래키는 **26개**, CHECK 제약은 **29개**, 명시적 조회 인덱스는 **4개**입니다. SQLite 내부 테이블·자동 인덱스는 제외합니다. 공개 서버에는 프로필·새 주사위/보상 개편을 아직 배포하지 않았습니다. 새 코드는 추가 테이블만 생성하며 기존 계정·세션·주문·예약·재고·과거 이력을 보존합니다.
 
 ## 1. 실행 환경과 저장 위치
 
@@ -21,6 +21,7 @@
 | 영역 | 테이블 | 저장하는 것 |
 | --- | --- | --- |
 | 계정 | `users` | 구매자·담당자 계정, 점수, 남은 주사위, 보상 수령 횟수 |
+| 프로필 | `user_profiles` | 계정별 얼굴·머리·안경·머리핀 선택, 저장 시각 |
 | 인증 | `sessions` | 로그인 토큰의 해시와 만료 시각 |
 | 상품·재고 | `products` | 빵·우유 정보와 현판·예판 재고 |
 | 재고 이력 | `inventory_logs` | 품목별 재고 증감, 사유, 처리자 이름 |
@@ -29,7 +30,12 @@
 | 예판 인증 | `preorder_verifications` | 구매자가 이름·전화번호를 확인한 예약의 조회 유효기간 |
 | 주문 | `orders` | 현장 구매·예판 수령·수기 판매 주문과 승인 상태 |
 | 주문 항목 | `order_items` | 주문 당시 상품명·가격·수량 |
-| 주사위 | `dice_rolls` | 주사위를 굴린 사용자와 결과 |
+| 이전 주사위 | `dice_rolls` | 개편 전 1~6 결과 보존 |
+| 주사위 지갑 | `dice_wallet` | 사용자·종류별 남은 수량 |
+| 종류별 굴림 | `typed_dice_rolls` | 사용한 주사위 종류·점수/우유 결과 |
+| 점수 보상 | `milestone_claims` | 5·10·15·20·30점의 1회 보상 |
+| 이벤트 물품 | `event_supplies` | 오트밀 미니바이트 재고 |
+| 이벤트 지급 | `reward_requests` | 당첨 물품 선택·재고 확보·담당자 승인/취소 |
 | 빵 보상 | `rewards` | 당첨 상품과 보상 기준 점수 |
 | 인스타 인증 | `events` | 사용자별 인증 및 우유·주사위 지급 내역 |
 | 운영 메모 | `memos` | 인수인계 내용과 작성자 이름 |
@@ -44,6 +50,7 @@
 ```mermaid
 erDiagram
     users ||--o{ orders : user_id
+    users ||--o| user_profiles : user_id
     users o|--o{ reservations : user_id
     reservations o|--o{ orders : reservation_id
     reservations ||--o{ reservation_items : reservation_id
@@ -72,7 +79,7 @@ erDiagram
 | `password_hash` | TEXT | NN | 구매자 PIN 해시. 담당자 행은 빈 문자열 |
 | `score` | INTEGER | NN, 기본 0, 0 이상 | 누적 주사위 점수 |
 | `dice_balance` | INTEGER | NN, 기본 0, 0 이상 | 아직 사용하지 않은 주사위 |
-| `rewards_claimed` | INTEGER | NN, 기본 0, 0 이상 | 성공적으로 받은 랜덤 빵 보상 횟수 |
+| `rewards_claimed` | INTEGER | NN, 기본 0, 0 이상 | 성공적으로 받은 점수 보상 횟수 (이전 빵 보상 포함) |
 | `created_at` | TEXT | NN | 계정 생성 시각 |
 
 - `UNIQUE(name, role)`: 같은 역할 안에서는 이름이 중복될 수 없습니다. 구매자와 담당자가 같은 이름인 것은 가능합니다.
@@ -105,7 +112,7 @@ erDiagram
 | `category` | TEXT | NN | 휘낭시에·타르트·음료 등 분류 |
 | `image` | TEXT | NN | 컨셉 SVG 이미지 식별자 |
 
-현재 판매 목록은 카탈로그의 101~112번입니다. 우유는 112번이며 2,000원입니다. 이전 메뉴 번호가 DB에 남아 있어도 현재 판매 목록에서 제외할 수 있고, 과거 주문·예약의 참조는 보존합니다.
+현재 판매 목록은 카탈로그의 101~113번입니다. 우유는 112번, 두유는 113번이며 각각 1,000원입니다. 이전 메뉴 번호가 DB에 남아 있어도 현재 판매 목록에서 제외할 수 있고, 과거 주문·예약의 참조는 보존합니다.
 
 도넛 108번은 5개 한 세트가 재고 1단위입니다. 판매 단위 `unit`, 실물 사진 경로 `photo`, 주사위 지급 단위 `dice_per_unit`, 추첨 대상 여부 `reward_eligible`은 API에서 카탈로그를 기준으로 붙이는 값이며 DB 컬럼이 아닙니다. 실물 사진 파일은 `frontend/assets/photos/`, 매핑은 `PRODUCT_PHOTOS`에서 관리합니다.
 
@@ -173,7 +180,7 @@ erDiagram
 
 기본 전환은 `pending → approved` 또는 `pending → cancelled`입니다. 수기 판매·수기 예판 수령은 승인된 상태로 즉시 생성할 수 있습니다. 승인 후 취소와 취소 후 승인은 현재 API에서 거부합니다. 이 전환 규칙과 시각 컬럼의 일관성은 앱이 관리하며 DB CHECK는 상태 값의 종류만 제한합니다.
 
-`dice_quantity`는 DB 컬럼이 아니라 `order_items`에서 우유 112번을 제외한 수량 합계입니다. 예판을 다른 이름의 기존 계정에 연결하면 `customer_name`과 `reservations.name`은 다를 수 있습니다.
+`dice_quantity`는 DB 컬럼이 아니라 현판·수기 현장은 음료 제외 수량 합, 예판은 빵 포함 시 1개입니다. 예판을 다른 이름의 기존 계정에 연결하면 `customer_name`과 `reservations.name`은 다를 수 있습니다.
 
 ### 4.8 `order_items` — 주문 품목 스냅샷
 
@@ -212,7 +219,7 @@ erDiagram
 | `value` | INTEGER | NN, 1~6 | 서버가 정한 눈금 |
 | `created_at` | TEXT | NN | 굴린 시각 |
 
-이력 추가, `users.dice_balance -= 1`, `users.score += value`를 같은 쓰기 트랜잭션에서 처리합니다.
+개편 전 기록을 그대로 보존합니다. 새 굴림은 0점 우유와 22점까지 지원하는 `typed_dice_rolls`에만 기록합니다.
 
 ### 4.11 `rewards` — 랜덤 빵 당첨 기록
 
@@ -225,11 +232,11 @@ erDiagram
 | `threshold` | INTEGER | NN, 1 이상 | 보상을 받은 기준 점수 |
 | `created_at` | TEXT | NN | 당첨 확정 시각 |
 
-다음 기준 점수는 `(users.rewards_claimed + 1) × 10`입니다. 가능한 빵의 현재 `stock²`에 비례해 추첨하고, 재고 1단위 차감·당첨 기록·수령 횟수 증가를 한 번에 처리합니다. 우유와 예판·접수 보관 재고는 추첨하지 않습니다.
+개편 전 당첨 기록입니다. 조회 시 `kind=legacy_bread`로 구분합니다. 새 보상은 `milestone_claims`를 사용하며 과거 수령 횟수로 새 기준을 계산하지 않습니다.
 
-DB에 `UNIQUE(user_id, threshold)`는 없고 쓰기 잠금·보상 횟수·요청 재시도 검사로 중복 지급을 막습니다. 물리적으로 빵을 전달했는지를 별도 표시하는 `received_at`이나 전달 상태 컬럼은 현재 없습니다.
+DB에 `UNIQUE(user_id, threshold)`는 없고 쓰기 잠금·보상 횟수·요청 재시도 검사로 중복 지급을 막습니다. 이전 기록은 전달 상태가 없고 새 물품 지급은 `reward_requests`에서 상태와 처리 시각을 관리합니다.
 
-### 4.12 `events` — 인스타 인증과 선택 지급
+### 4.12 `events` — 인스타 인증과 지급 이력
 
 | 컬럼 | 타입 | 제약·기본값 | 의미 |
 | --- | --- | --- | --- |
@@ -241,7 +248,7 @@ DB에 `UNIQUE(user_id, threshold)`는 없고 쓰기 잠금·보상 횟수·요�
 | `dice` | INTEGER | NN, 0 이상 | 추가 지급한 주사위 수 |
 | `created_at` | TEXT | NN | 인증 시각 |
 
-`UNIQUE(user_id, type)`으로 계정당 같은 이벤트를 한 번만 인증합니다. 현재 UI의 우유·주사위 체크는 각각 1 또는 0을 기록하며 둘 다 0인 인증도 가능합니다. 우유는 `products.id=112`의 `stock`에서 차감합니다. 인증 기록·선택 지급·재고 변경은 하나의 트랜잭션입니다. `type` 자체는 DB CHECK로 제한하지 않습니다.
+`UNIQUE(user_id, type)`으로 계정당 같은 이벤트를 한 번만 인증합니다. 새 인증은 `milk_quantity=0,dice=1`로 고정하며 `dice_wallet.instagram`에 1개를 추가합니다. 인증 시 우유 재고는 바꾸지 않습니다. 과거 선택 지급 기록은 유지합니다. `type` 자체는 DB CHECK로 제한하지 않습니다.
 
 ### 4.13 `memos` — 인수인계
 
@@ -277,7 +284,7 @@ DB에 `UNIQUE(user_id, threshold)`는 없고 쓰기 잠금·보상 횟수·요�
 | `demo_seeded` | 데모 계정·주문 등을 중복 생성하지 않기 위한 표시 |
 | `milk_stock` | 이전 별도 우유 재고 호환 값. 남은 양을 상품 112번에 이전한 뒤 `0`으로 닫음 |
 
-우유의 현재 수량은 `settings.milk_stock`이 아니라 `products.stock`을 읽습니다. 보상 간격 10점은 설정 행이 아니라 서버의 `REWARD_STEP` 상수입니다. PIN·담당자 공용 비밀번호·API 접속 주소를 이 테이블에서 관리하지 않습니다.
+우유의 현재 수량은 `settings.milk_stock`이 아니라 `products.stock`을 읽습니다. 보상 단계는 `server/game.py`의 `MILESTONES`이며 `settings.typed_dice_v1`은 기존 잔여 주사위를 지갑으로 한 번만 이관한 표시입니다. PIN·담당자 공용 비밀번호·API 접속 주소를 이 테이블에서 관리하지 않습니다.
 
 ### 4.16 `idempotency` — 요청 재시도 기록
 
@@ -294,42 +301,123 @@ DB에 `UNIQUE(user_id, threshold)`는 없고 쓰기 잠금·보상 횟수·요�
 
 현재 scope에는 `order`, `manual-sale`, `manual-preorder`, `preorder:<예약번호>`, `roll`, `reward`, `instagram`, `inventory`가 있습니다. 재고 수정의 요청 ID는 API에서 선택 사항입니다. 승인·취소는 이 테이블 대신 주문 상태 검사로 반복 실행을 막고, 예판 등록은 이름·전화번호 UNIQUE 제약으로 중복을 거부합니다.
 
+### 4.17 `user_profiles` — 캐릭터 프로필
+
+| 컬럼 | 타입 | 제약·기본값 | 의미 |
+| --- | --- | --- | --- |
+| `user_id` | INTEGER | NN, PK, FK → `users.id` | 프로필 소유 계정 |
+| `appearance` | TEXT | NN | `face_shape`, `skin`, `expression`, `glasses`, `hairpin`의 JSON 객체 |
+| `updated_at` | TEXT | NN | 마지막 저장 시각 |
+
+저장한 프로필이 없는 기존 계정에는 ID를 기준으로 만든 기본 외모를 응답하며 읽기만으로 행을 만들지 않습니다. 로그인한 계정 자신의 프로필만 수정할 수 있고 허용한 선택값만 저장합니다. 계정당 한 행을 UPSERT하므로 반복 저장해도 행을 추가하지 않습니다. 저장은 기존 쓰기 잠금 안에서 처리하며 점수·주사위·보상 횟수는 변경하지 않습니다. 실제 사진 파일이나 외부 이미지 URL은 저장하지 않습니다.
+
+머리핀 소유권은 별도 테이블에 저장하지 않고 승인된 `orders`와 `order_items`의 상품 종류로 계산합니다. 현판·예판·수기 판매를 포함하고 우유는 제외합니다. 저장 및 응답 시 소유권을 확인합니다. `unlocked_hairpins`는 본인 계정과 담당자 구매자 목록에만 제공하며 순위표에는 착용한 외모만 제공합니다. 선글라스 소유권은 `milestone_claims`의 15점 수령 기록으로 확인합니다. 미획득 착용 저장은 403, 응답에서는 미획득 선글라스를 제거합니다. 이전 6항목 JSON은 읽을 수 있고, 다시 저장하면 새 5항목 형식으로 저장합니다.
+
+### 4.18 `dice_wallet` — 종류별 주사위 지갑
+
+| 컬럼 | 타입 | 제약 | 의미 |
+| --- | --- | --- | --- |
+| `user_id` | INTEGER | NN, 복합 PK, FK → users | 소유자 |
+| `kind` | TEXT | NN, 복합 PK | walkin / preorder_plain·rainbow·silver·gold / instagram |
+| `quantity` | INTEGER | NN, 0 이상 | 남은 개수 |
+
+지급·사용 시 `users.dice_balance`와 함께 갱신합니다. 기존 잔여 주사위는 최초 실행에 `walkin`으로 한 번만 이관합니다. 면 구성은 DB나 프론트가 아니라 `server/game.py`에 있습니다.
+
+### 4.19 `typed_dice_rolls` — 종류별 결과
+
+| 컬럼 | 타입 | 제약 | 의미 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PK, 자동 증가 | 굴림 번호 |
+| `user_id` | INTEGER | NN, FK → users | 사용자 |
+| `kind` | TEXT | NN | 사용한 주사위 종류 |
+| `result` | TEXT | NN, score / milk | 점수 또는 우유 |
+| `value` | INTEGER | NN, 0~22 | 추가 점수. 우유 면은 0 |
+| `created_at` | TEXT | NN | 확정 시각 |
+
+주사위 차감·점수/우유 재고 변경·결과·재시도 기록은 하나의 쓰기 트랜잭션입니다. 우유 면은 주사위를 소비하고 `awaiting_choice` 지급 요청을 생성합니다. 실제 음료는 구매자가 선택할 때 재고를 확보합니다. 품절 선택은 거절하며 이미 확정된 결과를 다시 뽑지 않습니다.
+
+### 4.20 `milestone_claims` — 점수별 1회 보상
+
+| 컬럼 | 타입 | 제약 | 의미 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PK, 자동 증가 | 보상 번호 |
+| `user_id` | INTEGER | NN, FK → users | 사용자 |
+| `threshold` | INTEGER | NN, 5/10/15/20/30 | 달성 기준 |
+| `kind` | TEXT | NN | oatmeal / milk / sunglasses / bread |
+| `product_id` | INTEGER | NULL 허용, FK → products | 우유·빵 품목. 오트밀·선글라스는 NULL |
+| `product_name` | TEXT | NN | 보상명 |
+| `created_at` | TEXT | NN | 수령 확정 시각 |
+
+`UNIQUE(user_id,threshold)`로 중복 지급을 막습니다. 선택한 기준 점수의 달성 여부·미수령 여부를 확인하여 순서와 무관하게 한 번씩 지급하며 30점에서 끝납니다. API에서 기준 점수를 생략하면 미수령 최저 기준을 사용합니다. 배지·칭호는 화면 예고만 있고 저장·지급하지 않습니다. 빵만 현판 `stock²` 가중치로 추첨하며 우유 보상은 112번 우유·113번 두유를 선택하고, 오트밀은 `event_supplies`를 사용합니다. 물리적 지급은 `reward_requests`에 연결합니다. 지급 취소가 확정된 점수 단계·캐릭터 레벨을 되돌리지는 않습니다.
+
+### 4.21 `event_supplies` — 판매하지 않는 이벤트 재고
+
+| 컬럼 | 타입 | 제약 | 의미 |
+| --- | --- | --- | --- |
+| `key` | TEXT | PK | 현재 oatmeal |
+| `name` | TEXT | NN | 오트밀 미니바이트 |
+| `stock` | INTEGER | NN, 0 이상 | 남은 개수 |
+
+운영 기본 0, 데모 최초 40개입니다. 관리자 재고 수정·5점 보상에 따라 변경하고 `inventory_logs.bucket=event_supply`로 이력을 남깁니다. 판매 메뉴·랜덤 빵 추첨에는 넣지 않습니다.
+
+### 4.22 `reward_requests` — 이벤트 물품 지급
+
+| 컬럼 | 타입 | 제약 | 의미 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PK, 자동 증가 | 지급 요청 번호 |
+| `user_id` | INTEGER | NN, FK → users | 구매자 |
+| `milestone_id` | INTEGER | NULL 허용, UNIQUE, FK → milestone_claims | 점수 보상 원본 |
+| `roll_id` | INTEGER | NULL 허용, UNIQUE, FK → typed_dice_rolls | 주사위 보상 원본 |
+| `kind` | TEXT | NN, bread/milk/oatmeal | 물품 구분 |
+| `status` | TEXT | NN, awaiting_choice/pending/approved/cancelled | 선택 중/확보·대기/전달 완료/취소 |
+| `product_id` | INTEGER | NULL 허용, FK → products | 확보한 빵·우유·두유 |
+| `supply_key` | TEXT | NULL 허용, FK → event_supplies | 오트밀 재고 키 |
+| `product_name` | TEXT | NN | 물품명 스냅샷 |
+| `created_at` | TEXT | NN | 당첨·요청 생성 |
+| `requested_at` | TEXT | NULL 허용 | 재고 확보 시각 |
+| `processed_at` | TEXT | NULL 허용 | 승인/취소 시각 |
+| `processed_by` | TEXT | NULL 허용 | 처리 담당자/미수령 선택자 |
+
+CHECK로 두 원본 중 정확히 하나만 연결하고 각 원본의 UNIQUE로 중복 요청을 막습니다. 빵·오트밀은 생성 시 재고를 확보하여 pending, 음료는 awaiting_choice에서 구매자의 재고 있는 품목 선택 후 pending이 됩니다. 승인 시 재차 차감하지 않고, pending 취소 시 1개 반환합니다. 선택 전 취소는 재고 변화가 없습니다. 동일 처리는 반복 가능하며 승인↔취소 전환은 거부합니다. 취소 후 재추첨·주사위 환급·점수 단계 재사용은 없습니다. 디지털 보상은 이 테이블을 만들지 않습니다. 과거 보상도 소급하여 대기로 생성하지 않습니다.
+
 ## 5. DB에 저장하지 않고 계산하는 값
 
 | 화면/API 값 | 계산 기준 |
 | --- | --- |
 | 캐릭터 `level` | `min(5, users.rewards_claimed)` |
-| 다음 보상 점수 | `(rewards_claimed + 1) × 10` |
-| 주문 `dice_quantity` | `order_items`에서 우유 112번을 제외한 수량 합계 |
+| 다음 보상 점수 | 5·10·15·20·30 중 미수령 최저 기준 |
+| 주문 `dice_quantity` | 현판·수기 현장은 음료 제외 수량 합, 예판은 빵 포함 시 1개 |
 | 예약 합계 | `reservation_items.quantity × price`의 합 |
-| 접수 보관 수량 | 해당 품목의 `pending` 주문 항목 수량 합 |
+| 접수 보관 수량 | 해당 품목의 `pending` 주문 항목 수량 합 + `pending` 이벤트 요청 수량 |
 | 재고 표의 매장 예상 | `stock + preorder_stock + 접수 보관` |
 | 관리자 주문 항목 `remaining_stock` | 조회 시점의 `stock` (예판 주문은 `preorder_stock`). 주문 접수 시 이미 차감되어 추가 차감하지 않음 |
 | 순위 | 구매자만 `score DESC, id ASC`로 정렬. 동점이면 작은 사용자 번호 우선 |
 | 매출 | `approved` 주문의 `total` 합계 |
-| 판매 빵 수 | 승인된 주문 항목 중 우유를 제외한 수량 합 |
+| 판매 빵 수 | 승인된 주문 항목 중 우유·두유를 제외한 수량 합 |
 | 현재 우유 수량 | 112번 상품의 `stock` |
 | 관리자 예판 수령 현황 | `reservations`와 `reservation_items`·`products` 조회 |
 
-캐릭터·순위·일별 점수·결제 내역을 위한 별도 테이블은 없습니다. 양일 점수는 같은 `users.score`에 누적됩니다. 실제 결제사·이체 연동은 없고 담당자 승인 상태가 판매 인정 기준입니다.
+외모는 `user_profiles`에 저장하고, 레벨·순위·일별 점수·결제 내역을 위한 별도 테이블은 없습니다. 양일 점수는 같은 `users.score`에 누적됩니다. 실제 결제사·이체 연동은 없고 담당자 승인 상태가 판매 인정 기준입니다.
 
 ## 6. 주요 작업이 바꾸는 데이터
 
-`q`는 판매 단위 수, `b`는 그중 우유를 제외한 빵 수입니다.
+`q`는 판매 단위 수, `b`는 그중 음료를 제외한 빵 수입니다.
 
 | 작업 | 재고 | 주문·예약 | 계정·이력 |
 | --- | --- | --- | --- |
 | 예판 등록 | `stock -q`, `preorder_stock +q` | 예약·항목 생성, `reserved` | 재고 이동 이력 |
 | 현장 구매 요청 | `stock -q` | `walkin/pending` 주문·항목 생성 | 재고 확보 이력 |
 | 구매자 예판 수령 요청 | `preorder_stock -q` | `preorder/pending`, 예약을 `pending`으로 연결 | 24시간 조회 확인 검사, 재고 확보 이력 |
-| 대기 주문 승인 | 추가 재고 차감 없음 | 주문 `approved`, 예판이면 예약도 `approved` | `dice_balance +b` |
+| 대기 주문 승인 | 추가 재고 차감 없음 | 주문 `approved`, 예판이면 예약도 `approved` | 현판 `+b` / 예판 전용 1개 |
 | 대기 주문 취소 | 원래 차감한 재고 구분으로 `+q` 반환 | 주문 `cancelled`; 예판은 `reserved`로 복구하고 계정·현재 주문 연결 해제 | 재고 반환 이력 |
 | 수기 현장 판매 | `stock -q` | `manual/approved` 즉시 생성 | 선택 계정 또는 생성 계정에 주사위 `+b` |
-| 미접수 예판 수기 수령 | `preorder_stock -q` | `preorder/approved` 즉시 생성, 예약 연결·완료 | 선택 계정 또는 생성 계정에 주사위 `+b` |
-| 이미 접수된 예판 수기 수령 | 추가 재고 차감 없음 | 기존 주문·계정을 유지해 승인 | 주사위 `+b`, 완료 재시도는 추가 지급 없음 |
-| 주사위 굴리기 | — | — | 주사위 `-1`, 점수 `+1~6`, `dice_rolls` 추가 |
-| 랜덤 빵 보상 | 당첨 품목 `stock -1` | — | `rewards` 추가, `rewards_claimed +1` |
-| 인스타 인증 | 선택한 우유만 `stock` 차감 | — | `events` 추가, 선택한 추가 주사위 지급 |
+| 미접수 예판 수기 수령 | `preorder_stock -q` | `preorder/approved` 즉시 생성, 예약 연결·완료 | 선택 계정 또는 생성 계정에 예판 주사위 1개 |
+| 이미 접수된 예판 수기 수령 | 추가 재고 차감 없음 | 기존 주문·계정을 유지해 승인 | 예판 주사위 1개, 완료 재시도는 추가 지급 없음 |
+| 주사위 굴리기 | 음료는 선택 전 재고 변화 없음 | — | 종류별 주사위 `-1`, 숫자만큼 점수 증가, 우유 면은 음료 선택 요청 생성 |
+| 점수 보상 | 빵·오트밀 확보 `-1`, 음료는 선택 시 `-1` | — | `milestone_claims` 및 물품 `reward_requests` 추가, 디지털 즉시 지급 |
+| 이벤트 승인 | 추가 차감 없음 | — | `reward_requests.approved` |
+| 이벤트 취소 | 확보했던 수량만 `+1` | — | cancelled, 재추첨·점수 단계 환급 없음 |
+| 인스타 인증 | 변경 없음 | — | `events` 추가, `instagram` 주사위 1개 |
 
 현재 수량을 이미 차감한 대기 주문은 확보된 재고입니다. 이 수량과 예판 대기 재고는 랜덤 빵 추첨에 다시 사용하지 않습니다. 예판의 대기 수량을 수동으로 줄일 때도 아직 `reserved`인 예약에 필요한 양을 침범하지 않도록 앱이 검사합니다.
 
@@ -337,8 +425,8 @@ DB에 `UNIQUE(user_id, threshold)`는 없고 쓰기 잠금·보상 횟수·요�
 
 ### DB가 직접 보장하는 것
 
-- 기본키, 선언된 외래키 16개, 이름·역할 / 예약 이름·전화번호 / 계정·이벤트 종류의 UNIQUE 제약.
-- 재고·점수·주사위·보상 횟수의 음수 금지, 항목 수량 1 이상, 주사위 눈금 1~6 등의 CHECK.
+- 기본키, 선언된 외래키 26개, 이름·역할 / 예약 이름·전화번호 / 계정·이벤트 종류의 UNIQUE 제약.
+- 재고·점수·주사위·보상 횟수의 음수 금지, 항목 수량 1 이상, 이전 주사위 1~6·새 결과 0~22·보상 기준 등의 CHECK.
 - 조회 확인 및 요청 재시도 기록의 복합 기본키.
 - 외래키 삭제·수정 정책은 기본 `NO ACTION`이며 CASCADE 삭제는 선언하지 않습니다.
 

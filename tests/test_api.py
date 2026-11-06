@@ -270,7 +270,7 @@ class APIIntegrationTests(unittest.TestCase):
         self.transition(new["id"], "approve")
         self.transition(new["id"], "approve")
         self.assertEqual(self.product()["preorder_stock"], before_reserved)
-        self.assertEqual(self.me(token)["dice_balance"], 2)
+        self.assertEqual(self.me(token)["dice_balance"], 1)
         approved = self.ok("POST", path, {"request_id": request_id()}, token)["order"]
         self.assertEqual(approved["id"], new["id"])
 
@@ -301,7 +301,7 @@ class APIIntegrationTests(unittest.TestCase):
             self.ok("POST", "/api/staff/inventory",
                     {"bucket": "milk", "delta": 2, "reason": "자동 검증용"}, self.staff_token)
             milk_before += 2
-        body = {"user_id": user["id"], "milk_quantity": 1, "dice": 1, "request_id": request_id()}
+        body = {"user_id": user["id"], "request_id": request_id()}
         first = self.ok("POST", "/api/staff/instagram", body, self.staff_token)
         repeated = self.ok("POST", "/api/staff/instagram", body, self.staff_token)
         self.assertEqual(first, repeated)
@@ -309,7 +309,7 @@ class APIIntegrationTests(unittest.TestCase):
         status, _ = self.call("POST", "/api/staff/instagram", body, self.staff_token)
         self.assertEqual(status, 409)
         dashboard = self.ok("GET", "/api/staff/dashboard", token=self.staff_token)
-        self.assertEqual(dashboard["stats"]["milk_stock"], milk_before - 1)
+        self.assertEqual(dashboard["stats"]["milk_stock"], milk_before)
         self.assertEqual(self.me(token)["dice_balance"], 1)
 
     def test_preorder_import_atomic_and_inventory_bounds(self):
@@ -390,9 +390,14 @@ class APIIntegrationTests(unittest.TestCase):
         self.assertEqual(self.me(token)["dice_balance"], 30)
         status, _ = self.call("POST", "/api/rewards/claim", {"request_id": request_id()}, token)
         self.assertEqual(status, 409)
-        while self.me(token)["score"] < 10:
+        while self.me(token)["score"] < 20:
             self.ok("POST", "/api/dice/roll", {"request_id": request_id()}, token)
 
+        self.ok('POST','/api/staff/event-supplies',{'key':'oatmeal','delta':1,'reason':'점수 보상 검증','request_id':request_id()},self.staff_token)
+        self.ok('POST','/api/staff/inventory',{'product_id':112,'bucket':'stock','delta':1,'reason':'점수 보상 검증'},self.staff_token)
+        for threshold in [5,10,15]:
+            claimed=self.ok('POST','/api/rewards/claim',{'request_id':request_id()},token)
+            self.assertEqual(claimed['reward']['threshold'],threshold)
         # A single eligible product makes the weighted draw deterministic.
         products = self.ok("GET", "/api/products")["products"]
         for product in products:
@@ -407,12 +412,28 @@ class APIIntegrationTests(unittest.TestCase):
         repeated = self.ok("POST", "/api/rewards/claim", {"request_id": identity}, token)
         self.assertEqual(reward, repeated)
         self.assertEqual(reward["reward"]["product_id"], self.product_id)
-        self.assertEqual(reward["reward"]["threshold"], 10)
+        self.assertEqual(reward["reward"]["threshold"], 20)
         self.assertEqual(self.product()["stock"], 0)
-        self.assertEqual(self.me(token)["rewards_claimed"], 1)
-        self.assertEqual(len(self.ok("GET", "/api/rewards", token=token)["rewards"]), 1)
+        self.assertEqual(self.me(token)["rewards_claimed"], 4)
+        self.assertEqual(len(self.ok("GET", "/api/rewards", token=token)["rewards"]), 4)
         status, _ = self.call("POST", "/api/rewards/claim", {"request_id": request_id()}, token)
         self.assertEqual(status, 409)
+
+    def test_profile_saves_through_the_http_and_allowed_origin_path(self):
+        request=urllib.request.Request(self.base+'/api/profile',method='OPTIONS',headers={
+            'Origin':'http://test.example','Access-Control-Request-Method':'POST',
+            'Access-Control-Request-Headers':'Authorization,Content-Type'})
+        with urllib.request.urlopen(request,timeout=10) as response:
+            self.assertEqual(response.status,204)
+            self.assertIn('POST',response.headers['Access-Control-Allow-Methods'])
+            self.assertEqual(response.headers['Access-Control-Allow-Origin'],'http://test.example')
+        token,user=self.buyer()
+        avatar={'face_shape':'pound','skin':'warm','expression':'surprised','glasses':'round','hairpin':'none'}
+        status,saved=self.call('POST','/api/profile',{'avatar':avatar},token,headers={'Origin':'http://test.example'})
+        self.assertEqual(status,200,saved)
+        self.assertEqual(saved['user']['avatar'],avatar)
+        self.assertTrue(saved['user']['profile_customized'])
+        self.assertEqual(self.me(token)['avatar'],avatar)
 
     def test_menu_prices_and_donut_set_grants_one_die_per_set(self):
         menu = self.ok('GET', '/api/products')['products']
@@ -421,7 +442,7 @@ class APIIntegrationTests(unittest.TestCase):
             '카라멜 휘낭시에': 3000, '무화과 휘낭시에': 3400,
             '로투스 브라우니 치즈케이크': 3800, '레몬 다쿠아즈': 3500,
             '얼그레이 다쿠아즈': 3500, '글레이즈드 도넛 5개 세트': 2000,
-            '보늬밤 마들렌': 2800, '에그타르트': 2800, '치즈타르트': 2800, '우유': 2000,
+            '보늬밤 마들렌': 2800, '에그타르트': 2800, '치즈타르트': 2800, '우유': 1000, '두유': 1000,
         }
         self.assertEqual({p['name']: p['price'] for p in menu}, expected)
         donut = next(p for p in menu if p['name'] == '글레이즈드 도넛 5개 세트')
@@ -464,7 +485,7 @@ class CatalogMigrationTests(unittest.TestCase):
                     tx.execute('INSERT INTO reservation_items (reservation_id,product_id,quantity,price) VALUES (?,1,2,2500)', (reservation,))
                 app = Application()
                 menu = app.handle('GET', '/api/products', {}, {}, None)['products']
-                self.assertEqual(len(menu), 12)
+                self.assertEqual(len(menu), 13)
                 self.assertNotIn(1, [p['id'] for p in menu])
                 with db.transaction(write=True) as tx:
                     self.assertEqual(order_data(tx, order)['items'][0]['name'], '이전 시연 빵')

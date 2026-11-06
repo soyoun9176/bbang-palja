@@ -17,6 +17,11 @@ CREATE TABLE IF NOT EXISTS users (
  created_at TEXT NOT NULL,
  UNIQUE(name, role)
 );
+CREATE TABLE IF NOT EXISTS user_profiles (
+ user_id INTEGER NOT NULL PRIMARY KEY REFERENCES users(id),
+ appearance TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sessions (
  token_hash TEXT PRIMARY KEY,
  user_id INTEGER NOT NULL REFERENCES users(id),
@@ -110,6 +115,51 @@ CREATE TABLE IF NOT EXISTS dice_rolls (
  user_id INTEGER NOT NULL REFERENCES users(id),
  value INTEGER NOT NULL CHECK (value BETWEEN 1 AND 6),
  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS dice_wallet (
+ user_id INTEGER NOT NULL REFERENCES users(id),
+ kind TEXT NOT NULL,
+ quantity INTEGER NOT NULL CHECK (quantity >= 0),
+ PRIMARY KEY(user_id,kind)
+);
+CREATE TABLE IF NOT EXISTS typed_dice_rolls (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ user_id INTEGER NOT NULL REFERENCES users(id),
+ kind TEXT NOT NULL,
+ result TEXT NOT NULL CHECK (result IN ('score','milk')),
+ value INTEGER NOT NULL CHECK (value >= 0 AND value <= 22),
+ created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS milestone_claims (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ user_id INTEGER NOT NULL REFERENCES users(id),
+ threshold INTEGER NOT NULL CHECK (threshold IN (5,10,15,20,30)),
+ kind TEXT NOT NULL,
+ product_id INTEGER REFERENCES products(id),
+ product_name TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ UNIQUE(user_id,threshold)
+);
+CREATE TABLE IF NOT EXISTS event_supplies (
+ key TEXT PRIMARY KEY,
+ name TEXT NOT NULL,
+ stock INTEGER NOT NULL CHECK (stock >= 0)
+);
+CREATE TABLE IF NOT EXISTS reward_requests (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ user_id INTEGER NOT NULL REFERENCES users(id),
+ milestone_id INTEGER UNIQUE REFERENCES milestone_claims(id),
+ roll_id INTEGER UNIQUE REFERENCES typed_dice_rolls(id),
+ kind TEXT NOT NULL CHECK (kind IN ('bread','milk','oatmeal')),
+ status TEXT NOT NULL CHECK (status IN ('awaiting_choice','pending','approved','cancelled')),
+ product_id INTEGER REFERENCES products(id),
+ supply_key TEXT REFERENCES event_supplies(key),
+ product_name TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ requested_at TEXT,
+ processed_at TEXT,
+ processed_by TEXT,
+ CHECK ((milestone_id IS NOT NULL AND roll_id IS NULL) OR (milestone_id IS NULL AND roll_id IS NOT NULL))
 );
 CREATE TABLE IF NOT EXISTS memos (
  id INTEGER PRIMARY KEY AUTOINCREMENT,

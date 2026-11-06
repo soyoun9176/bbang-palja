@@ -1,7 +1,9 @@
 """Event menu. Stable IDs keep previous prototype orders and reservations intact."""
 
 MILK_PRODUCT_ID = 112
-MILK_PRICE = 2000
+SOYMILK_PRODUCT_ID = 113
+DRINK_PRODUCT_IDS = (MILK_PRODUCT_ID, SOYMILK_PRODUCT_ID)
+MILK_PRICE = 1000
 
 # id, real name, concept name, KRW, demo walk-in, reserved, unused legacy event bucket, category, icon
 PRODUCTS = [
@@ -17,17 +19,18 @@ PRODUCTS = [
     (110, '에그타르트', '황금이 들어있는 용광로', 2800, 20, 0, 0, '타르트', 'furnace'),
     (111, '치즈타르트', '황금이 들어있는 용광로', 2800, 20, 0, 0, '타르트', 'furnace'),
     (MILK_PRODUCT_ID, '우유', '', MILK_PRICE, 0, 0, 0, '음료', 'milk'),
+    (SOYMILK_PRODUCT_ID, '두유', '', MILK_PRICE, 20, 0, 0, '음료', 'milk'),
 ]
 PRODUCT_IDS = tuple(product[0] for product in PRODUCTS)
 PRODUCT_UNITS = {108: '세트'}
 # Add real menu photos here after placing files in frontend/assets/photos/.
 # Example: 101: '/assets/photos/plain-financier.webp'
 PRODUCT_PHOTOS = {}
-REWARD_PRODUCT_IDS = tuple(product_id for product_id in PRODUCT_IDS if product_id != MILK_PRODUCT_ID)
+REWARD_PRODUCT_IDS = tuple(product_id for product_id in PRODUCT_IDS if product_id not in DRINK_PRODUCT_IDS)
 
 
 def dice_quantity(items):
-    return sum(item['quantity'] for item in items if item['product_id'] != MILK_PRODUCT_ID)
+    return sum(item['quantity'] for item in items if item['product_id'] not in DRINK_PRODUCT_IDS)
 
 
 def sync_catalog(tx, demo=False):

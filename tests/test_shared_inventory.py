@@ -30,11 +30,15 @@ class SharedInventoryTests(unittest.TestCase):
     def request(self, method, path, body=None, token=None):
         return self.app.handle(method, path, {}, body or {}, 'Bearer '+token if token else None)
 
-    def buyer(self):
+    def buyer(self, bread_stage=True):
         login = self.request('POST', '/api/auth/register',
                              {'name':'추첨'+uuid.uuid4().hex[:10], 'pin':'1234'})
         with self.app.db.transaction(write=True) as tx:
-            tx.execute('UPDATE users SET score=10 WHERE id=?', (login['user']['id'],))
+            tx.execute('UPDATE users SET score=? WHERE id=?', (20 if bread_stage else 0,login['user']['id']))
+            if bread_stage:
+                for threshold,kind in [(5,'oatmeal'),(10,'milk'),(15,'sunglasses')]:
+                    tx.execute("INSERT INTO milestone_claims(user_id,threshold,kind,product_name,created_at) VALUES(?,?,?,?,?)", (login['user']['id'],threshold,kind,'선행 보상 테스트','2026-11-07'))
+                tx.execute('UPDATE users SET rewards_claimed=3 WHERE id=?',(login['user']['id'],))
         return login['token']
 
     def stock(self, counts):
@@ -50,31 +54,35 @@ class SharedInventoryTests(unittest.TestCase):
         return self.request('POST', '/api/rewards/claim',
                             {'request_id': request_id or str(uuid.uuid4())}, token)
 
-    def test_ten_point_levels_persist_with_bread_and_cap_at_five(self):
-        self.stock({101:6})
-        token = self.buyer()
-        user = self.request('GET', '/api/auth/me', token=token)['user']
-        self.assertEqual(self.request('GET', '/api/config')['reward_step'], 10)
-        self.assertEqual(user['level'], 0)  # Score alone does not level up.
-        for threshold in range(10, 61, 10):
-            with self.subTest(threshold=threshold):
-                with self.app.db.transaction(write=True) as tx:
-                    tx.execute('UPDATE users SET score=? WHERE id=?', (threshold-1,user['id']))
-                with self.assertRaises(APIError) as error:
-                    self.draw(token)
-                self.assertEqual(error.exception.status, 409)
-                with self.app.db.transaction(write=True) as tx:
-                    tx.execute('UPDATE users SET score=? WHERE id=?', (threshold,user['id']))
-                identity = str(uuid.uuid4())
-                result = self.draw(token, identity)
-                self.assertEqual(self.draw(token, identity), result)
-                user = self.request('GET', '/api/auth/me', token=token)['user']
-                self.assertEqual(user['score'], threshold)
-                self.assertEqual(user['level'], min(5,threshold//10))
-                self.assertEqual(user['rewards_claimed'], threshold//10)
-                self.assertEqual(result['reward']['threshold'], threshold)
-                self.assertEqual(self.product(101)['stock'], 6-threshold//10)
-        self.assertEqual(len(self.request('GET','/api/rewards',token=token)['rewards']), 6)
+    def test_five_milestones_persist_once_and_stop_at_thirty(self):
+        self.stock({101:2,112:1})
+        with self.app.db.transaction(write=True) as tx:
+            tx.execute("UPDATE event_supplies SET stock=1 WHERE key='oatmeal'")
+        token=self.buyer(bread_stage=False)
+        user=self.request('GET','/api/auth/me',token=token)['user']
+        self.assertEqual([m['threshold'] for m in self.request('GET','/api/config')['milestones']],[5,10,15,20,30])
+        for level,(threshold,kind) in enumerate([(5,'oatmeal'),(10,'milk'),(15,'sunglasses'),(20,'bread'),(30,'bread')],1):
+            with self.app.db.transaction(write=True) as tx:
+                tx.execute('UPDATE users SET score=? WHERE id=?',(threshold-1,user['id']))
+            with self.assertRaises(APIError) as error:self.draw(token)
+            self.assertEqual(error.exception.status,409)
+            with self.app.db.transaction(write=True) as tx:
+                tx.execute('UPDATE users SET score=? WHERE id=?',(threshold,user['id']))
+            identity=uuid.uuid4().hex
+            result=self.draw(token,identity)
+            self.assertEqual(self.draw(token,identity),result)
+            self.assertEqual((result['reward']['threshold'],result['reward']['kind']),(threshold,kind))
+            if kind=='milk':
+                self.request('POST',f"/api/reward-requests/{result['reward']['fulfillment']['id']}/choose",{'product_id':112,'request_id':uuid.uuid4().hex},token)
+            user=self.request('GET','/api/auth/me',token=token)['user']
+            self.assertEqual((user['level'],user['rewards_claimed']),(level,level))
+        self.assertEqual(self.product(101)['stock'],0)
+        self.assertEqual(self.product(112)['stock'],0)
+        self.assertEqual(user['claimed_milestones'],[5,10,15,20,30])
+        self.assertTrue(user['sunglasses_unlocked'])
+        with self.assertRaises(APIError) as error:self.draw(token)
+        self.assertEqual(error.exception.status,409)
+        self.assertEqual(len(self.request('GET','/api/rewards',token=token)['rewards']),5)
 
     def test_parallel_level_up_requests_cannot_spend_one_milestone_twice(self):
         self.stock({101:2})
@@ -90,7 +98,7 @@ class SharedInventoryTests(unittest.TestCase):
             results = list(pool.map(level_up,range(2)))
         self.assertEqual(sorted(status for status,_ in results), [200,409])
         user = self.request('GET','/api/auth/me',token=token)['user']
-        self.assertEqual((user['level'],user['rewards_claimed']), (1,1))
+        self.assertEqual((user['level'],user['rewards_claimed']), (4,4))
         self.assertEqual(self.product(101)['stock'], 1)
 
     def test_squared_weights_have_exact_ticket_boundaries(self):
@@ -105,7 +113,7 @@ class SharedInventoryTests(unittest.TestCase):
                 self.assertEqual(result['reward']['product_id'], expected)
                 self.assertEqual(self.product(101)['stock'], 2-(expected==101))
                 self.assertEqual(self.product(102)['stock'], 4-(expected==102))
-                self.assertEqual(result['user']['rewards_claimed'], 1)
+                self.assertEqual(result['user']['rewards_claimed'], 4)
 
     def test_next_draw_uses_remaining_shared_stock(self):
         self.stock({101:2,102:4})
@@ -146,8 +154,8 @@ class SharedInventoryTests(unittest.TestCase):
         with self.assertRaises(APIError) as error:
             self.draw(token, identity)
         self.assertEqual(error.exception.status, 409)
-        self.assertEqual(self.request('GET','/api/auth/me',token=token)['user']['rewards_claimed'], 0)
-        self.assertEqual(self.request('GET','/api/auth/me',token=token)['user']['level'], 0)
+        self.assertEqual(self.request('GET','/api/auth/me',token=token)['user']['rewards_claimed'], 3)
+        self.assertEqual(self.request('GET','/api/auth/me',token=token)['user']['level'], 3)
         self.stock({101:1})
         result = self.draw(token, identity)
         self.assertEqual(self.draw(token, identity), result)
@@ -156,8 +164,8 @@ class SharedInventoryTests(unittest.TestCase):
         with self.app.db.transaction() as tx:
             logs = tx.all("SELECT * FROM inventory_logs WHERE bucket='stock' AND delta=-1")
             self.assertEqual(len(logs), 1)
-            self.assertIn('이벤트 당첨', logs[0]['reason'])
-            self.assertEqual(tx.one('SELECT COUNT(*) AS count FROM rewards')['count'], 1)
+            self.assertIn('이벤트 지급 요청', logs[0]['reason'])
+            self.assertEqual(tx.one("SELECT COUNT(*) AS count FROM milestone_claims WHERE kind='bread'")['count'], 1)
 
     def test_last_unit_cannot_be_both_ordered_and_drawn(self):
         self.stock({101:1})
@@ -180,7 +188,7 @@ class SharedInventoryTests(unittest.TestCase):
         self.assertEqual(self.product(101)['stock'], 0)
         with self.app.db.transaction() as tx:
             orders=tx.one('SELECT COUNT(*) AS count FROM orders')['count']
-            rewards=tx.one('SELECT COUNT(*) AS count FROM rewards')['count']
+            rewards=tx.one("SELECT COUNT(*) AS count FROM milestone_claims WHERE kind='bread'")['count']
             self.assertEqual(orders+rewards, 1)
 
     def test_staff_cannot_create_a_separate_reward_pool(self):

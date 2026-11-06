@@ -35,8 +35,8 @@ def build(output, commit=None):
         (output / name).unlink()
         return '/build/' + target
 
-    admin = asset('admin.js')
-    app_source = (source / 'app.js').read_text().replace("'./admin.js'", repr(admin))
+    admin, profile = asset('admin.js'), asset('profile.js')
+    app_source = (source / 'app.js').read_text().replace("'./admin.js'", repr(admin)).replace("'./profile.js'", repr(profile))
     app = asset('app.js', app_source.encode())
     config, css = asset('config.js'), asset('styles.css')
     index = (source / 'index.html').read_text()
