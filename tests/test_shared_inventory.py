@@ -8,6 +8,8 @@ import unittest
 import uuid
 from unittest.mock import call, patch
 
+from account_support import account_payload, phone_for
+
 from server.app import Application, APIError, merge_legacy_reward_stock
 from server.db import Database
 
@@ -28,7 +30,7 @@ class SharedInventoryTests(unittest.TestCase):
         self.app = Application()
 
     def request(self, method, path, body=None, token=None):
-        return self.app.handle(method, path, {}, body or {}, 'Bearer '+token if token else None)
+        return self.app.handle(method, path, {}, account_payload(path,body) or {}, 'Bearer '+token if token else None)
 
     def buyer(self, bread_stage=True):
         login = self.request('POST', '/api/auth/register',

@@ -9,6 +9,8 @@ import unittest
 import uuid
 from unittest.mock import patch
 
+from account_support import account_payload, phone_for
+
 from server.app import Application, APIError, AVATAR_OPTIONS, default_avatar
 
 
@@ -29,7 +31,7 @@ class ProfileTests(unittest.TestCase):
         self.chosen={'face_shape':'financier','skin':'warm','expression':'wink','glasses':'round','hairpin':'none'}
 
     def call(self,method,path,body=None,token=None):
-        return self.app.handle(method,path,{},body or {},'Bearer '+token if token else None)
+        return self.app.handle(method,path,{},account_payload(path,body) or {},'Bearer '+token if token else None)
 
     def me(self,account):
         return self.call('GET','/api/auth/me',token=account['token'])['user']

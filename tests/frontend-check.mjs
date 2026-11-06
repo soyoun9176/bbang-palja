@@ -57,6 +57,33 @@ function fixture({guest = false, storage = new Map(), admin=false} = {}) {
 }
 
 const chosenAvatar={face_shape:'financier',skin:'warm',expression:'wink',glasses:'sunglasses',hairpin:'none'};
+test('signup collects nickname and phone while login uses phone and profile omits it',()=>{
+  const f=fixture();
+  const signup=f.run("buyerAuthForm('register')"),login=f.run("buyerAuthForm('login')");
+  assert.match(signup,/이름\(닉네임\)/);
+  for(const name of ['name','phone','pin'])assert.match(signup,new RegExp(`name="${name}"`));
+  assert.doesNotMatch(login,/name="name"/);
+  assert.match(login,/name="phone"/);
+  assert.doesNotMatch(f.run("profileEditor({id:1,name:'닉네임',phone:'010-1234-5678'})"),/010-1234-5678|name="phone"/);
+});
+
+test('phone formatting accepts only exact 010 digits or canonical dashes',()=>{
+  const f=fixture();
+  assert.equal(f.run("normalizePhone('01012345678')"),'010-1234-5678');
+  assert.equal(f.run("normalizePhone('010-1234-5678')"),'010-1234-5678');
+  for(const phone of ['010 1234 5678','010-12345678','0101234567','01112345678','01012345678 ','01012345678\n','010-1234-567a','０１０１２３４５６７８']){
+    f.context.badPhone=phone;assert.throws(()=>f.run('normalizePhone(badPhone)'),/전화번호/);
+  }
+});
+
+test('login sends normalized phone and password without nickname',async()=>{
+  const f=fixture({guest:true});f.context.authForm={dataset:{mode:'login'}};
+  f.run('closeModal=()=>{}');
+  f.context.fetchOverride=(path,options)=>path==='/api/auth/login'?f.response({token:'token-A',user:{id:1,name:'닉네임'}}):f.context.normalFetch(path,options);
+  await f.run("signInBuyer(authForm,{phone:'01012345678',pin:'1234'})");
+  assert.deepEqual(JSON.parse(f.requests.find(r=>r.path==='/api/auth/login').body),{phone:'010-1234-5678',pin:'1234'});
+});
+
 function profileForm(f) {
   const error={hidden:true,textContent:''},fields=[{disabled:false},{disabled:false}];
   const form={dataset:{userId:'1'},isConnected:true,querySelectorAll:selector=>selector==='fieldset'?fields:[],
@@ -73,13 +100,13 @@ test('first sign-in offers character choices while returning customized users co
   f.context.fetchOverride=(path,options)=>path==='/api/auth/login'
     ?f.response({token:'token-A',user:{id:1,name:'구매자1',profile_customized:f.remote.profileCustomized}})
     :f.context.normalFetch(path,options);
-  await f.run("signInBuyer(authForm,{name:'구매자1',pin:'1234'})");
+  await f.run("signInBuyer(authForm,{name:'구매자1',phone:'01012345678',pin:'1234'})");
   assert.equal(f.context.opened.length,1);
   assert.match(f.context.opened[0],/나만의 연금술사 만들기/);
   for(const label of ['얼굴 종류','표정','안경','구매한 빵 머리핀','다음에 꾸미기'])assert.match(f.context.opened[0],new RegExp(label));
   assert.equal(f.requests.filter(r=>r.path==='/api/profile').length,0);
   f.remote.profileCustomized=true;f.context.opened.length=0;
-  await f.run("signInBuyer(authForm,{name:'구매자1',pin:'1234'})");
+  await f.run("signInBuyer(authForm,{name:'구매자1',phone:'01012345678',pin:'1234'})");
   assert.equal(f.context.opened.length,0);
 });
 
@@ -537,7 +564,7 @@ function adminFixture() {
     has(key){return this.values.has(key);}
   }};
   let identity=0;
-  context.shared={state,esc:String,icon:()=>'',money:String,time:()=>'',requestId:()=>`request-${++identity}`,
+  context.shared={state,esc:String,icon:()=>'',money:String,time:()=>'',normalizePhone:value=>value,requestId:()=>`request-${++identity}`,
     api:async(path,options)=>{requests.push(JSON.parse(JSON.stringify({path,...options})));return context.respond?context.respond(path,options):{};},
     submitButton(){},refresh:async()=>{},render(){renderCalls++;},toast:message=>messages.push(message),closeModal(){}};
   vm.createContext(context);

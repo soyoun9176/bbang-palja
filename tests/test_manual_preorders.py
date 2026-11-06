@@ -9,6 +9,8 @@ import uuid
 from unittest.mock import patch
 from urllib.parse import parse_qs,urlencode
 
+from account_support import account_payload, phone_for
+
 from server.app import Application,APIError,now
 
 
@@ -29,17 +31,18 @@ class ManualPreorderTests(unittest.TestCase):
             tx.execute('UPDATE products SET stock=5 WHERE id=112')
 
     def request(self,method,path,body=None,token=None):
-        return self.app.handle(method,path,{},body or {},'Bearer '+token if token else None)
+        return self.app.handle(method,path,{},account_payload(path,body) or {},'Bearer '+token if token else None)
 
     def buyer(self,name=None):
         return self.request('POST','/api/auth/register',{'name':name or '예약'+uuid.uuid4().hex[:8],'pin':'1234'})
 
     def reserve(self,name,items=None):
-        self.request('POST','/api/staff/preorders/import',{'reservations':[{'name':name,'phone':'01012345678',
+        self.request('POST','/api/staff/preorders/import',{'reservations':[{'name':name,'phone':phone_for(name),
             'items':items or [{'product_id':101,'quantity':2},{'product_id':112,'quantity':1}]}]},self.staff)
         return self.lookup(name)
 
-    def lookup(self,name,phone='01012345678'):
+    def lookup(self,name,phone=None):
+        phone=phone or phone_for(name)
         return self.request('POST','/api/staff/preorders/lookup',{'name':name,'phone':phone},self.staff)['reservation']
 
     def complete(self,reservation,extra=None,identity=None,staff=None):
@@ -185,7 +188,7 @@ class ManualPreorderTests(unittest.TestCase):
         rows=dashboard['reservations']
         self.assertEqual([r['id'] for r in rows],[approved['id'],pending['id'],waiting['id']])
         self.assertEqual([r['status'] for r in rows],['approved','pending','reserved'])
-        self.assertEqual(rows[1]['phone'],'01012345678')
+        self.assertEqual(rows[1]['phone'],phone_for(rows[1]['name']))
         self.assertEqual(rows[1]['items'],[{'product_id':101,'name':'플레인 휘낭시에','quantity':2,'price':2800}])
         self.assertEqual(rows[1]['total'],5600)
         for token,status in [(buyer['token'],403),(None,401)]:
@@ -293,7 +296,7 @@ class ManualPreorderTests(unittest.TestCase):
         buyer=self.buyer()
         with self.app.db.transaction(write=True) as tx:
             tx.execute("INSERT INTO products VALUES(1,'이전 예약 빵','',9000,9,2,0,'이전','salt-bread')")
-            rid=tx.insert('INSERT INTO reservations(name,phone,created_at) VALUES(?,?,?)',(buyer['user']['name'],'01012345678',now()))
+            rid=tx.insert('INSERT INTO reservations(name,phone,created_at) VALUES(?,?,?)',(buyer['user']['name'],phone_for(buyer['user']['name']),now()))
             tx.execute('INSERT INTO reservation_items(reservation_id,product_id,quantity,price) VALUES(?,1,2,2500)',(rid,))
         r=self.lookup(buyer['user']['name'])
         result=self.complete(r,{'user_id':buyer['user']['id']})

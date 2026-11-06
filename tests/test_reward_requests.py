@@ -8,6 +8,8 @@ import unittest
 import uuid
 from unittest.mock import patch
 
+from account_support import account_payload, phone_for
+
 from server.app import APIError, Application, grant_dice
 
 
@@ -26,7 +28,7 @@ class RewardRequestTests(unittest.TestCase):
         self.buyer=self.register('구매자')
 
     def call(self,method,path,body=None,token=None):
-        return self.app.handle(method,path,{},body or {},'Bearer '+token if token else None)
+        return self.app.handle(method,path,{},account_payload(path,body) or {},'Bearer '+token if token else None)
 
     def register(self,name):
         return self.call('POST','/api/auth/register',{'name':name,'pin':'1234'})

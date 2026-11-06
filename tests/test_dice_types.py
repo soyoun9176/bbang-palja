@@ -9,6 +9,8 @@ import unittest
 import uuid
 from unittest.mock import patch
 
+from account_support import account_payload, phone_for
+
 from server.app import APIError, Application, grant_dice
 from server.game import preorder_kind
 
@@ -28,7 +30,7 @@ class TypedDiceTests(unittest.TestCase):
         self.buyer = self.call('POST', '/api/auth/register', {'name':'검증 구매자', 'pin':'1234'})
 
     def call(self, method, path, body=None, token=None):
-        return self.app.handle(method, path, {}, body or {}, 'Bearer '+token if token else None)
+        return self.app.handle(method, path, {}, account_payload(path,body) or {}, 'Bearer '+token if token else None)
 
     def me(self):
         return self.call('GET', '/api/auth/me', token=self.buyer['token'])['user']

@@ -9,13 +9,17 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  name TEXT NOT NULL,
+ phone TEXT UNIQUE,
  role TEXT NOT NULL CHECK (role IN ('buyer','staff')),
  password_hash TEXT NOT NULL,
  score INTEGER NOT NULL DEFAULT 0 CHECK (score >= 0),
  dice_balance INTEGER NOT NULL DEFAULT 0 CHECK (dice_balance >= 0),
  rewards_claimed INTEGER NOT NULL DEFAULT 0 CHECK (rewards_claimed >= 0),
  created_at TEXT NOT NULL,
- UNIQUE(name, role)
+ CHECK ((role='buyer' AND phone IS NOT NULL) OR (role='staff' AND phone IS NULL)),
+ CHECK (phone IS NULL OR (length(phone)=13 AND substr(phone,1,4)='010-' AND substr(phone,9,1)='-'
+  AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(phone,
+  '0',''),'1',''),'2',''),'3',''),'4',''),'5',''),'6',''),'7',''),'8',''),'9','')='--'))
 );
 CREATE TABLE IF NOT EXISTS user_profiles (
  user_id INTEGER NOT NULL PRIMARY KEY REFERENCES users(id),
@@ -190,6 +194,7 @@ CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id, id);
 CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_reservation_items_parent ON reservation_items(reservation_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_staff_name ON users(name) WHERE role='staff';
 """
 
 
@@ -259,6 +264,13 @@ class Database:
             conn.close()
 
     def initialize(self):
+        with self.transaction() as tx:
+            if self.postgres:
+                columns=tx.all("SELECT column_name AS name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='users'")
+            else:
+                columns=tx.all('PRAGMA table_info(users)')
+            if columns and 'phone' not in {row['name'] for row in columns}:
+                raise RuntimeError('전화번호 계정용 DB 재생성이 필요합니다. 서버를 멈춘 뒤 python3 ops/reset-db.py --yes 를 실행하세요. 기존 DB는 자동 백업됩니다.')
         if not self.postgres:
             conn = self.connect()
             try:
@@ -270,3 +282,4 @@ class Database:
             for statement in schema.split(";"):
                 if statement.strip():
                     tx.execute(statement)
+            tx.execute("INSERT INTO settings(key,value) VALUES('schema_version','phone_accounts_v1') ON CONFLICT(key) DO NOTHING")

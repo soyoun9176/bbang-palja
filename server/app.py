@@ -138,10 +138,10 @@ def person_name(value):
 
 
 def phone_number(value):
-    check(isinstance(value, str), "전화번호를 입력해 주세요.")
-    result = re.sub(r"[\s()-]", "", value)
-    check(re.fullmatch(r"[0-9]{10,11}", result) is not None, "전화번호는 숫자 10~11자리로 입력해 주세요.")
-    return result
+    check(isinstance(value,str) and re.fullmatch(r'(?:010[0-9]{8}|010-[0-9]{4}-[0-9]{4})',value) is not None,
+          '전화번호는 01012345678 또는 010-1234-5678 형식으로 입력해 주세요. 숫자와 정해진 위치의 대시만 사용할 수 있어요.')
+    digits=value.replace('-','')
+    return f'{digits[:3]}-{digits[3:7]}-{digits[7:]}'
 
 
 def pin_value(value):
@@ -378,13 +378,14 @@ def manual_buyer(tx, body, reservation_name=None):
         buyer = user_by_id(tx, integer(body.get('user_id'), '구매자 번호', maximum=1_000_000), buyer=True)
     else:
         name = reservation_name if reservation_name is not None else person_name(body.get('name'))
+        phone = phone_number(body.get('phone'))
         pin = pin_value(body.get('pin'))
-        buyer = tx.one("SELECT * FROM users WHERE name = ? AND role = 'buyer'", (name,))
+        buyer = tx.one("SELECT * FROM users WHERE phone = ? AND role = 'buyer'", (phone,))
         if buyer is None:
-            buyer_id = tx.insert("INSERT INTO users (name,role,password_hash,created_at) VALUES (?,'buyer',?,?)", (name, hash_pin(pin), now()))
+            buyer_id = tx.insert("INSERT INTO users (name,phone,role,password_hash,created_at) VALUES (?,?,'buyer',?,?)", (name, phone, hash_pin(pin), now()))
             buyer = user_by_id(tx, buyer_id)
         else:
-            check(verify_pin(pin, buyer['password_hash']), '같은 이름의 계정이 있습니다. 기존 비밀번호를 입력하거나 구매자를 선택해 주세요.', 409)
+            check(verify_pin(pin, buyer['password_hash']), '이미 등록된 전화번호입니다. 기존 비밀번호를 입력하거나 구매자를 선택해 주세요.', 409)
     return buyer
 
 
@@ -467,7 +468,7 @@ class Application:
         self.staff_password = os.environ.get("STAFF_PASSWORD", "butter2026")
         if self.production and (self.staff_password == "butter2026" or len(self.staff_password) < 12):
             raise RuntimeError("Production requires a non-default STAFF_PASSWORD of at least 12 characters.")
-        self.demo = not self.production and os.environ.get("DEMO_SEED", "1") == "1"
+        self.demo = not self.production and os.environ.get("DEMO_SEED", "0") == "1"
         self.allowed_origins = {value.strip().rstrip("/") for value in os.environ.get("ALLOWED_ORIGINS", "").split(",") if value.strip()}
         check("*" not in self.allowed_origins, "ALLOWED_ORIGINS must contain exact origins, not *.")
         self.db = Database(ROOT)
@@ -497,10 +498,11 @@ class Application:
             stamp = now()
             ids = {}
             pin_hash = hash_pin("1234")
-            for name, score, dice in [("김소연", 42, 3), ("이서연", 96, 0), ("박지우", 81, 0), ("정다은", 68, 0), ("최민준", 37, 2), ("한유진", 24, 1)]:
-                existing = tx.one("SELECT id FROM users WHERE name = ? AND role = 'buyer'", (name,))
-                ids[name] = existing["id"] if existing else tx.insert("INSERT INTO users (name,role,password_hash,score,dice_balance,created_at) VALUES (?,'buyer',?,?,?,?)", (name, pin_hash, score, dice, stamp))
-            if not tx.one("SELECT id FROM reservations WHERE name = ? AND phone = ?", ("김소연", "01012345678")):
+            for index,(name, score, dice) in enumerate([("김소연", 42, 3), ("이서연", 96, 0), ("박지우", 81, 0), ("정다은", 68, 0), ("최민준", 37, 2), ("한유진", 24, 1)],1):
+                phone='010-1234-5678' if index==1 else f'010-0000-{index:04d}'
+                existing = tx.one("SELECT id FROM users WHERE phone = ? AND role = 'buyer'", (phone,))
+                ids[name] = existing["id"] if existing else tx.insert("INSERT INTO users (name,phone,role,password_hash,score,dice_balance,created_at) VALUES (?,?,'buyer',?,?,?,?)", (name, phone, pin_hash, score, dice, stamp))
+            if not tx.one("SELECT id FROM reservations WHERE name = ? AND phone = ?", ("김소연", "010-1234-5678")):
                 self.import_reservations(tx, [{"name": "김소연", "phone": "01012345678", "items": [{"product_id": 101, "quantity": 2}, {"product_id": 102, "quantity": 1}]}], "데모 준비")
             buyer = user_by_id(tx, ids["최민준"])
             insert_order(tx, buyer, normalize_items(tx, [{"product_id": 105, "quantity": 1}, {"product_id": 106, "quantity": 2}]), "walkin", "데모 준비")
@@ -559,15 +561,16 @@ class Application:
             with self.db.transaction() as tx:
                 return {"products": products(tx)}
         if method == "POST" and path in ("/api/auth/register", "/api/auth/login"):
-            name, pin = person_name(body.get("name")), pin_value(body.get("pin"))
+            phone, pin = phone_number(body.get('phone')), pin_value(body.get('pin'))
             with self.db.transaction(write=True) as tx:
-                user = tx.one("SELECT * FROM users WHERE name = ? AND role = 'buyer'", (name,))
+                user = tx.one("SELECT * FROM users WHERE phone = ? AND role = 'buyer'", (phone,))
                 if path.endswith("register"):
-                    check(user is None, "같은 이름의 계정이 있습니다. 기존 계정으로 로그인해 주세요.", 409)
-                    user_id = tx.insert("INSERT INTO users (name,role,password_hash,created_at) VALUES (?,'buyer',?,?)", (name, hash_pin(pin), now()))
+                    name=person_name(body.get('name'))
+                    check(user is None, "이미 등록된 전화번호입니다. 기존 계정으로 로그인해 주세요.", 409)
+                    user_id = tx.insert("INSERT INTO users (name,phone,role,password_hash,created_at) VALUES (?,?,'buyer',?,?)", (name, phone, hash_pin(pin), now()))
                     user = user_by_id(tx, user_id)
                 else:
-                    check(user is not None and verify_pin(pin, user["password_hash"]), "이름 또는 비밀번호가 맞지 않습니다.", 401)
+                    check(user is not None and verify_pin(pin, user["password_hash"]), "전화번호 또는 비밀번호가 맞지 않습니다.", 401)
                 return self.session(tx, user)
         if method == "POST" and path == "/api/staff/login":
             name = person_name(body.get("name"))
@@ -613,20 +616,23 @@ class Application:
                 return idempotent(tx, user, "order", body, lambda: {"order": insert_order(tx, user, normalize_items(tx, body.get("items")), "walkin", user["name"])})
         if method == "GET" and path == "/api/preorders/lookup":
             name = person_name(query.get("name", [""])[0])
-            phone = phone_number(query.get("phone", [""])[0])
-            check(name == user["name"], "로그인한 본인의 이름으로 예약을 조회해 주세요.", 403)
+            phone = user['phone']
+            if 'phone' in query:
+                check(phone_number(query['phone'][0])==phone, '가입한 본인의 전화번호로만 예약을 조회할 수 있어요.', 403)
             with self.db.transaction(write=True) as tx:
                 reservation = tx.one("SELECT * FROM reservations WHERE name = ? AND phone = ?", (name, phone))
                 check(reservation is not None, "해당 이름과 전화번호의 예약이 없습니다. 담당자에게 문의해 주세요.", 404)
                 expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(timespec="milliseconds")
                 tx.execute("INSERT INTO preorder_verifications (user_id,reservation_id,expires_at) VALUES (?,?,?) ON CONFLICT (user_id,reservation_id) DO UPDATE SET expires_at = excluded.expires_at", (user["id"], reservation["id"], expires))
-                return {"reservation": reservation_data(tx, reservation)}
+                result=reservation_data(tx,reservation)
+                result.pop('phone')
+                return {"reservation": result}
         match = re.fullmatch(r"/api/preorders/([0-9]+)/claim", path)
         if method == "POST" and match:
             with self.db.transaction(write=True) as tx:
                 def claim_preorder():
                     reservation = tx.one("SELECT * FROM reservations WHERE id = ?", (int(match.group(1)),))
-                    check(reservation is not None and reservation["name"] == user["name"], "본인의 예약을 찾을 수 없습니다.", 404)
+                    check(reservation is not None and reservation["phone"] == user['phone'], "본인의 예약을 찾을 수 없습니다.", 404)
                     verification = tx.one("SELECT expires_at FROM preorder_verifications WHERE user_id = ? AND reservation_id = ? AND expires_at > ?", (user["id"], reservation["id"], now()))
                     check(verification is not None, "이름과 전화번호로 예약을 먼저 조회해 주세요.", 403)
                     check(reservation["user_id"] in (None, user["id"]), "이미 다른 계정으로 접수된 예약입니다.", 409)
@@ -739,7 +745,7 @@ class Application:
                         "event_supplies": tx.all('SELECT * FROM event_supplies ORDER BY key'),
                         'reward_requests': reward_requests(tx),
                         "reservations": all_reservations(tx),
-                        "users": [public_user(row) for row in profile_rows(tx, tx.all("SELECT u.*,p.appearance FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.role = 'buyer' ORDER BY u.name,u.id"))],
+                        "users": [{**public_user(row),'phone':row['phone']} for row in profile_rows(tx, tx.all("SELECT u.*,p.appearance FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.role = 'buyer' ORDER BY u.name,u.id"))],
                         "inventory_logs": tx.all("SELECT * FROM inventory_logs ORDER BY id DESC LIMIT 300"),
                         "events": tx.all("SELECT * FROM events ORDER BY id DESC LIMIT 300"),
                         "memos": tx.all("SELECT * FROM memos ORDER BY id DESC LIMIT 100"),
