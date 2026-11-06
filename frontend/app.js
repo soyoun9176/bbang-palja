@@ -3,7 +3,7 @@ import {profileAvatar, profileEditor, profileHairpins, normalizeAvatar} from './
 
 const isAdmin = /^\/admin(?:\/|$)/.test(location.pathname);
 const tokenKey = `kambo.${isAdmin ? 'staff' : 'buyer'}.token`;
-const state = {isAdmin,token:localStorage.getItem(tokenKey),user:null,config:{},products:[],orders:[],rewards:[],leaderboard:null,staffData:null,route:location.hash.slice(1)||(isAdmin?'queue':'shop'),cart:{},reservation:null,authMode:'login',rolling:false,leveling:false,lastRoll:null,selectedDice:null};
+const state = {isAdmin,token:localStorage.getItem(tokenKey),user:null,config:{},products:[],orders:[],rewards:[],rewardRequests:[],leaderboard:null,staffData:null,route:location.hash.slice(1)||(isAdmin?'queue':'shop'),cart:{},reservation:null,authMode:'login',rolling:false,leveling:false,lastRoll:null,selectedDice:null};
 const paths={shop:'M3 10h18M5 10v10h14V10M3 10l2-6h14l2 6M9 20v-6h6v6M2 10c0 3 4 3 4 0 0 3 4 3 4 0 0 3 4 3 4 0 0 3 4 3 4 0 0 3 4 3 4 0',bag:'M5 7h14l1 14H4L5 7ZM8 8V6a4 4 0 0 1 8 0v2',dice:'M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3ZM8 8h.01M16 8h.01M12 12h.01M8 16h.01M16 16h.01',trophy:'M8 3h8v7a4 4 0 0 1-8 0V3ZM8 5H4v3a4 4 0 0 0 4 4m8-7h4v3a4 4 0 0 1-4 4M12 14v6M8 21h8',clock:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM12 7v5l3 2',arrow:'M4 12h15m-5-5 5 5-5 5',plus:'M12 5v14M5 12h14',minus:'M5 12h14',x:'m6 6 12 12M18 6 6 18',check:'m5 12 4 4L19 6',info:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM12 11v6M12 7h.01',bread:'M5 11C-1 4 9 0 12 5c5-6 15 1 7 6v9H5v-9ZM9 11v4m6-4v4',user:'M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM4 21v-2a8 8 0 0 1 16 0v2',users:'M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM2 21v-2a7 7 0 0 1 14 0v2M17 4a4 4 0 0 1 0 7m2 4a6 6 0 0 1 3 5',shield:'m12 2 8 3v6c0 6-8 11-8 11S4 17 4 11V5l8-3ZM8 11l3 3 5-6',box:'m3 7 9-4 9 4v11l-9 4-9-4V7Zm0 0 9 4 9-4M12 11v11M7 5l9 4',note:'M5 3h14v13l-5 5H5V3Zm9 18v-5h5M8 8h8M8 12h5',calendar:'M4 5h16v16H4V5ZM8 3v4m8-4v4M4 10h16M8 14h2m4 0h2m-8 3h2',spark:'m12 2 2.5 7.5L22 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5L12 2Z',logout:'M9 3H4v18h5m4-15 6 6-6 6m-5-6h11',chevron:'m9 5 7 7-7 7',heart:'M12 21 3 12C-2 6 6 0 12 6c6-6 14 0 9 6l-9 9Z',search:'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm5 12 6 6',milk:'M9 3h6v4l3 4v10H6V11l3-4V3Zm0 4h6M6 12h12',upload:'M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6',edit:'m15 4 5 5M4 20l5-1L21 7l-5-5L4 14v6Z'};
 function icon(name){return `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name]||paths.bread}"/></svg>`}
 function esc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -20,10 +20,10 @@ function closeModal(){document.querySelector('#modal-root').innerHTML='';documen
 function submitButton(form,busy,label){const button=form.querySelector('[type=submit]');if(!button)return;button.disabled=busy;if(!button.dataset.label)button.dataset.label=button.innerHTML;button.innerHTML=busy?'<span class="spinner"></span> 처리하고 있어요':label||button.dataset.label;}
 function brand(){return `<span class="brand"><span class="brand-icon">${icon('bread')}</span><span><strong>캄보딜라이트</strong><small>CAMBODELIGHT</small></span></span>`;}
 const buyerNav=[['shop','bag','빵 구매'],['ranking','trophy','이벤트 참여']];
-const staffNav=[['queue','clock','주문 확인'],['sales','edit','수기 판매'],['inventory','box','재고'],['events','spark','인스타 이벤트'],['notes','note','인수인계']];
+const staffNav=[['queue','clock','주문'],['events','spark','이벤트'],['sales','edit','수기판매'],['inventory','box','재고관리'],['notes','note','인수인계']];
 function navButton([route,img,label]) {
   const active=isAdmin?state.route===route:route==='shop'?['shop','pickup','orders'].includes(state.route):['dice','ranking'].includes(state.route);
-  const pending=isAdmin&&route==='queue'?(state.staffData?.stats.pending_orders||0):0;
+  const pending=isAdmin?(route==='queue'?state.staffData?.stats.pending_orders||0:route==='events'?state.staffData?.stats.pending_rewards||0:0):0;
   return `<button class="nav-item ${active?'active':''}" data-action="navigate" data-route="${route}" ${active?'aria-current="page"':''}>${icon(img)}<span>${label}</span>${pending?`<b class="pending-pill">${pending}</b>`:''}</button>`;
 }
 function shell(content) {
@@ -70,7 +70,7 @@ function renderPickup() {
 }
 function renderOrders() {
   return `${purchaseHeading()}<div class="narrow">${state.orders.length?state.orders.map(o=>`<article class="order-card"><div class="order-top"><strong>${{walkin:'현장 구매',preorder:'예약한 빵 수령',manual:'수기 판매'}[o.type]} #${String(o.id).padStart(3,'0')}</strong>${orderStatus(o.status)}</div>${orderLines(o)}<div class="order-bottom"><span>${time(o.created_at)}</span><strong>${money(o.total)}원</strong></div>
-  ${o.status==='pending'?`<p class="callout">${o.type==='preorder'?'담당자에게 예약 내역을 보여주고 빵을 받아주세요.':'담당자에게 주문과 입금 내역을 보여주세요.'} 승인 대기 중입니다.</p>`:o.status==='approved'?`<div class="callout"><span>구매 완료 · ${orderDice(o)?`주사위 ${orderDice(o)}개 지급`:'우유는 주사위 미지급'}</span><button class="text-button" data-action="navigate" data-route="ranking">이벤트 참여하기 ${icon('arrow')}</button></div>`:''}</article>`).join(''):'<div class="empty-state"><h2>주문 내역이 없습니다.</h2><button class="primary-button" data-action="navigate" data-route="shop">현장 구매하기</button></div>'}</div>`;
+  ${o.status==='pending'?`<p class="callout">${o.type==='preorder'?'담당자에게 예약 내역을 보여주고 빵을 받아주세요.':'담당자에게 주문과 입금 내역을 보여주세요.'} 승인 대기 중입니다.</p>`:o.status==='approved'?`<div class="callout"><span>구매 완료 · ${orderDice(o)?`주사위 ${orderDice(o)}개 지급`:'음료는 주사위 미지급'}</span><button class="text-button" data-action="navigate" data-route="ranking">이벤트 참여하기 ${icon('arrow')}</button></div>`:''}</article>`).join(''):'<div class="empty-state"><h2>주문 내역이 없습니다.</h2><button class="primary-button" data-action="navigate" data-route="shop">현장 구매하기</button></div>'}</div>`;
 }
 const dieDots={1:[5],2:[1,9],3:[1,5,9],4:[1,3,7,9],5:[1,3,5,7,9],6:[1,3,4,6,7,9]};
 function die(value=1,color='plain'){
@@ -83,7 +83,7 @@ const characterTiers = [
 ];
 const milestonePreview=[
   {threshold:5,kind:'oatmeal',name:'오트밀 미니바이트',extra:'프로필 배지 1 · 추후 추가'},
-  {threshold:10,kind:'milk',name:'우유',extra:'프로필 배지 2 · 추후 추가'},
+  {threshold:10,kind:'milk',name:'우유 또는 두유',extra:'프로필 배지 2 · 추후 추가'},
   {threshold:15,kind:'sunglasses',name:'멋진 선글라스',extra:'칭호 「멋쟁이 마법사」 · 추후 추가'},
   {threshold:20,kind:'bread',name:'랜덤 빵 1개',extra:''},
   {threshold:30,kind:'bread',name:'랜덤 빵 1개',extra:'담당자가 지어주는 커스텀 칭호 · 추후 추가'},
@@ -109,47 +109,92 @@ function diceAction() {
 }
 function renderDiceControl() {
   const last=state.lastRoll,chosen=selectedDie(),busy=state.rolling||state.leveling;
-  const result=state.rolling?'주사위를 굴리고 있어요…':last?.result==='milk'?'우유 당첨! 담당자에게 당첨 기록을 보여주세요.':last?`결과 ${last.value} · +${last.value}점`:chosen?'사용할 주사위를 고르고 굴려요.':'빵 구매 승인 후 주사위가 지급돼요.';
+  const result=state.rolling?'주사위를 굴리고 있어요…':last?.result==='milk'?'음료 보상 당첨! 우유 또는 두유를 선택해 주세요.':last?`결과 ${last.value} · +${last.value}점`:chosen?'사용할 주사위를 고르고 굴려요.':'빵 구매 승인 후 주사위가 지급돼요.';
   return `<div class="inline-dice ${state.rolling?'rolling':''}" aria-label="주사위 굴리기" aria-busy="${state.rolling}">
     <div class="dice-control-head"><div class="dice-visual" aria-hidden="true">${die(last?.result==='milk'?'milk':last?.value||1,last?.dice?.color||chosen?.color||'plain')}</div><div><p class="dice-balance">남은 주사위 <strong>${state.user.dice_balance}개</strong></p><p class="dice-feedback ${last&&!state.rolling?'has-result':''}" role="status">${esc(result)}</p></div></div>
     ${ownedDice().length?`<div class="dice-picker" role="group" aria-label="사용할 주사위">${ownedDice().map(d=>`<button class="dice-choice die-${esc(d.color)} ${d.kind===chosen?.kind?'selected':''}" data-action="select-dice" data-kind="${esc(d.kind)}" aria-pressed="${d.kind===chosen?.kind}" ${busy?'disabled':''}><span class="dice-color-mark" aria-hidden="true"></span><span><strong>${esc(d.name)}</strong><small>${d.kind.startsWith('preorder_')?`${dieColors[d.color]} · `:''}${d.quantity}개</small></span>${d.kind===chosen?.kind?icon('check'):''}</button>`).join('')}</div>`:''}
     ${diceAction()}
   </div>`;
 }
+function milestoneImage(milestone){return `/assets/${({oatmeal:'oatmeal',milk:'milk',sunglasses:'sunglasses',bread:'reward-bread'})[milestone.kind]||'reward-bread'}.svg`;}
+function renderMilestoneTrack(){
+  const {milestones,claimed}=eventProgress(),maximum=Math.max(...milestones.map(m=>Number(m.threshold))),score=Math.min(maximum,Math.max(0,state.user.score));
+  return `<section class="magic-level-track" aria-label="마법 레벨업"><div class="level-track-heading"><h3>마법 레벨업</h3><span>${score} / ${maximum}점</span></div><div class="milestone-track"><div class="milestone-track-bar" role="progressbar" aria-label="마법 레벨업 점수" aria-valuemin="0" aria-valuemax="${maximum}" aria-valuenow="${score}"><span style="width:${score/maximum*100}%"></span></div><span class="milestone-zero" aria-hidden="true">0</span><ol class="milestone-stops" aria-label="점수별 보상">${milestones.map(m=>{const received=claimed.includes(m.threshold),achieved=received||state.user.score>=m.threshold;return `<li style="left:${Number(m.threshold)/maximum*100}%"><button class="milestone-trigger ${achieved?'is-achieved':'is-locked'} ${received?'is-claimed':''}" data-action="open-milestone" data-threshold="${m.threshold}" aria-label="${m.threshold}점 보상: ${esc(m.name)} · ${received?'받기 완료':achieved?'달성':'미달성'}"><span class="milestone-bubble"><img src="${milestoneImage(m)}" alt="" width="32" height="32">${received?`<span class="milestone-received" aria-hidden="true">${icon('check')}</span>`:''}</span><span class="milestone-dot" aria-hidden="true"></span><span class="milestone-point">${m.threshold}점</span></button></li>`;}).join('')}</ol></div><p class="milestone-track-hint">말풍선을 눌러 보상을 확인해요.</p></section>`;
+}
+function openMilestone(threshold){
+  if(state.rolling||state.leveling)return;
+  const {milestones,claimed}=eventProgress(),m=milestones.find(m=>m.threshold===Number(threshold));if(!m)return;
+  const received=claimed.includes(m.threshold),achieved=state.user.score>=m.threshold;
+  const record=state.rewards.find(r=>r.threshold===m.threshold&&r.kind!=='legacy_bread'),request=record?.fulfillment;
+  const status=received?(request?rewardStatus(request.status):'보상 받기 완료'):achieved?`${m.threshold}점 달성!`:`${m.threshold-state.user.score}점 더 모으면 받을 수 있어요.`;
+  modal(`<div class="draw-prompt milestone-detail ${achieved||received?'is-achieved':'is-locked'}"><span class="label-kicker">${m.threshold}점 보상</span><img class="milestone-detail-image" src="${milestoneImage(m)}" alt="${esc(m.name)}" width="112" height="112"><h2>${esc(m.name)}</h2><p class="milestone-detail-status">${esc(status)}</p>${m.extra?`<p class="form-hint">${esc(m.extra)}</p>`:''}${!received&&achieved?`<button class="primary-button full" data-action="claim-reward" data-threshold="${m.threshold}">상품 받기</button>`:''}${request?.status==='awaiting_choice'?`<button class="primary-button full" data-action="open-beverage-choice" data-request="${request.id}">우유·두유 선택하기</button>`:''}${received&&request?.status==='pending'?'<p class="form-hint">담당자에게 이벤트 요청을 보여주고 물품을 받아주세요.</p>':''}</div>`);
+}
 function renderLevelCard() {
-  const {milestones,claimed,step,previous,level,target,next,remaining,eligible}=eventProgress();
-  const progress=next?Math.min(step,Math.max(0,state.user.score-previous)):1;
+  const {level,target,next,remaining,eligible}=eventProgress();
   return `<section class="level-card content-card event-play" aria-label="내 점수와 주사위">
     <div class="character-summary">${characterPortrait(level)}<div><span class="level-badge">Lv. ${level}</span><h2>${characterTiers[level].name}</h2><p>현재 점수 <strong>${money(state.user.score)}점</strong></p></div></div>
-    <p class="level-message" aria-live="polite">${!next?'30점 보상까지 모두 받았어요! 더 높은 순위에 도전해요.':eligible?`${target}점 달성! ${esc(next.name)} 보상을 받아요.`:`${remaining}점 더 모으면 레벨업!`}</p>
-    ${next?`<p class="next-prize">다음 보상 · ${esc(next.name)}</p>`:''}
-    <div class="progress" role="progressbar" aria-label="다음 점수 보상까지" aria-valuemin="0" aria-valuemax="${step}" aria-valuenow="${progress}"><span style="width:${progress/step*100}%"></span></div>
-    ${eligible?`<button class="primary-button full level-up-button" data-action="claim-reward" ${state.leveling||state.rolling?'disabled':''}>${icon('spark')}${state.leveling?'보상을 확인하고 있어요…':`${target}점 보상 받기`}</button>`:''}
+    <p class="level-message" aria-live="polite">${!next?'30점 보상까지 모두 받았어요! 더 높은 순위에 도전해요.':eligible?`${target}점 달성! 말풍선을 눌러 보상을 받아요.`:`${remaining}점 더 모으면 레벨업!`}</p>
+    ${renderMilestoneTrack()}
     ${renderDiceControl()}
-    <section class="milestone-roadmap" aria-label="점수별 이벤트 보상"><h3>모을수록 커지는 마법</h3><p>각 보상은 한 번씩, 30점까지!</p><ol>${milestones.map((m,index)=>`<li class="${claimed.includes(m.threshold)?'unlocked':m.threshold===target?'next':'locked'}"><span class="milestone-score">${m.threshold}<small>점</small></span><div><strong>${esc(m.name)}</strong>${m.extra?`<small>${esc(m.extra)}</small>`:''}</div><span class="milestone-state">${claimed.includes(m.threshold)?icon('check'):m.kind==='sunglasses'?'✦':icon(m.kind==='milk'?'milk':m.kind==='bread'?'bread':'spark')}</span></li>`).join('')}</ol></section>
   </section>`;
 }
+const rewardStatus = status => ({awaiting_choice:'음료 선택 필요',pending:'담당자 지급 대기',approved:'수령 완료',cancelled:'지급 취소'}[status]||status);
+function beverageOptions(request){
+  const drinks=state.products.filter(p=>p.beverage_reward_eligible),empty=!drinks.some(p=>p.stock>0);
+  return `<div class="beverage-options">${drinks.map(p=>`<button class="secondary-button full" data-action="choose-beverage" data-request="${request.id}" data-product="${p.id}" ${p.stock<=0?'disabled':''}>${icon('milk')}${esc(p.name)} ${p.stock<=0?'품절':'선택'}</button>`).join('')}</div>${empty?`<p class="form-hint">우유와 두유가 모두 품절이에요. 받지 않거나 나중에 다시 확인해 주세요.</p><button class="text-button" data-action="decline-beverage" data-request="${request.id}">이번 음료 보상 받지 않기</button>`:''}`;
+}
+function openBeverageChoice(request){
+  if(!request)return;
+  request=state.rewardRequests.find(r=>r.id===request.id)||request;
+  if(request.status&&request.status!=='awaiting_choice')return;
+  modal(`<div class="draw-prompt"><div class="draw-icon">${icon('milk')}</div><h2>우유 보상 당첨!</h2><p>우유 또는 두유 중 1개를 선택해 주세요.<br>선택 후 담당자에게 요청을 보여주세요.</p>${beverageOptions(request)}<p class="form-hint">이벤트 요청 #${request.id}</p></div>`);
+}
+function renderRewardRequests(){
+  const active=state.rewardRequests.filter(r=>['awaiting_choice','pending'].includes(r.status));
+  return active.length?`<section class="content-card buyer-reward-requests"><h2>이벤트 물품 수령</h2>${active.map(r=>`<article class="buyer-reward-request"><div><strong>${esc(r.product_name)}${r.status==='pending'?' × 1':''}</strong><span class="status pending">${rewardStatus(r.status)}</span></div><p class="form-hint">이벤트 #${r.id} · ${r.roll_id?'주사위 당첨':`${r.threshold}점 보상`}</p>${r.status==='awaiting_choice'?`<button class="secondary-button full" data-action="open-beverage-choice" data-request="${r.id}" ${state.rolling||state.leveling?'disabled':''}>우유·두유 선택하기</button>`:'<p class="form-hint">담당자에게 이 요청을 보여주고 물품을 받아주세요.</p>'}</article>`).join('')}</section>`:'';
+}
+async function chooseBeverage(button,decline=false){
+  if(state.rolling||state.leveling)return;
+  const id=Number(button.dataset.request),body=decline?{}:{product_id:Number(button.dataset.product)};
+  const op=operation(`beverage-${id}`,body);state.leveling=true;button.disabled=true;
+  try{
+    const result=await api(`/api/reward-requests/${id}/${decline?'decline':'choose'}`,{method:'POST',body:{...body,request_id:op.id}});
+    op.done();state.rewardRequests=state.rewardRequests.map(r=>r.id===id?{...r,...result.request}:r);
+    await refreshAfterAction();state.leveling=false;closeModal();render();
+    toast(decline?'이번 음료 보상은 받지 않는 것으로 처리했어요.':'음료를 확보하고 담당자에게 지급을 요청했어요.');
+  }catch(error){
+    if(error.status>=400&&error.status<500)op.done();state.leveling=false;
+    await refresh().catch(()=>{});render();
+    const current=state.rewardRequests.find(r=>r.id===id);if(current?.status==='awaiting_choice')openBeverageChoice(current);else closeModal();
+    toast(error.message,'error');
+  }
+}
 function renderRewardHistory() {
-  return state.rewards.length?`<details id="buyer-reward-history" class="content-card reward-history"><summary>받은 이벤트 보상 · ${state.rewards.length}건</summary>${state.rewards.map(r=>`<div class="reward-item"><strong>${esc(r.product_name)}</strong><span>${r.kind==='dice_milk'?'주사위 당첨':r.kind==='legacy_bread'?`이전 이벤트 ${r.threshold}점`:`${r.threshold}점`} · #${r.id}</span></div>`).join('')}<p class="form-hint">물품 보상은 담당자에게 당첨 기록을 보여주고 받아가세요.</p></details>`:'';
+  return state.rewards.length?`<details id="buyer-reward-history" class="content-card reward-history"><summary>이벤트 보상 기록 · ${state.rewards.length}건</summary>${state.rewards.map(r=>`<div class="reward-item"><strong>${esc(r.product_name)}</strong><span>${r.kind==='dice_milk'?'주사위 당첨':r.kind==='legacy_bread'?`이전 이벤트 ${r.threshold}점`:`${r.threshold}점`} · ${r.fulfillment?rewardStatus(r.fulfillment.status):r.kind==='sunglasses'?'자동 지급':'이전 지급 기록'}</span></div>`).join('')}</details>`:'';
 }
 function renderEvent() {
   const board=state.leaderboard;
   const rankings=board?`<section class="content-card"><h2>최고의 연금술사 TOP 3</h2><p class="form-hint">양일 누적 점수로 최종 1·2·3등을 선정합니다.</p><ol class="leaders">${board.leaders.map(p=>`<li class="${p.is_me?'me':''}"><span class="rank-number">${p.rank}위</span><strong class="profile-name">${profileAvatar(p)}<span>${esc(p.name)}${p.is_me?' (나)':''}</span></strong><b>${money(p.score)}점</b></li>`).join('')}</ol></section>
   <section class="content-card ranking-neighbors"><h2>내 주변 순위</h2>${board.neighbors.map(p=>`<div class="rank-row ${p.is_me?'me':''}"><span>${p.rank}위</span><strong class="profile-name">${profileAvatar(p)}<span>${esc(p.name)}${p.is_me?' (나)':''}</span></strong><b>${money(p.score)}점</b></div>`).join('')}<p class="form-hint">내 순위 ${board.me?.rank||'-'}위 · 총 ${board.total_participants}명 참여</p></section>`:'<section class="content-card"><h2>점수 순위</h2><p class="form-hint">순위를 불러오는 중입니다.</p></section>';
-  return `${eventHeading()}<div class="event-layout"><div class="event-personal">${renderLevelCard()}${renderRewardHistory()}</div><div class="event-rankings">${rankings}</div></div>`;
+  return `${eventHeading()}<div class="event-layout"><div class="event-personal">${renderRewardRequests()}${renderLevelCard()}${renderRewardHistory()}</div><div class="event-rankings">${rankings}</div></div>`;
 }
 function render() {
+  const previousTrackWidth=document.querySelector('.milestone-track-bar > span')?.style.width;
   if(!isAdmin&&state.route==='dice'){state.route='ranking';history.replaceState(null,'','#ranking');}
   let content;
   if(isAdmin)content=state.user?renderAdmin():renderStaffLogin();
   else content=state.user?({shop:renderShop,pickup:renderPickup,orders:renderOrders,ranking:renderEvent}[state.route]||renderShop)():renderBuyerLogin();
   const expanded=[...document.querySelectorAll('#app details[open]')].map(node=>node.id).filter(Boolean);
   document.querySelector('#app').innerHTML=shell(prototypeNotice()+content);
+  const trackFill=document.querySelector('.milestone-track-bar > span');
+  if(previousTrackWidth&&trackFill?.animate&&previousTrackWidth!==trackFill.style.width&&!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches){
+    trackFill.animate([{width:previousTrackWidth},{width:trackFill.style.width}],{duration:650,easing:'ease-out'});
+  }
   expanded.forEach(id=>{const node=document.getElementById(id);if(node)node.open=true;});
   document.title=`${isAdmin?'담당자':!state.user?'로그인':['dice','ranking'].includes(state.route)?'이벤트 참여':'빵 구매'} · 캄보딜라이트`;
 }
 let refreshVersion=0;
-async function refresh(){const version=++refreshVersion,token=state.token;try{const get=path=>api(path,{token});const jobs=[get('/api/config'),get('/api/products')];if(token)jobs.push(get('/api/auth/me'));const results=await Promise.all(jobs);let extra;if(token){const user=results[2].user;if((isAdmin&&user.role!=='staff')||(!isAdmin&&user.role!=='buyer')){if(state.token===token){localStorage.removeItem(tokenKey);state.token=null;state.user=null;}return;}extra=isAdmin?await get('/api/staff/dashboard'):await Promise.all([get('/api/orders'),get('/api/rewards'),get('/api/leaderboard')]);}if(state.token!==token||version!==refreshVersion)return;state.config=results[0];state.products=results[1].products;if(token){state.user=results[2].user;if(isAdmin)state.staffData=extra;else{state.orders=extra[0].orders;state.rewards=extra[1].rewards;state.leaderboard=extra[2];}syncProfileHairpins();}}catch(error){if(token!==state.token||version!==refreshVersion)return;throw error;}}
+async function refresh(){const version=++refreshVersion,token=state.token;try{const get=path=>api(path,{token});const jobs=[get('/api/config'),get('/api/products')];if(token)jobs.push(get('/api/auth/me'));const results=await Promise.all(jobs);let extra;if(token){const user=results[2].user;if((isAdmin&&user.role!=='staff')||(!isAdmin&&user.role!=='buyer')){if(state.token===token){localStorage.removeItem(tokenKey);state.token=null;state.user=null;}return;}extra=isAdmin?await get('/api/staff/dashboard'):await Promise.all([get('/api/orders'),get('/api/rewards'),get('/api/leaderboard')]);}if(state.token!==token||version!==refreshVersion)return;state.config=results[0];state.products=results[1].products;if(token){state.user=results[2].user;if(isAdmin)state.staffData=extra;else{state.orders=extra[0].orders;state.rewards=extra[1].rewards;state.rewardRequests=extra[1].requests||[];state.leaderboard=extra[2];}syncProfileHairpins();}}catch(error){if(token!==state.token||version!==refreshVersion)return;throw error;}}
 
 initAdmin({state,api,icon,esc,money,time,toast,modal,closeModal,render,refresh,requestId,submitButton,profileAvatar});
 
@@ -230,11 +275,10 @@ async function saveProfile(form,data) {
 }
 function openAuth(mode='login') { modal(`<h2>로그인</h2>${buyerAuthForm(mode)}`); }
 
-async function checkout(button){if(!cartCount())return;if(!state.user){openAuth();return;}const items=Object.entries(state.cart).map(([product_id,quantity])=>({product_id:Number(product_id),quantity}));const op=operation('checkout',items);button.disabled=true;try{const {order}=await api('/api/orders',{method:'POST',body:{items,request_id:op.id}});state.cart={};op.done();if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);await refreshAfterAction();state.route='orders';history.replaceState(null,'','#orders');render();modal(`<div class="order-success"><div class="success-icon">${icon('check')}</div><h2>빵 구매 요청을 보냈어요!</h2><p>담당자에게 주문을 보여 주고<br>안내받은 계좌로 입금해 주세요.</p><div class="success-box">주문 #${String(order.id).padStart(3,'0')} · 선택 수량 ${order.quantity}<strong>${money(order.total)}원</strong>${orderDice(order)?`확인 후 주사위 ${orderDice(order)}개가 지급돼요.`:'우유 구매에는 주사위가 지급되지 않아요.'}</div><button class="primary-button full" data-action="close-modal">주문 내역 확인하기 ${icon('arrow')}</button></div>`);}catch(error){if(error.status>=400&&error.status<500)op.done();button.disabled=false;toast(error.message,'error');await refresh().catch(()=>{});render();}}
+async function checkout(button){if(!cartCount())return;if(!state.user){openAuth();return;}const items=Object.entries(state.cart).map(([product_id,quantity])=>({product_id:Number(product_id),quantity}));const op=operation('checkout',items);button.disabled=true;try{const {order}=await api('/api/orders',{method:'POST',body:{items,request_id:op.id}});state.cart={};op.done();if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);await refreshAfterAction();state.route='orders';history.replaceState(null,'','#orders');render();modal(`<div class="order-success"><div class="success-icon">${icon('check')}</div><h2>빵 구매 요청을 보냈어요!</h2><p>담당자에게 주문을 보여 주고<br>안내받은 계좌로 입금해 주세요.</p><div class="success-box">주문 #${String(order.id).padStart(3,'0')} · 선택 수량 ${order.quantity}<strong>${money(order.total)}원</strong>${orderDice(order)?`확인 후 주사위 ${orderDice(order)}개가 지급돼요.`:'음료 구매에는 주사위가 지급되지 않아요.'}</div><button class="primary-button full" data-action="close-modal">주문 내역 확인하기 ${icon('arrow')}</button></div>`);}catch(error){if(error.status>=400&&error.status<500)op.done();button.disabled=false;toast(error.message,'error');await refresh().catch(()=>{});render();}}
 function openLevelUp() {
-  const {target,next,eligible}=eventProgress();
-  if(!eligible)return;
-  modal(`<div class="draw-prompt"><div class="draw-icon">${icon('spark')}</div><span class="label-kicker">LEVEL UP!</span><h2>${target}점 달성!</h2><p>${esc(next.name)} 보상을 받을 수 있어요.</p>${next.extra?`<p class="form-hint">${esc(next.extra)}</p>`:''}<button class="primary-button full" data-action="claim-reward">${target}점 보상 받기</button></div>`);
+  const {target,eligible}=eventProgress();
+  if(eligible)openMilestone(target);
 }
 async function rollDice() {
   if(state.rolling||state.leveling||!state.user?.dice_balance)return;
@@ -245,18 +289,22 @@ async function rollDice() {
     const [result]=await Promise.all([api('/api/dice/roll',{method:'POST',body:{kind,request_id:op.id}}),new Promise(r=>setTimeout(r,850))]);
     state.lastRoll=result;state.user=result.user||{...state.user,score:result.score,dice_balance:result.dice_balance};op.done();state.rolling=false;
     await refreshAfterAction();render();
-    if(result.result==='milk')modal(`<div class="order-success"><div class="draw-icon">${icon('milk')}</div><h2>우유 당첨!</h2><p>담당자에게 이 화면이나 보상 기록을 보여주고<br>우유 1개를 받아 가세요.</p><p class="form-hint">주사위 당첨 #${result.id} · 담당자 화면에도 기록됐어요.</p><button class="primary-button full" data-action="close-modal">확인</button></div>`);
+    if(result.result==='milk')openBeverageChoice(result.fulfillment);
     else if(target!==null&&before<target&&state.user.score>=target)openLevelUp();
   } catch(error) { if(error.status>=400&&error.status<500)op.done();state.rolling=false;await refresh().catch(()=>{});render();toast(error.message,'error'); }
 }
 async function claimReward(button) {
   if(state.leveling||state.rolling)return;
-  state.leveling=true;button.disabled=true;const op=operation('reward');
+  const threshold=Number(button.dataset?.threshold??eventProgress().target);
+  const m=eventProgress().milestones.find(m=>m.threshold===threshold);
+  if(!m||state.user.score<threshold||eventProgress().claimed.includes(threshold))return;
+  state.leveling=true;button.disabled=true;const op=operation(`reward-${threshold}`,{threshold});
   try {
-    const {reward,user}=await api('/api/rewards/claim',{method:'POST',body:{request_id:op.id}});
+    const {reward,user}=await api('/api/rewards/claim',{method:'POST',body:{threshold,request_id:op.id}});
     state.user=user;op.done();await refreshAfterAction();state.leveling=false;render();
+    if(reward.kind==='milk'&&reward.fulfillment){openBeverageChoice(reward.fulfillment);return;}
     const p=state.products.find(p=>p.id===reward.product_id),level=eventProgress(user).level;
-    modal(`<div class="order-success level-up-result"><span class="label-kicker">LEVEL UP!</span>${characterPortrait(level,'level-preview',level)}<h2>${esc(reward.product_name)}${reward.kind==='sunglasses'?' 해제!':' 당첨!'}</h2><div class="bread-prize">${p?`<img src="${productImage(p)}" alt="" width="76" height="64">`:icon(reward.kind==='milk'?'milk':'spark')}<strong>${esc(reward.product_name)}</strong></div><p>${reward.threshold}점 달성을 축하해요.<br>${reward.kind==='sunglasses'?'계정 관리 → 꾸미기에서 착용할 수 있어요.':'담당자에게 이 화면을 보여주고 보상을 받아 가세요.'}</p><p class="form-hint">점수 보상 #${reward.id} · 담당자 화면에도 기록됐어요.</p><button class="primary-button full" data-action="close-modal">확인</button></div>`);
+    modal(`<div class="order-success level-up-result"><span class="label-kicker">LEVEL UP!</span>${characterPortrait(level,'level-preview',level)}<h2>${esc(reward.product_name)}${reward.kind==='sunglasses'?' 해제!':' 당첨!'}</h2><div class="bread-prize">${p?`<img src="${productImage(p)}" alt="" width="76" height="64">`:icon(reward.kind==='milk'?'milk':'spark')}<strong>${esc(reward.product_name)}</strong></div><p>${reward.threshold}점 달성을 축하해요.<br>${reward.kind==='sunglasses'?'계정 관리 → 꾸미기에서 착용할 수 있어요.':'물품을 확보했어요. 담당자에게 요청을 보여주고 받아 가세요.'}</p><p class="form-hint">${reward.fulfillment?`이벤트 요청 #${reward.fulfillment.id} · 담당자 지급 대기`:`점수 보상 #${reward.id} · 자동 지급됐어요.`}</p><button class="primary-button full" data-action="close-modal">확인</button></div>`);
   } catch(error) {
     if(error.status>=400&&error.status<500)op.done();state.leveling=false;button.disabled=false;toast(error.message,'error');
   }
@@ -274,14 +322,18 @@ else if(action==='profile-tab'){
   editor.querySelectorAll('[data-action="profile-tab"]').forEach(button=>{const selected=button===el;button.classList.toggle('active',selected);button.setAttribute('aria-pressed',String(selected));});
   editor.querySelectorAll('[data-profile-panel]').forEach(panel=>panel.hidden=panel.dataset.profilePanel!==el.dataset.tab);
 }
-else if(action==='logout'){if(profileSaving)return;await api('/api/auth/logout',{method:'POST',body:{}});localStorage.removeItem(tokenKey);state.token=null;state.user=null;state.orders=[];state.rewards=[];state.staffData=null;state.reservation=null;state.lastRoll=null;state.selectedDice=null;closeModal();render();toast('다음에 또 따뜻한 빵으로 만나요.');}
+else if(action==='logout'){if(profileSaving)return;await api('/api/auth/logout',{method:'POST',body:{}});localStorage.removeItem(tokenKey);state.token=null;state.user=null;state.orders=[];state.rewards=[];state.rewardRequests=[];state.staffData=null;state.reservation=null;state.lastRoll=null;state.selectedDice=null;closeModal();render();toast('다음에 또 따뜻한 빵으로 만나요.');}
 else if(action==='cart-plus'||action==='cart-minus'||action==='remove-cart'){const id=Number(el.dataset.id),p=state.products.find(p=>p.id===id);const quantity=action==='remove-cart'?0:(state.cart[id]||0)+(action==='cart-plus'?1:-1);if(quantity>p.stock){toast('지금 남은 수량만큼 담을 수 있어요.','error');return;}const basketOpen=!!document.querySelector('.modal .basket');if(quantity>0)state.cart[id]=quantity;else delete state.cart[id];render();if(basketOpen)modal(renderBasket());}
 else if(action==='open-cart')modal(renderBasket());
 else if(action==='checkout')await checkout(el);
 else if(action==='claim-preorder'){el.disabled=true;try{const {order}=await api(`/api/preorders/${el.dataset.id}/claim`,{method:'POST',body:{request_id:el.dataset.requestId||(el.dataset.requestId=requestId())}});if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);await refreshAfterAction();state.route='orders';location.hash='orders';render();toast(order.status==='approved'?'이미 픽업을 완료한 예약이에요.':'픽업을 요청했어요. 담당자에게 말씀해 주세요.');}catch(error){el.disabled=false;throw error;}}
 else if(action==='select-dice'){if(!state.rolling&&!state.leveling){state.selectedDice=el.dataset.kind;state.lastRoll=null;render();}}
 else if(action==='roll-dice')await rollDice();
+else if(action==='open-milestone')openMilestone(Number(el.dataset.threshold));
 else if(action==='claim-reward')await claimReward(el);
+else if(action==='open-beverage-choice'){if(!state.rolling&&!state.leveling)openBeverageChoice(state.rewardRequests.find(r=>r.id===Number(el.dataset.request)&&r.status==='awaiting_choice'));}
+else if(action==='choose-beverage')await chooseBeverage(el);
+else if(action==='decline-beverage')await chooseBeverage(el,true);
 else if(action==='retry')location.reload();
 else await handleAdminClick(action,el,event);
 }catch(error){toast(error.message||'잠시 후 다시 시도해 주세요.','error');}});
@@ -289,8 +341,8 @@ document.addEventListener('submit',async event=>{const form=event.target;event.p
 document.addEventListener('keydown',event=>{if(!document.querySelector('.modal'))return;if(event.key==='Escape'&&!profileSaving)closeModal();if(event.key==='Tab'){const focusables=[...document.querySelectorAll('.modal button:not(:disabled),.modal a[href],.modal input:not([disabled]),.modal select,.modal textarea')].filter(n=>n.offsetParent!==null);const first=focusables[0],last=focusables.at(-1);if(event.shiftKey&&document.activeElement===first){last?.focus();event.preventDefault();}else if(!event.shiftKey&&document.activeElement===last){first?.focus();event.preventDefault();}}});
 window.addEventListener('hashchange',()=>{state.route=location.hash.slice(1)||(isAdmin?'queue':'shop');render();});
 let polling=false,pendingRender=false;
-function snapshot(){return JSON.stringify([state.user,state.products,state.orders,state.staffData,state.leaderboard,state.rewards]);}
+function snapshot(){return JSON.stringify([state.user,state.products,state.orders,state.staffData,state.leaderboard,state.rewards,state.rewardRequests]);}
 function safeToRender(){return !document.querySelector('.modal')&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)&&!state.rolling&&!state.leveling;}
-setInterval(async()=>{if(polling||state.rolling||state.leveling||document.hidden)return;polling=true;try{const before=snapshot();const oldOrders=isAdmin?state.staffData?.orders||[]:state.orders;await refresh();const newOrders=isAdmin?state.staffData?.orders||[]:state.orders;if(isAdmin){const fresh=newOrders.filter(o=>o.status==='pending'&&!oldOrders.some(old=>old.id===o.id));if(fresh.length)toast(`${fresh[0].customer_name} 님의 새 주문이 도착했어요.`);}else{const newlyApproved=newOrders.find(o=>o.status==='approved'&&oldOrders.find(old=>old.id===o.id&&old.status==='pending'));if(newlyApproved)toast(`주문이 승인됐어요. ${orderDice(newlyApproved)?`주사위 ${orderDice(newlyApproved)}개가 도착했어요!`:'우유 구매에는 주사위가 지급되지 않아요.'}`);}if(before!==snapshot())pendingRender=true;if(pendingRender&&safeToRender()){render();pendingRender=false;}}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;render();toast('다시 로그인해 주세요.','error');}}finally{polling=false;}},4000);
+setInterval(async()=>{if(polling||state.rolling||state.leveling||document.hidden)return;polling=true;try{const before=snapshot();const oldOrders=isAdmin?state.staffData?.orders||[]:state.orders,oldRewards=state.staffData?.reward_requests||[];await refresh();const newOrders=isAdmin?state.staffData?.orders||[]:state.orders;if(isAdmin){const freshRewards=(state.staffData?.reward_requests||[]).filter(r=>r.status==='pending'&&!oldRewards.some(old=>old.id===r.id&&old.status==='pending'));if(freshRewards.length)toast(`${freshRewards[0].customer_name} 님의 이벤트 지급 요청이 도착했어요.`);const fresh=newOrders.filter(o=>o.status==='pending'&&!oldOrders.some(old=>old.id===o.id));if(fresh.length)toast(`${fresh[0].customer_name} 님의 새 주문이 도착했어요.`);}else{const newlyApproved=newOrders.find(o=>o.status==='approved'&&oldOrders.find(old=>old.id===o.id&&old.status==='pending'));if(newlyApproved)toast(`주문이 승인됐어요. ${orderDice(newlyApproved)?`주사위 ${orderDice(newlyApproved)}개가 도착했어요!`:'음료 구매에는 주사위가 지급되지 않아요.'}`);}if(before!==snapshot())pendingRender=true;if(pendingRender&&safeToRender()){render();pendingRender=false;}}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;render();toast('다시 로그인해 주세요.','error');}}finally{polling=false;}},4000);
 async function boot(){try{await refresh();render();}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;await refresh();render();}else document.querySelector('#app').innerHTML=`<div class="connection-error">${brand()}<h1>빵집에 연결하고 있어요</h1><p>잠시 후 다시 연결해 주세요.<br>${esc(error.message)}</p><button class="primary-button" data-action="retry">다시 연결하기 ${icon('arrow')}</button></div>`;}}
 boot();

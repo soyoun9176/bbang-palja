@@ -11,7 +11,7 @@ DICE = {
 
 MILESTONES = (
     {'threshold': 5, 'kind': 'oatmeal', 'name': '오트밀 미니바이트', 'extra': '프로필 배지 1 · 추후 추가'},
-    {'threshold': 10, 'kind': 'milk', 'name': '우유', 'extra': '프로필 배지 2 · 추후 추가'},
+    {'threshold': 10, 'kind': 'milk', 'name': '우유 또는 두유', 'extra': '프로필 배지 2 · 추후 추가'},
     {'threshold': 15, 'kind': 'sunglasses', 'name': '멋진 선글라스', 'extra': '칭호 「멋쟁이 마법사」 · 추후 추가'},
     {'threshold': 20, 'kind': 'bread', 'name': '랜덤 빵 1개', 'extra': ''},
     {'threshold': 30, 'kind': 'bread', 'name': '랜덤 빵 1개', 'extra': '담당자가 지어주는 커스텀 칭호 · 추후 추가'},

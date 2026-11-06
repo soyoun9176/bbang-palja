@@ -11,7 +11,7 @@ const source = profileSource + '\n' + readFileSync(new URL('../frontend/app.js',
   .replace(/^import[^\n]+\n/gm, '')
   .replace(/\nboot\(\);\s*$/, '');
 
-function fixture({guest = false, storage = new Map()} = {}) {
+function fixture({guest = false, storage = new Map(), admin=false} = {}) {
   const remote = {stock: 3, score: 10, approved: false, modal: false};
   const root = {innerHTML: ''};
   let renderCount = 0;
@@ -20,7 +20,7 @@ function fixture({guest = false, storage = new Map()} = {}) {
   const response = (body, status = 200) => ({ok: status < 400, status, json: async () => body});
   const context = {
     crypto: {getRandomValues: bytes => webcrypto.getRandomValues(bytes)},
-    location: {pathname: '/', hash: '#shop'}, history: {replaceState(...args) {routeChanges.push(args[2]);}},
+    location: {pathname: admin?'/admin/':'/', hash: '#shop'}, history: {replaceState(...args) {routeChanges.push(args[2]);}},
     localStorage: {getItem: () => guest ? null : 'token-A', removeItem() {}, setItem() {}},
     sessionStorage: {getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key)},
     window: {KAMBO_CONFIG: {apiBase: ''}, addEventListener() {}},
@@ -412,23 +412,49 @@ test('event actions remain available while the leaderboard is loading',async()=>
   assert.match(f.root.innerHTML,/현재 점수/);
 });
 
-test('milestone roadmap shows five once-only rewards and growth waits for claim', async()=>{
-  const f=fixture();await f.run('refresh()');
-  f.run("state.route='ranking'; state.user.score=4; renderPage()");
+test('score bar has image bubbles that unlock by score and reveal claim controls only in details', async()=>{
+  const f=fixture();await f.run('refresh()');let prompt='';
+  f.context.capture=html=>prompt=html;f.run('modal=capture');
+  f.run("state.route='ranking';state.user.score=4;renderPage()");
   assert.match(f.root.innerHTML,/1점 더 모으면 레벨업!/);
   assert.match(f.root.innerHTML,/character-unknown/);
-  assert.doesNotMatch(f.root.innerHTML,/data-action="claim-reward"/);
-  for(const reward of ['오트밀 미니바이트','프로필 배지 1 · 추후 추가','우유','프로필 배지 2 · 추후 추가','멋진 선글라스','멋쟁이 마법사','커스텀 칭호'])assert.match(f.root.innerHTML,new RegExp(reward));
-  assert.doesNotMatch(f.root.innerHTML,/10점마다|50점까지/);
-  f.run('state.user.score=5; renderPage()');
-  assert.equal(f.run('eventProgress().level'),0);
-  assert.match(f.root.innerHTML,/5점 보상 받기/);
-  f.run('state.user.claimed_milestones=[5];state.user.level=1;renderPage()');
+  assert.match(f.root.innerHTML,/aria-valuemax="30" aria-valuenow="4"/);
+  assert.equal((f.root.innerHTML.match(/data-action="open-milestone"/g)||[]).length,5);
+  for(const point of [5,10,15,20,30])assert.match(f.root.innerHTML,new RegExp(`data-threshold="${point}"`));
+  assert.doesNotMatch(f.root.innerHTML,/data-action="claim-reward"|milestone-roadmap|10점마다|50점까지/);
+  f.run('openMilestone(5)');
+  assert.match(prompt,/오트밀 미니바이트/);
+  assert.match(prompt,/프로필 배지 1 · 추후 추가/);
+  assert.match(prompt,/1점 더 모으면/);
+  assert.match(prompt,/\/assets\/oatmeal.svg/);
+  assert.doesNotMatch(prompt,/data-action="claim-reward"/);
+  f.run('state.user.score=5;renderPage();openMilestone(5)');
+  assert.match(f.root.innerHTML,/milestone-trigger is-achieved [^"]*" data-action="open-milestone" data-threshold="5"/);
+  assert.match(prompt,/data-action="claim-reward" data-threshold="5">상품 받기/);
+  f.run('openMilestone(15)');
+  assert.match(prompt,/멋진 선글라스/);
+  assert.match(prompt,/멋쟁이 마법사/);
+  assert.doesNotMatch(prompt,/data-action="claim-reward"/);
+  f.run('state.user.claimed_milestones=[5];state.user.level=1;renderPage();openMilestone(5)');
   assert.match(f.root.innerHTML,/data-character-level="1"/);
-  assert.match(f.root.innerHTML,/5점 더 모으면 레벨업!/);
+  assert.match(f.root.innerHTML,/is-claimed/);
+  assert.doesNotMatch(prompt,/data-action="claim-reward"/);
   f.run('state.user.score=60;state.user.level=5;state.user.claimed_milestones=[5,10,15,20,30];renderPage()');
   assert.match(f.root.innerHTML,/30점 보상까지 모두 받았어요/);
-  assert.doesNotMatch(f.root.innerHTML,/data-action="claim-reward"/);
+  assert.match(f.root.innerHTML,/aria-valuemax="30" aria-valuenow="30"/);
+  assert.match(f.root.innerHTML,/width:100%/);
+});
+
+test('claiming an achieved bubble sends that threshold rather than the first unclaimed reward',async()=>{
+  const f=fixture();await f.run('refresh()');let prompt='';
+  f.context.capture=html=>prompt=html;f.run('modal=capture;state.user.score=20;openMilestone(15)');
+  assert.match(prompt,/멋진 선글라스/);
+  assert.match(prompt,/data-threshold="15">상품 받기/);
+  assert.equal(f.requests.filter(r=>r.path==='/api/rewards/claim').length,0);
+  f.context.fetchOverride=(path,options)=>path==='/api/rewards/claim'?f.response({reward:{id:2,threshold:15,kind:'sunglasses',product_name:'멋진 선글라스'},user:{id:1,name:'구매자1',score:20,level:1,claimed_milestones:[15]}}):f.context.normalFetch(path,options);
+  await f.run("claimReward({dataset:{threshold:'15'},disabled:false})");
+  const request=f.requests.find(r=>r.path==='/api/rewards/claim');
+  assert.equal(JSON.parse(request.body).threshold,15);
 });
 
 test('level-up waits for one server claim before revealing the reward', async () => {
@@ -488,10 +514,10 @@ test('a selected typed die sends only its kind and a retry-safe identifier',asyn
 test('milk dice outcomes show milk instead of a zero-point die or automatic milestone claim',async()=>{
   const f=fixture();await f.run('refresh()');let prompt='';
   f.context.capture=html=>prompt=html;f.run('modal=capture');
-  f.context.fetchOverride=(path,options)=>path==='/api/dice/roll'?f.response({id:4,result:'milk',value:0,score:0,dice_balance:1,dice:{color:'pink'}}):f.context.normalFetch(path,options);
+  f.context.fetchOverride=(path,options)=>path==='/api/dice/roll'?f.response({id:4,result:'milk',value:0,score:0,dice_balance:1,dice:{color:'pink'},fulfillment:{id:4,status:'awaiting_choice'}}):f.context.normalFetch(path,options);
   await f.run('rollDice()');
-  assert.match(prompt,/우유 당첨!/);
-  assert.match(prompt,/당첨 #4/);
+  assert.match(prompt,/우유 보상 당첨!/);
+  assert.match(prompt,/이벤트 요청 #4/);
   assert.doesNotMatch(prompt,/\+0점|주사위 0/);
   assert.equal(f.requests.filter(r=>r.path==='/api/rewards/claim').length,0);
   assert.match(f.run("die('milk','pink')"),/우유 당첨/);
@@ -504,7 +530,7 @@ function adminFixture() {
   let renderCalls=0;
   const state={user:{id:1},route:'events',products:[],staffData:{users:[{id:10,name:'등록사용자'}],stats:{milk_stock:2},
     products:[{id:101,name:'플레인 휘낭시에',stock:2,preorder_stock:0,price:2800,dice_per_unit:1},
-              {id:112,name:'우유',stock:2,preorder_stock:0,price:2000,dice_per_unit:0}]}};
+              {id:112,name:'우유',stock:2,preorder_stock:0,price:1000,dice_per_unit:0}]}};
   const context={document:{addEventListener(type,listener){listeners[type]=listener;},querySelector:selector=>nodes.get(selector)||null},FormData:class {
     constructor(form){this.values=form.values;}
     get(key){return this.values.get(key)??null;}
@@ -531,10 +557,102 @@ function adminFixture() {
 }
 
 function manualReservation(overrides={}) {
-  return {id:7,name:'등록사용자',phone:'01012345678',status:'reserved',total:7600,dice_quantity:2,
-    items:[{product_id:101,name:'플레인 휘낭시에',quantity:2,price:2800},{product_id:112,name:'우유',quantity:1,price:2000}],
+  return {id:7,name:'등록사용자',phone:'01012345678',status:'reserved',total:6600,dice_quantity:2,
+    items:[{product_id:101,name:'플레인 휘낭시에',quantity:2,price:2800},{product_id:112,name:'우유',quantity:1,price:1000}],
     order:null,...overrides};
 }
+
+test('staff navigation follows order, event, manual sale, stock and handover',()=>{
+  const f=fixture({admin:true});
+  f.run("state.user={id:1,name:'담당',role:'staff'};state.staffData={stats:{pending_rewards:2}};renderPage()");
+  const nav=f.root.innerHTML.match(/<nav class="primary-nav"[^>]*>(.*?)<\/nav>/s)[1];
+  assert.deepEqual([...nav.matchAll(/data-route="([^"]+)"/g)].map(m=>m[1]),['queue','events','sales','inventory','notes']);
+  for(const label of ['주문','이벤트','수기판매','재고관리','인수인계'])assert.match(nav,new RegExp(label));
+  assert.match(nav,/data-route="events"[^>]*>.*?pending-pill">2/s);
+});
+
+test('event page defaults to physical requests and keeps Instagram in a separate subtab',()=>{
+  const f=adminFixture();
+  f.state.staffData.reward_requests=[{id:1,user_id:10,customer_name:'등록사용자',status:'pending',product_id:101,product_name:'플레인 휘낭시에',threshold:20,remaining_stock:2},
+    {id:2,user_id:10,customer_name:'등록사용자',status:'awaiting_choice',product_name:'우유·두유 선택',roll_id:5}];
+  let html=f.run('renderAdmin()');
+  assert.match(html,/전달 완료 · 승인/);
+  assert.match(html,/이벤트 #1/);
+  assert.doesNotMatch(html,/id="admin-instagram"|이벤트 #2/);
+  f.run("eventFilter='awaiting_choice'");html=f.run('renderAdmin()');
+  assert.match(html,/이벤트 #2/);
+  assert.doesNotMatch(html,/전달 완료 · 승인/);
+  f.run("eventTab='instagram'");html=f.run('renderAdmin()');
+  assert.match(html,/id="admin-instagram"/);
+});
+
+test('staff approval and cancellation use fulfillment transitions without extra inventory requests',async()=>{
+  const f=adminFixture();let prompt='';
+  f.context.shared.modal=html=>prompt=html;
+  f.state.staffData.reward_requests=[{id:9,user_id:10,customer_name:'등록사용자',status:'pending',product_name:'두유'}];
+  await f.run("handleAdminClick('admin-event-cancel',{dataset:{id:'9'}})");
+  assert.equal(f.requests.length,0);
+  assert.match(prompt,/확보한 재고 1개를 반환/);
+  assert.match(prompt,/취소 후 다시 뽑지 않습니다/);
+  await f.run("handleAdminClick('admin-event-transition',{dataset:{id:'9',mode:'cancel'}})");
+  await f.run("handleAdminClick('admin-event-transition',{dataset:{id:'9',mode:'approve'}})");
+  assert.deepEqual(f.requests.map(r=>r.path),['/api/staff/reward-requests/9/cancel','/api/staff/reward-requests/9/approve']);
+});
+
+test('stock on hold includes pending event requests but excludes unselected and cancelled rewards',()=>{
+  const f=adminFixture();f.state.route='inventory';
+  f.state.staffData.orders=[{status:'pending',items:[{product_id:101,quantity:2}]}];
+  f.state.staffData.reward_requests=[{status:'pending',product_id:101},{status:'awaiting_choice',product_id:null},{status:'cancelled',product_id:101}];
+  assert.equal(f.run('heldStock(101)'),3);
+  assert.match(f.run('renderAdmin()'),/<td>2<\/td><td>0<\/td><td>3<\/td><td><strong>5<\/strong>/);
+});
+
+test('beverage selection disables sold-out drinks and allows declining only when all are sold out',async()=>{
+  const f=fixture();await f.run('refresh()');
+  f.run("state.products=[{id:112,name:'우유',stock:0,beverage_reward_eligible:true},{id:113,name:'두유',stock:1,beverage_reward_eligible:true}]");
+  let html=f.run('beverageOptions({id:9})');
+  assert.match(html,/data-product="112" disabled/);
+  assert.match(html,/data-product="113" >.*두유 선택/s);
+  assert.doesNotMatch(html,/decline-beverage/);
+  f.run('state.products[1].stock=0');html=f.run('beverageOptions({id:9})');
+  assert.match(html,/모두 품절/);
+  assert.match(html,/data-action="decline-beverage"/);
+});
+
+test('beverage choice posts selected product once and refreshes the staff-pending state',async()=>{
+  const f=fixture();await f.run('refresh()');let release;
+  let row={id:9,status:'awaiting_choice',product_name:'우유·두유 선택'};
+  f.run('closeModal=()=>{}');
+  f.context.fetchOverride=(path,options)=>{
+    if(path==='/api/reward-requests/9/choose')return new Promise(resolve=>release=()=>{row={...row,status:'pending',product_id:113,product_name:'두유'};resolve(f.response({request:row}));});
+    if(path==='/api/rewards')return f.response({rewards:[],requests:[row]});
+    return f.context.normalFetch(path,options);
+  };
+  const first=f.run("chooseBeverage({dataset:{request:'9',product:'113'}})");
+  await f.run("chooseBeverage({dataset:{request:'9',product:'112'}})");
+  assert.equal(f.requests.filter(r=>r.path.includes('/choose')).length,1);
+  const body=JSON.parse(f.requests.find(r=>r.path.includes('/choose')).body);
+  assert.equal(body.product_id,113);
+  assert.deepEqual(Object.keys(body).sort(),['product_id','request_id']);
+  release();await first;
+  assert.equal(f.run('state.rewardRequests[0].status'),'pending');
+  assert.match(f.run('renderRewardRequests()'),/담당자 지급 대기/);
+});
+
+test('a stock conflict refreshes the drink choices without drawing a new reward',async()=>{
+  const f=fixture();await f.run('refresh()');let prompt='';
+  f.context.capture=html=>prompt=html;f.run('modal=capture;closeModal=()=>{}');
+  f.context.fetchOverride=(path,options)=>{
+    if(path.includes('/choose'))return f.response({error:'두유 재고가 부족합니다.'},409);
+    if(path==='/api/products')return f.response({products:[{id:112,name:'우유',stock:0,beverage_reward_eligible:true},{id:113,name:'두유',stock:0,beverage_reward_eligible:true}]});
+    if(path==='/api/rewards')return f.response({rewards:[],requests:[{id:9,status:'awaiting_choice'}]});
+    return f.context.normalFetch(path,options);
+  };
+  await f.run("chooseBeverage({dataset:{request:'9',product:'113'}})");
+  assert.match(prompt,/모두 품절/);
+  assert.match(prompt,/decline-beverage/);
+  assert.equal(f.requests.filter(r=>r.path==='/api/dice/roll'||r.path==='/api/rewards/claim').length,0);
+});
 
 test('preorder status search accepts partial names, formatted phones and combined menu terms',()=>{
   const f=adminFixture();f.state.route='inventory';
@@ -686,7 +804,7 @@ test('reservation lookup shows original items and completes for the matching buy
   let html=f.run('renderAdmin()');
   assert.match(html,/플레인 휘낭시에 × 2/);
   assert.match(html,/우유 × 1/);
-  assert.match(html,/7600원/);
+  assert.match(html,/6600원/);
   assert.match(html,/주사위 2개를 지급/);
   assert.match(html,/<select id="admin-pickup-user" name="user_id" required/);
   assert.match(html,/<option value="10" selected>등록사용자/);
@@ -702,8 +820,8 @@ test('reservation lookup shows original items and completes for the matching buy
 
 test('reservation pickup creates a new buyer PIN only when no account exists',async()=>{
   const f=adminFixture();f.state.route='sales';
-  const reservation=manualReservation({name:'새예약자',dice_quantity:0,total:2000,
-    items:[{product_id:112,name:'우유',quantity:1,price:2000}]});
+  const reservation=manualReservation({name:'새예약자',dice_quantity:0,total:1000,
+    items:[{product_id:112,name:'우유',quantity:1,price:1000}]});
   f.context.respond=async path=>path.endsWith('/lookup')?{reservation}:{reservation:{...reservation,status:'approved'},
     order:{id:9,dice_quantity:0},already_completed:false};
   await f.run("handleAdminClick('admin-sale-type',{dataset:{type:'preorder'}})");
@@ -712,7 +830,7 @@ test('reservation pickup creates a new buyer PIN only when no account exists',as
   await f.run("handleAdminClick('admin-pickup-mode',{dataset:{mode:'new'}})");
   const html=f.run('renderAdmin()');
   assert.match(html,/name="pin" type="password"/);
-  assert.match(html,/우유는 주사위를 지급하지 않습니다/);
+  assert.match(html,/우유·두유는 주사위를 지급하지 않습니다/);
   assert.doesNotMatch(html,/name="user_id"/);
   await f.submit({pin:'2345'},'admin-manual-preorder-complete');
   assert.deepEqual(f.requests[1].body,{name:'새예약자',phone:reservation.phone,pin:'2345',request_id:'request-1'});
@@ -784,7 +902,7 @@ test('editing a reservation lookup or switching sale type ignores an older respo
 });
 
 test('Instagram certification grants one special die without milk controls',()=>{
-  const f=adminFixture(),html=f.run('renderAdmin()');
+  const f=adminFixture();f.run("eventTab='instagram'");const html=f.run('renderAdmin()');
   assert.match(html,/<option value="10"[^>]*>등록사용자/);
   assert.match(html,/인싸 마법사의 주사위 1개 지급/);
   assert.doesNotMatch(html,/<input[^>]*name="(?:dice|milk_quantity|name|pin)"/);
@@ -828,20 +946,20 @@ test('inventory offers a collapsed preorder status table with plain menu text an
 test('milk purchase and mixed order messages use bread dice rather than total quantity',async()=>{
   const f=fixture();
   await f.run('refresh()');
-  f.run("state.route='orders'; state.orders=[{id:1,type:'walkin',status:'approved',quantity:3,dice_quantity:2,total:7600,items:[{name:'빵',quantity:2,price:2800},{name:'우유',quantity:1,price:2000}]}]; renderPage()");
+  f.run("state.route='orders'; state.orders=[{id:1,type:'walkin',status:'approved',quantity:3,dice_quantity:2,total:6600,items:[{name:'빵',quantity:2,price:2800},{name:'우유',quantity:1,price:1000}]}]; renderPage()");
   assert.match(f.root.innerHTML,/구매 완료 · 주사위 2개 지급/);
   assert.doesNotMatch(f.root.innerHTML,/주사위 3개 지급/);
   f.run('state.orders[0].dice_quantity=0; renderPage()');
-  assert.match(f.root.innerHTML,/우유는 주사위 미지급/);
-  f.run("state.route='shop'; state.products=[{id:112,name:'우유',price:2000,stock:2,dice_per_unit:0}]; state.cart={112:2}; renderPage()");
+  assert.match(f.root.innerHTML,/음료는 주사위 미지급/);
+  f.run("state.route='shop'; state.products=[{id:112,name:'우유',price:1000,stock:2,dice_per_unit:0}]; state.cart={112:2}; renderPage()");
   assert.match(f.root.innerHTML,/주사위 미지급/);
   let prompt='';
   f.context.captureModal=html=>{prompt=html;};f.run('modal=captureModal');
   f.context.fetchOverride=async(path,options)=>{
-    if(path==='/api/orders'&&options.method==='POST')return f.response({order:{id:9,quantity:2,dice_quantity:0,total:4000}});
+    if(path==='/api/orders'&&options.method==='POST')return f.response({order:{id:9,quantity:2,dice_quantity:0,total:2000}});
     return f.context.normalFetch(path,options);
   };
   await f.run('checkout({disabled:false})');
-  assert.match(prompt,/우유 구매에는 주사위가 지급되지 않아요/);
+  assert.match(prompt,/음료 구매에는 주사위가 지급되지 않아요/);
   assert.doesNotMatch(prompt,/주사위 2개/);
 });

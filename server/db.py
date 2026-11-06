@@ -145,6 +145,22 @@ CREATE TABLE IF NOT EXISTS event_supplies (
  name TEXT NOT NULL,
  stock INTEGER NOT NULL CHECK (stock >= 0)
 );
+CREATE TABLE IF NOT EXISTS reward_requests (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ user_id INTEGER NOT NULL REFERENCES users(id),
+ milestone_id INTEGER UNIQUE REFERENCES milestone_claims(id),
+ roll_id INTEGER UNIQUE REFERENCES typed_dice_rolls(id),
+ kind TEXT NOT NULL CHECK (kind IN ('bread','milk','oatmeal')),
+ status TEXT NOT NULL CHECK (status IN ('awaiting_choice','pending','approved','cancelled')),
+ product_id INTEGER REFERENCES products(id),
+ supply_key TEXT REFERENCES event_supplies(key),
+ product_name TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ requested_at TEXT,
+ processed_at TEXT,
+ processed_by TEXT,
+ CHECK ((milestone_id IS NOT NULL AND roll_id IS NULL) OR (milestone_id IS NULL AND roll_id IS NOT NULL))
+);
 CREATE TABLE IF NOT EXISTS memos (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  content TEXT NOT NULL,

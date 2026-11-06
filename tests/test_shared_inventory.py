@@ -72,6 +72,8 @@ class SharedInventoryTests(unittest.TestCase):
             result=self.draw(token,identity)
             self.assertEqual(self.draw(token,identity),result)
             self.assertEqual((result['reward']['threshold'],result['reward']['kind']),(threshold,kind))
+            if kind=='milk':
+                self.request('POST',f"/api/reward-requests/{result['reward']['fulfillment']['id']}/choose",{'product_id':112,'request_id':uuid.uuid4().hex},token)
             user=self.request('GET','/api/auth/me',token=token)['user']
             self.assertEqual((user['level'],user['rewards_claimed']),(level,level))
         self.assertEqual(self.product(101)['stock'],0)
@@ -162,7 +164,7 @@ class SharedInventoryTests(unittest.TestCase):
         with self.app.db.transaction() as tx:
             logs = tx.all("SELECT * FROM inventory_logs WHERE bucket='stock' AND delta=-1")
             self.assertEqual(len(logs), 1)
-            self.assertIn('이벤트 보상', logs[0]['reason'])
+            self.assertIn('이벤트 지급 요청', logs[0]['reason'])
             self.assertEqual(tx.one("SELECT COUNT(*) AS count FROM milestone_claims WHERE kind='bread'")['count'], 1)
 
     def test_last_unit_cannot_be_both_ordered_and_drawn(self):

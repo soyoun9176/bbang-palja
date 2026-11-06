@@ -81,7 +81,8 @@ class TypedDiceTests(unittest.TestCase):
         self.assertEqual(self.me()['dice_balance'],0)
         with self.app.db.transaction() as tx:
             self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM typed_dice_rolls')['n'],36)
-            self.assertEqual(tx.one('SELECT stock FROM products WHERE id=112')['stock'],1)
+            self.assertEqual(tx.one('SELECT stock FROM products WHERE id=112')['stock'],3)
+            self.assertEqual(tx.one("SELECT COUNT(*) AS n FROM reward_requests WHERE status='awaiting_choice'")['n'],2)
             self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM dice_rolls')['n'],0)
 
     def test_forged_kind_and_client_result_cannot_spend_other_dice(self):

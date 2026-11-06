@@ -15,7 +15,7 @@ import traceback
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from .db import Database
-from .catalog import PRODUCT_IDS, PRODUCT_UNITS, PRODUCT_PHOTOS, MILK_PRODUCT_ID, REWARD_PRODUCT_IDS, dice_quantity, sync_catalog
+from .catalog import PRODUCT_IDS, PRODUCT_UNITS, PRODUCT_PHOTOS, MILK_PRODUCT_ID, DRINK_PRODUCT_IDS, REWARD_PRODUCT_IDS, dice_quantity, sync_catalog
 from .game import DICE, MILESTONES, public_dice, preorder_kind
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -189,8 +189,68 @@ def order_dice(order):
     return (preorder_kind(order['total']), 1 if count else 0) if order['type'] == 'preorder' else ('walkin', count)
 
 
-def award_milk(tx, user, reason):
-    change_inventory(tx, MILK_PRODUCT_ID, 'stock', -1, reason, user['name'])
+def reward_requests(tx, user_id=None):
+    rows = tx.all('SELECT r.*,u.name AS customer_name,COALESCE(m.threshold,0) AS threshold '
+                  'FROM reward_requests r JOIN users u ON u.id=r.user_id '
+                  'LEFT JOIN milestone_claims m ON m.id=r.milestone_id' +
+                  (' WHERE r.user_id=?' if user_id is not None else '') + ' ORDER BY r.id DESC',
+                  (user_id,) if user_id is not None else ())
+    if user_id is None:
+        inventory = {p['id']: p['stock'] for p in tx.all('SELECT id,stock FROM products')}
+        supplies = {p['key']: p['stock'] for p in tx.all('SELECT key,stock FROM event_supplies')}
+        for row in rows:
+            row['remaining_stock'] = inventory.get(row['product_id']) if row['product_id'] else supplies.get(row['supply_key'])
+    else:
+        for row in rows:
+            row.pop('processed_by')
+    return rows
+
+
+def reward_request(tx, request_id):
+    row = tx.one('SELECT * FROM reward_requests WHERE id=?', (request_id,))
+    check(row is not None, '이벤트 지급 요청을 찾을 수 없습니다.', 404)
+    return row
+
+
+def change_supply(tx, key, delta, reason, actor):
+    supply = tx.one('SELECT * FROM event_supplies WHERE key=?', (key,))
+    check(supply is not None, '이벤트 물품을 찾을 수 없습니다.', 404)
+    check(supply['stock'] + delta >= 0, f"{supply['name']} 재고가 부족합니다. 담당자에게 문의해 주세요.", 409)
+    tx.execute('UPDATE event_supplies SET stock=stock+? WHERE key=?', (delta,key))
+    tx.insert('INSERT INTO inventory_logs(product_name,bucket,delta,reason,actor,created_at) VALUES(?,?,?,?,?,?)',
+              (supply['name'], 'event_supply', delta, reason, actor, now()))
+
+
+def create_reward_request(tx, user, kind, selected=None, *, milestone_id=None, roll_id=None):
+    selected = selected or {'id': None, 'name': '우유·두유 선택'}
+    reason = f"{user['name']} 이벤트 지급 요청 · 재고 확보"
+    if kind == 'bread':
+        change_inventory(tx, selected['id'], 'stock', -1, reason, user['name'])
+    elif kind == 'oatmeal':
+        change_supply(tx, 'oatmeal', -1, reason, user['name'])
+    stamp = now()
+    request_id = tx.insert('INSERT INTO reward_requests(user_id,milestone_id,roll_id,kind,status,product_id,supply_key,product_name,created_at,requested_at) '
+                           'VALUES(?,?,?,?,?,?,?,?,?,?)',
+                           (user['id'],milestone_id,roll_id,kind,'awaiting_choice' if kind=='milk' else 'pending',
+                            selected['id'],'oatmeal' if kind=='oatmeal' else None,selected['name'],stamp,None if kind=='milk' else stamp))
+    return reward_request(tx, request_id)
+
+
+def process_reward_request(tx, row, action, actor):
+    desired = 'approved' if action == 'approve' else 'cancelled'
+    if row['status'] == desired:
+        return row
+    check(row['status'] in ('pending','awaiting_choice'), '이미 처리된 이벤트 요청입니다. 현재 상태를 확인해 주세요.', 409)
+    if desired == 'approved':
+        check(row['status'] == 'pending', '구매자가 우유 또는 두유를 먼저 선택해야 합니다.', 409)
+    elif row['status'] == 'pending':
+        reason = f"이벤트 요청 #{row['id']} 취소 · 재고 반환"
+        if row['product_id'] is not None:
+            change_inventory(tx, row['product_id'], 'stock', 1, reason, actor)
+        else:
+            change_supply(tx, row['supply_key'], 1, reason, actor)
+    tx.execute('UPDATE reward_requests SET status=?,processed_at=?,processed_by=? WHERE id=?', (desired,now(),actor,row['id']))
+    return reward_request(tx, row['id'])
 
 
 def reward_history(tx, user_id=None):
@@ -203,6 +263,14 @@ def reward_history(tx, user_id=None):
                   "FROM typed_dice_rolls r JOIN users u ON u.id=r.user_id" +
                   (' WHERE r.user_id=? AND' if user_id is not None else ' WHERE') +
                   " r.result='milk' ORDER BY r.id DESC LIMIT 300", args)
+    requests = reward_requests(tx, user_id)
+    milestones = {r['milestone_id']:r for r in requests if r['milestone_id'] is not None}
+    rolls = {r['roll_id']:r for r in requests if r['roll_id'] is not None}
+    for item in current + milk:
+        item['fulfillment'] = (rolls if item['kind']=='dice_milk' else milestones).get(item['id'])
+        if item['fulfillment']:
+            item['product_name'] = item['fulfillment']['product_name']
+            item['product_id'] = item['fulfillment']['product_id']
     return sorted(current + legacy + milk, key=lambda r: r['created_at'], reverse=True)[:300]
 
 
@@ -216,7 +284,8 @@ def products(tx):
     placeholders = ','.join('?' for _ in PRODUCT_IDS)
     rows = tx.all(f"SELECT * FROM products WHERE id IN ({placeholders}) ORDER BY id", PRODUCT_IDS)
     return [{**row, "unit": PRODUCT_UNITS.get(row["id"], "개"), "photo": PRODUCT_PHOTOS.get(row["id"], ""),
-             "dice_per_unit": 0 if row["id"] == MILK_PRODUCT_ID else 1,
+             "dice_per_unit": 0 if row["id"] in DRINK_PRODUCT_IDS else 1,
+             "beverage_reward_eligible": row['id'] in DRINK_PRODUCT_IDS,
              "reward_eligible": row["id"] in REWARD_PRODUCT_IDS} for row in rows]
 
 
@@ -580,15 +649,14 @@ class Application:
                     check(held is not None and held['quantity'] > 0, '선택한 주사위가 없습니다. 보유 주사위를 다시 확인해 주세요.', 409)
                     face = DICE[kind]['faces'][secrets.randbelow(6)]
                     value = 0 if face == 'milk' else face
-                    if face == 'milk':
-                        award_milk(tx, current, f"{current['name']} 주사위 우유 당첨")
                     tx.execute('UPDATE dice_wallet SET quantity=quantity-1 WHERE user_id=? AND kind=?', (user['id'], kind))
                     tx.execute("UPDATE users SET dice_balance = dice_balance - 1, score = score + ? WHERE id = ?", (value, user["id"]))
                     roll_id = tx.insert('INSERT INTO typed_dice_rolls(user_id,kind,result,value,created_at) VALUES(?,?,?,?,?)',
                                         (user['id'], kind, 'milk' if face == 'milk' else 'score', value, now()))
+                    fulfillment = create_reward_request(tx, current, 'milk', roll_id=roll_id) if face=='milk' else None
                     return {'id': roll_id, 'dice': public_dice(kind), 'result': 'milk' if face == 'milk' else 'score',
                             "value": value, "score": current["score"] + value, "dice_balance": current["dice_balance"] - 1,
-                            'user': public_user(user_by_id(tx, user['id']))}
+                            'user': public_user(user_by_id(tx, user['id'])), 'fulfillment': fulfillment}
                 return idempotent(tx, user, "roll", body, roll)
         if method == "GET" and path == "/api/leaderboard":
             with self.db.transaction() as tx:
@@ -599,17 +667,46 @@ class Application:
                 return {"leaders": entries[:3], "neighbors": entries[max(0, position - 2):position + 3], "me": entries[position], "total_participants": len(entries)}
         if method == "GET" and path == "/api/rewards":
             with self.db.transaction() as tx:
-                return {"rewards": reward_history(tx, user['id'])}
+                return {"rewards": reward_history(tx, user['id']), 'requests': reward_requests(tx, user['id'])}
+        match = re.fullmatch(r'/api/reward-requests/([0-9]+)/(choose|decline)', path)
+        if method == 'POST' and match:
+            with self.db.transaction(write=True) as tx:
+                def choose_reward():
+                    row = reward_request(tx, int(match.group(1)))
+                    check(row['user_id'] == user['id'], '본인의 이벤트 지급 요청만 처리할 수 있습니다.', 403)
+                    if match.group(2) == 'decline':
+                        if row['status']=='cancelled':
+                            return {'request':row}
+                        check(row['status']=='awaiting_choice', '이미 선택한 물품은 담당자에게 취소를 요청해 주세요.', 409)
+                        return {'request':process_reward_request(tx,row,'cancel',user['name'])}
+                    product_id = integer(body.get('product_id'), '음료 번호', maximum=1_000_000)
+                    check(product_id in DRINK_PRODUCT_IDS and row['kind']=='milk', '우유 또는 두유를 선택해 주세요.')
+                    if row['status'] in ('pending','approved') and row['product_id']==product_id:
+                        return {'request':row}
+                    check(row['status']=='awaiting_choice', '이미 처리된 요청입니다. 현재 상태를 확인해 주세요.', 409)
+                    product = tx.one('SELECT * FROM products WHERE id=?', (product_id,))
+                    change_inventory(tx,product_id,'stock',-1,f"이벤트 요청 #{row['id']} 음료 선택 · 재고 확보",user['name'])
+                    tx.execute("UPDATE reward_requests SET product_id=?,product_name=?,status='pending',requested_at=? WHERE id=?",
+                               (product_id,product['name'],now(),row['id']))
+                    if row['milestone_id'] is not None:
+                        tx.execute('UPDATE milestone_claims SET product_id=?,product_name=? WHERE id=?', (product_id,product['name'],row['milestone_id']))
+                    return {'request':reward_request(tx,row['id'])}
+                return idempotent(tx,user,f'reward-choice:{match.group(1)}',body,choose_reward)
         if method == "POST" and path == "/api/rewards/claim":
             with self.db.transaction(write=True) as tx:
                 def reward():
                     current = user_by_id(tx, user["id"])
-                    milestone = next((m for m in MILESTONES if m['threshold'] not in current['claimed_milestones']), None)
+                    if 'threshold' in body:
+                        requested = integer(body['threshold'], '보상 점수', maximum=30)
+                        milestone = next((m for m in MILESTONES if m['threshold']==requested), None)
+                        check(milestone is not None, '해당 점수의 보상이 없습니다.')
+                        check(requested not in current['claimed_milestones'], '이미 받은 점수 보상입니다.', 409)
+                    else:
+                        milestone = next((m for m in MILESTONES if m['threshold'] not in current['claimed_milestones']), None)
                     check(milestone is not None, '모든 점수 보상을 받았어요.', 409)
                     threshold, kind = milestone['threshold'], milestone['kind']
                     check(current["score"] >= threshold, f"다음 보상은 {threshold}점부터 가능해요.", 409)
                     selected = {'id': None, 'name': milestone['name']}
-                    reason = f"{current['name']} {threshold}점 이벤트 보상"
                     if kind == 'bread':
                         available = [p for p in products(tx) if p['stock'] > 0 and p['reward_eligible']]
                         total = sum(p['stock'] ** 2 for p in available)
@@ -620,20 +717,13 @@ class Application:
                             if ticket < 0:
                                 selected = product
                                 break
-                        change_inventory(tx, selected['id'], 'stock', -1, reason, current['name'])
                     elif kind == 'milk':
-                        award_milk(tx, current, reason)
-                        selected = {'id': MILK_PRODUCT_ID, 'name': '우유'}
-                    elif kind == 'oatmeal':
-                        supply = tx.one("SELECT stock FROM event_supplies WHERE key='oatmeal'")
-                        check(supply['stock'] > 0, '오트밀 미니바이트 재고가 부족합니다. 담당자에게 문의해 주세요.', 409)
-                        tx.execute("UPDATE event_supplies SET stock=stock-1 WHERE key='oatmeal'")
-                        tx.insert('INSERT INTO inventory_logs(product_name,bucket,delta,reason,actor,created_at) VALUES(?,?,?,?,?,?)',
-                                  ('오트밀 미니바이트', 'event_supply', -1, reason, current['name'], now()))
+                        selected = {'id':None, 'name':'우유·두유 선택'}
                     reward_id = tx.insert('INSERT INTO milestone_claims(user_id,product_id,product_name,threshold,kind,created_at) VALUES(?,?,?,?,?,?)',
                                           (user['id'], selected['id'], selected['name'], threshold, kind, now()))
                     tx.execute("UPDATE users SET rewards_claimed = rewards_claimed + 1 WHERE id = ?", (user["id"],))
                     result = tx.one('SELECT id,product_id,product_name,threshold,kind,created_at FROM milestone_claims WHERE id=?', (reward_id,))
+                    result['fulfillment'] = create_reward_request(tx,current,kind,selected,milestone_id=reward_id) if kind!='sunglasses' else None
                     return {"reward": result, "user": public_user(user_by_id(tx, user["id"]))}
                 return idempotent(tx, user, "reward", body, reward)
         raise APIError(404, "요청한 API를 찾을 수 없습니다.")
@@ -642,10 +732,12 @@ class Application:
         if method == "GET" and path == "/api/staff/dashboard":
             with self.db.transaction() as tx:
                 stats = tx.one("SELECT COALESCE(SUM(CASE WHEN status = 'approved' THEN total ELSE 0 END),0) AS revenue, COALESCE(SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END),0) AS approved_orders, COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END),0) AS pending_orders FROM orders")
-                stats["bread_sold"] = tx.one("SELECT COALESCE(SUM(i.quantity),0) AS count FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.status='approved' AND i.product_id != ?", (MILK_PRODUCT_ID,))["count"]
+                stats["bread_sold"] = tx.one("SELECT COALESCE(SUM(i.quantity),0) AS count FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.status='approved' AND i.product_id NOT IN (?,?)", DRINK_PRODUCT_IDS)["count"]
                 stats["milk_stock"] = milk_stock(tx)
+                stats['pending_rewards'] = tx.one("SELECT COUNT(*) AS n FROM reward_requests WHERE status='pending'")['n']
                 return {"orders": all_orders(tx, include_inventory=True), "products": products(tx), "stats": stats,
                         "event_supplies": tx.all('SELECT * FROM event_supplies ORDER BY key'),
+                        'reward_requests': reward_requests(tx),
                         "reservations": all_reservations(tx),
                         "users": [public_user(row) for row in profile_rows(tx, tx.all("SELECT u.*,p.appearance FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.role = 'buyer' ORDER BY u.name,u.id"))],
                         "inventory_logs": tx.all("SELECT * FROM inventory_logs ORDER BY id DESC LIMIT 300"),
@@ -660,13 +752,13 @@ class Application:
                     delta = integer(body.get('delta'), '수정 수량', minimum=-10000, maximum=10000)
                     check(delta != 0, '수정 수량을 입력해 주세요.')
                     reason = string(body.get('reason'), '수정 사유', maximum=200)
-                    supply = tx.one("SELECT * FROM event_supplies WHERE key='oatmeal'")
-                    check(supply['stock'] + delta >= 0, '오트밀 미니바이트 재고가 부족합니다.', 409)
-                    tx.execute("UPDATE event_supplies SET stock=stock+? WHERE key='oatmeal'", (delta,))
-                    tx.insert('INSERT INTO inventory_logs(product_name,bucket,delta,reason,actor,created_at) VALUES(?,?,?,?,?,?)',
-                              (supply['name'], 'event_supply', delta, reason, user['name'], now()))
+                    change_supply(tx,'oatmeal',delta,reason,user['name'])
                     return {'supply': tx.one("SELECT * FROM event_supplies WHERE key='oatmeal'")}
                 return idempotent(tx, user, 'event-supply', body, adjust_supply)
+        match = re.fullmatch(r'/api/staff/reward-requests/([0-9]+)/(approve|cancel)', path)
+        if method == 'POST' and match:
+            with self.db.transaction(write=True) as tx:
+                return {'request':process_reward_request(tx,reward_request(tx,int(match.group(1))),match.group(2),user['name'])}
         match = re.fullmatch(r"/api/staff/orders/([0-9]+)/(approve|cancel)", path)
         if method == "POST" and match:
             with self.db.transaction(write=True) as tx:

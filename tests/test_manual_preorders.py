@@ -60,13 +60,13 @@ class ManualPreorderTests(unittest.TestCase):
 
     def test_reserved_pickup_uses_original_prices_and_only_reserved_stock_once(self):
         buyer=self.buyer();r=self.reserve(buyer['user']['name'])
-        self.assertEqual((r['status'],r['dice_quantity'],r['total'],r['order']),('reserved',1,7600,None))
+        self.assertEqual((r['status'],r['dice_quantity'],r['total'],r['order']),('reserved',1,6600,None))
         before=[self.product(p)['stock'] for p in [101,112]]
         with self.app.db.transaction(write=True) as tx:tx.execute('UPDATE products SET price=9999 WHERE id=101')
         identity=uuid.uuid4().hex
         result=self.complete(r,{'user_id':buyer['user']['id']},identity)
         self.assertEqual(self.complete(r,{'user_id':buyer['user']['id']},identity),result)
-        self.assertEqual((result['order']['type'],result['order']['status'],result['order']['total']),('preorder','approved',7600))
+        self.assertEqual((result['order']['type'],result['order']['status'],result['order']['total']),('preorder','approved',6600))
         self.assertEqual(result['order']['dice_quantity'],1)
         self.assertEqual(self.me(buyer)['dice_balance'],1)
         self.assertEqual([self.product(p)['stock'] for p in [101,112]],before)
@@ -96,7 +96,7 @@ class ManualPreorderTests(unittest.TestCase):
         result=self.complete(r,{'pin':'2345'})
         self.assertEqual(result['user']['name'],'첫방문예약자')
         self.assertEqual(result['user']['dice_balance'],0)
-        self.assertEqual((result['order']['quantity'],result['order']['total']),(2,4000))
+        self.assertEqual((result['order']['quantity'],result['order']['total']),(2,2000))
         login=self.request('POST','/api/auth/login',{'name':'첫방문예약자','pin':'2345'})
         self.assertEqual(login['user']['id'],result['user']['id'])
         self.complete(r,{'pin':'9999'})  # Completed receipt does not reset the account PIN.
