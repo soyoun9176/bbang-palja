@@ -17,7 +17,7 @@ let previousFocus;
 function modal(content,{wide=false}={}){previousFocus=document.activeElement;document.querySelector('#modal-root').innerHTML=`<div class="overlay"><section class="modal ${wide?'wide':''}" role="dialog" aria-modal="true" aria-label="${isAdmin?'담당자 작업':'캄보딜라이트 안내'}" tabindex="-1"><button class="modal-close" data-action="close-modal" aria-label="닫기">${icon('x')}</button>${content}</section></div>`;document.body.style.overflow='hidden';requestAnimationFrame(()=>(document.querySelector('.modal input:not([type=hidden]),.modal textarea,.modal select,.modal [type=submit]')||document.querySelector('.modal'))?.focus());}
 function closeModal(){document.querySelector('#modal-root').innerHTML='';document.body.style.overflow='';previousFocus?.focus?.();}
 function submitButton(form,busy,label){const button=form.querySelector('[type=submit]');if(!button)return;button.disabled=busy;if(!button.dataset.label)button.dataset.label=button.innerHTML;button.innerHTML=busy?'<span class="spinner"></span> 처리하고 있어요':label||button.dataset.label;}
-function brand(){return `<span class="brand"><span class="brand-icon">${icon('bread')}</span><span><strong>캄보딜라이트</strong><small>KAMBO DELIGHT</small></span></span>`;}
+function brand(){return `<span class="brand"><span class="brand-icon">${icon('bread')}</span><span><strong>캄보딜라이트</strong><small>CAMBODELIGHT</small></span></span>`;}
 const buyerNav=[['shop','bag','빵 구매'],['ranking','trophy','이벤트 참여']];
 const staffNav=[['queue','clock','주문 확인'],['sales','edit','수기 판매'],['inventory','box','재고'],['events','spark','인스타 이벤트'],['notes','note','인수인계']];
 function navButton([route,img,label]) {
