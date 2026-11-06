@@ -566,7 +566,7 @@ class Application:
                 user = tx.one("SELECT * FROM users WHERE phone = ? AND role = 'buyer'", (phone,))
                 if path.endswith("register"):
                     name=person_name(body.get('name'))
-                    check(user is None, "이미 등록된 전화번호입니다. 기존 계정으로 로그인해 주세요.", 409)
+                    check(user is None, "이미 있는 번호입니다", 409)
                     user_id = tx.insert("INSERT INTO users (name,phone,role,password_hash,created_at) VALUES (?,?,'buyer',?,?)", (name, phone, hash_pin(pin), now()))
                     user = user_by_id(tx, user_id)
                 else:

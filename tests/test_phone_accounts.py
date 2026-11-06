@@ -45,6 +45,7 @@ class PhoneAccountTests(unittest.TestCase):
             self.assertEqual(logged['user']['id'],first['user']['id'])
         with self.assertRaises(APIError) as error:self.register('010-1234-5678','다른 닉네임')
         self.assertEqual(error.exception.status,409)
+        self.assertEqual(str(error.exception),'이미 있는 번호입니다')
         with self.app.db.transaction() as tx:
             self.assertEqual(tx.one('SELECT phone FROM users WHERE id=?',(first['user']['id'],))['phone'],'010-1234-5678')
 
