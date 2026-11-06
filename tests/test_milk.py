@@ -48,7 +48,7 @@ class MilkTests(unittest.TestCase):
     def transition(self,order,action):
         return self.request('POST',f"/api/staff/orders/{order['id']}/{action}",{},self.staff)['order']
 
-    def certify(self,buyer,milk=1,dice=1,identity=None):
+    def certify(self,buyer,milk=0,dice=1,identity=None):
         return self.request('POST','/api/staff/instagram',{'user_id':buyer['user']['id'],
                             'milk_quantity':milk,'dice':dice,'request_id':identity or uuid.uuid4().hex},self.staff)
 
@@ -111,60 +111,59 @@ class MilkTests(unittest.TestCase):
         self.assertEqual(self.me(buyer)['dice_balance'],1)
         self.assertEqual((self.product()['stock'],self.product()['preorder_stock']),(1,0))
 
-    def test_instagram_checks_are_independent_and_retries_do_not_duplicate(self):
-        for milk,dice in [(0,0),(0,1),(1,0),(1,1)]:
-            with self.subTest(milk=milk,dice=dice):
-                self.stock(2)
-                buyer=self.buyer();identity=uuid.uuid4().hex
-                first=self.certify(buyer,milk,dice,identity)
-                self.assertEqual(self.certify(buyer,milk,dice,identity),first)
-                self.assertEqual((first['event']['milk_quantity'],first['event']['dice']),(milk,dice))
-                self.assertEqual(self.me(buyer)['dice_balance'],dice)
-                self.assertEqual(self.product()['stock'],2-milk)
-                with self.assertRaises(APIError) as error:self.certify(buyer,milk,dice)
-                self.assertEqual(error.exception.status,409)
-                self.assertEqual(self.product()['stock'],2-milk)
+    def test_instagram_grants_only_one_typed_die_without_touching_milk(self):
+        for stock in [0,2]:
+            self.stock(stock);buyer=self.buyer();identity=uuid.uuid4().hex
+            first=self.certify(buyer,identity=identity)
+            self.assertEqual(self.certify(buyer,identity=identity),first)
+            self.assertEqual((first['event']['milk_quantity'],first['event']['dice']),(0,1))
+            self.assertEqual(self.me(buyer)['dice'][0]['kind'],'instagram')
+            self.assertEqual(self.product()['stock'],stock)
+            with self.assertRaises(APIError) as error:self.certify(buyer)
+            self.assertEqual(error.exception.status,409)
+        for milk,dice in [(1,1),(0,0),(0,2)]:
+            with self.assertRaises(APIError) as error:self.certify(self.buyer(),milk,dice)
+            self.assertEqual(error.exception.status,400)
 
-    def test_sold_out_milk_allows_unchecked_certification_and_checked_failure_is_atomic(self):
-        self.stock(0)
-        for dice in [0,1]:
-            buyer=self.buyer()
-            self.certify(buyer,milk=0,dice=dice)
-            self.assertEqual(self.me(buyer)['dice_balance'],dice)
-        buyer=self.buyer();identity=uuid.uuid4().hex
-        with self.assertRaises(APIError) as error:self.certify(buyer,identity=identity)
-        self.assertEqual(error.exception.status,409)
-        self.assertEqual(self.me(buyer)['dice_balance'],0)
-        with self.app.db.transaction() as tx:
-            self.assertIsNone(tx.one('SELECT id FROM events WHERE user_id=?',(buyer['user']['id'],)))
-        self.stock(1)
-        self.certify(buyer,identity=identity)
-        self.assertEqual((self.me(buyer)['dice_balance'],self.product()['stock']),(1,0))
+    def test_milk_face_failure_is_atomic_and_retry_allocates_only_once(self):
+        buyer=self.buyer();self.certify(buyer);self.stock(0);identity=uuid.uuid4().hex
+        body={'kind':'instagram','request_id':identity}
+        with patch('server.app.secrets.randbelow',return_value=5):
+            with self.assertRaises(APIError) as error:self.request('POST','/api/dice/roll',body,buyer['token'])
+            self.assertEqual(error.exception.status,409)
+            self.assertEqual(self.me(buyer)['dice_balance'],1)
+            self.stock(1)
+            first=self.request('POST','/api/dice/roll',body,buyer['token'])
+            self.assertEqual(self.request('POST','/api/dice/roll',body,buyer['token']),first)
+        self.assertEqual((first['result'],first['value'],first['score']),('milk',0,0))
+        self.assertEqual((self.product()['stock'],self.me(buyer)['dice_balance']),(0,0))
+        records=self.request('GET','/api/rewards',token=buyer['token'])['rewards']
+        self.assertEqual((len(records),records[0]['kind']),(1,'dice_milk'))
 
-    def test_last_milk_cannot_be_sold_and_given_by_instagram_simultaneously(self):
-        self.stock(1)
-        shopper,participant=self.buyer(),self.buyer()
+    def test_last_milk_cannot_be_sold_and_won_by_dice_simultaneously(self):
+        self.stock(1);shopper,participant=self.buyer(),self.buyer();self.certify(participant)
         barrier=threading.Barrier(2)
         def compete(kind):
             barrier.wait(timeout=5)
             try:
-                return (200,self.order(shopper,[(MILK_PRODUCT_ID,1)])) if kind=='sale' else (200,self.certify(participant))
+                if kind=='sale':result=self.order(shopper,[(MILK_PRODUCT_ID,1)])
+                else:result=self.request('POST','/api/dice/roll',{'kind':'instagram','request_id':uuid.uuid4().hex},participant['token'])
+                return 200,result
             except APIError as error:return error.status,None
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-            results=list(pool.map(compete,['sale','instagram']))
+        with patch('server.app.secrets.randbelow',return_value=5):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(compete,['sale','dice']))
         self.assertEqual(sorted(status for status,_ in results),[200,409])
         self.assertEqual(self.product()['stock'],0)
         with self.app.db.transaction() as tx:
-            orders=tx.one('SELECT COUNT(*) AS n FROM orders')['n']
-            events=tx.one('SELECT COUNT(*) AS n FROM events')['n']
-            self.assertEqual(orders+events,1)
             self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM inventory_logs WHERE product_id=? AND delta=-1',(MILK_PRODUCT_ID,))['n'],1)
 
     def test_milk_is_never_a_random_bread_reward(self):
         self.stock(20)
         buyer=self.buyer()
         with self.app.db.transaction(write=True) as tx:
-            tx.execute('UPDATE users SET score=10 WHERE id=?',(buyer['user']['id'],))
+            tx.execute('UPDATE users SET score=20 WHERE id=?',(buyer['user']['id'],))
+            for threshold,kind in [(5,'oatmeal'),(10,'milk'),(15,'sunglasses')]:
+                tx.execute("INSERT INTO milestone_claims(user_id,threshold,kind,product_name,created_at) VALUES(?,?,?,?,?)",(buyer['user']['id'],threshold,kind,'선행 보상 테스트','2026-11-07'))
         body={'request_id':uuid.uuid4().hex}
         with self.assertRaises(APIError) as error:self.request('POST','/api/rewards/claim',body,buyer['token'])
         self.assertEqual(error.exception.status,409)
@@ -193,6 +192,6 @@ class MilkTests(unittest.TestCase):
         self.assertEqual(self.request('POST','/api/staff/inventory',body,self.staff),first)
         self.app.seed()
         self.assertEqual(self.product()['stock'],6)
-        buyer=self.buyer();self.certify(buyer,milk=1,dice=0)
-        self.assertEqual(self.product()['stock'],5)
-        self.assertEqual(self.me(buyer)['dice_balance'],0)
+        buyer=self.buyer();self.certify(buyer)
+        self.assertEqual(self.product()['stock'],6)
+        self.assertEqual(self.me(buyer)['dice_balance'],1)

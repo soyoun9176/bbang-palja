@@ -17,6 +17,10 @@ export function initAdmin(shared) {
     document.addEventListener('input', event => {
       const search = event.target.dataset?.adminSearch;
       if (Object.hasOwn(staffSearch,search)) { updateStaffSearch(search,event.target.value); return; }
+      if(event.target.name==='user_id'){
+        const preview=event.target.closest('form')?.querySelector('[data-selected-profile]');
+        if(preview)preview.innerHTML=event.target.value?buyerIdentity(Number(event.target.value)):'';
+      }
       if (event.target.name==='user_id' && event.target.closest('#admin-manual-preorder-complete')) {
         manualPickupUser = event.target.value;
         return;
@@ -41,11 +45,15 @@ const won = value => `${helpers.money(Number(value || 0))}원`;
 const stamp = value => escape(helpers.time(value));
 const typeLabel = type => ({ walkin: '현장 구매', preorder: '예약 수령', manual: '수기 판매' }[type] || type);
 const statusLabel = status => ({ pending: '확인 대기', approved: '승인 완료', cancelled: '취소 완료' }[status] || status);
-const bucketLabel = bucket => ({ stock: '현판·이벤트', preorder_stock: '예판', reward_stock: '이전 이벤트(통합 전)', milk: '이전 우유(통합 전)' }[bucket] || bucket);
+const bucketLabel = bucket => ({ stock: '현판·이벤트', preorder_stock: '예판', reward_stock: '이전 이벤트(통합 전)', milk: '이전 우유(통합 전)', event_supply: '이벤트 물품' }[bucket] || bucket);
 const pendingOrders = () => list('orders').filter(order => order.status === 'pending');
 const preorderLabel = status => ({reserved:'수령 대기',pending:'수령 요청 접수',approved:'수령 완료'}[status]||status);
 const phoneLabel = phone => String(phone).replace(/^(\d{3})(\d{3,4})(\d{4})$/,'$1-$2-$3');
 const preorderMenu = r => r.items.map(item=>`${item.name} ${item.quantity}${productList().find(p=>p.id===item.product_id)?.unit||'개'}`).join(', ');
+function buyerIdentity(id,name='') {
+  const user=list('users').find(u=>u.id===id)||{id,name};
+  return `<span class="profile-name">${helpers.profileAvatar?.(user)||''}<span>${escape(name||user.name)}</span></span>`;
+}
 
 function matchesSearch(query,...fields) {
   const normalize=value=>String(value??'').normalize('NFKC').toLowerCase().replace(/[\s-]+/g,'');
@@ -68,6 +76,8 @@ function updateStaffSearch(key,value) {
     manualPickupUser='';
     const select=document.querySelector('#admin-pickup-user');
     if(select)select.innerHTML=buyerOptions('','수령 계정 선택',value);
+    const preview=document.querySelector('#admin-manual-preorder-complete [data-selected-profile]');
+    if(preview)preview.innerHTML='';
     const count=document.querySelector('#pickup-account-count');
     if(count)count.textContent=`검색된 계정 ${list('users').filter(u=>matchesSearch(value,u.name)).length}명`;
     return;
@@ -99,7 +109,7 @@ function orderStockNote(order, item) {
 
 function orderCard(order) {
   const pending = order.status === 'pending';
-  return `<article class="pending-order"><div class="pending-title"><h3>${escape(order.customer_name)}<small>#${order.id} · ${typeLabel(order.type)}</small></h3><span class="status ${escape(order.status)}">${i(pending ? 'clock' : order.status === 'approved' ? 'check' : 'x')}${statusLabel(order.status)}</span></div><div class="order-lines">${(order.items || []).map(item => `<div class="order-line"><span>${escape(item.name)} <b>× ${item.quantity}</b>${orderStockNote(order, item)}</span><span>${won(item.price * item.quantity)}</span></div>`).join('')}</div><div class="order-bottom"><span>${stamp(order.created_at)} 접수 · 총 ${order.quantity}개</span><strong>${won(order.total)}</strong></div>${pending ? `<div class="order-controls"><button class="secondary-button" data-action="admin-cancel" data-id="${order.id}">${i('x')}취소</button><button class="primary-button" data-action="admin-approve" data-id="${order.id}">${i('check')}${order.type === 'preorder' ? '품목 전달 완료 · 승인' : '입금 · 전달 확인 후 승인'}</button></div>` : ''}</article>`;
+  return `<article class="pending-order"><div class="pending-title"><h3>${buyerIdentity(order.user_id,order.customer_name)}<small>#${order.id} · ${typeLabel(order.type)}</small></h3><span class="status ${escape(order.status)}">${i(pending ? 'clock' : order.status === 'approved' ? 'check' : 'x')}${statusLabel(order.status)}</span></div><div class="order-lines">${(order.items || []).map(item => `<div class="order-line"><span>${escape(item.name)} <b>× ${item.quantity}</b>${orderStockNote(order, item)}</span><span>${won(item.price * item.quantity)}</span></div>`).join('')}</div><div class="order-bottom"><span>${stamp(order.created_at)} 접수 · 총 ${order.quantity}개</span><strong>${won(order.total)}</strong></div>${pending ? `<div class="order-controls"><button class="secondary-button" data-action="admin-cancel" data-id="${order.id}">${i('x')}취소</button><button class="primary-button" data-action="admin-approve" data-id="${order.id}">${i('check')}${order.type === 'preorder' ? '품목 전달 완료 · 승인' : '입금 · 전달 확인 후 승인'}</button></div>` : ''}</article>`;
 }
 
 function queueResults() {
@@ -111,7 +121,7 @@ function queueResults() {
 }
 function queuePage() {
   return `${heading('주문 확인','이름·주문·입금 내역을 확인한 뒤 승인해 주세요.',`<button class="secondary-button" data-action="admin-refresh">새로고침</button>`)}
-  ${help('주문 확인 방법','현판은 입금과 빵 전달을 확인한 뒤 승인합니다. 예판은 예약한 빵을 전달한 뒤 승인합니다. 품목 옆 괄호는 접수된 주문을 반영한 현재 남은 재고이며, 예판은 별도 예판 재고를 표시합니다. 승인하면 빵 개수만큼 주사위가 지급됩니다. 우유는 주사위 지급에서 제외합니다. 대기 주문을 취소하면 확보한 재고가 돌아옵니다.')}
+  ${help('주문 확인 방법','현판은 입금과 빵 전달을 확인한 뒤 승인합니다. 예판은 예약한 빵을 전달한 뒤 승인합니다. 품목 옆 괄호는 접수된 주문을 반영한 현재 남은 재고이며, 예판은 별도 예판 재고를 표시합니다. 현장 구매는 빵 개수만큼, 예약 수령은 예약 금액 등급의 전용 주사위 1개를 지급합니다. 우유만 구매하면 주사위가 지급되지 않습니다. 대기 주문을 취소하면 확보한 재고가 돌아옵니다.')}
   <div class="admin-subtabs">${[['pending','승인 대기'],['approved','승인 완료'],['cancelled','취소']].map(([key,label])=>`<button class="tab-chip ${orderFilter===key?'active':''}" data-action="admin-order-filter" data-filter="${key}">${label} ${list('orders').filter(o=>o.status===key).length}</button>`).join('')}</div>
   ${searchField('queue','admin-queue-search','주문 검색','이름 · 예약 전화번호 · 메뉴 검색')}<div id="admin-queue-results">${queueResults()}</div>`;
 }
@@ -131,8 +141,9 @@ function preorderStatusPanel() {
 function inventoryPage() {
   const logs=list('inventory_logs').filter(log=>inventoryBucket==='all'||log.bucket===inventoryBucket);
   return `${heading('재고','',`<button class="secondary-button" data-action="admin-import">예판 등록</button><button class="primary-button" data-action="admin-adjust">재고 수정</button>`)}
-  ${help('재고 보는 방법','빵은 판매와 빵 당첨, 우유는 판매와 인스타 지급에 같은 현판 재고를 사용합니다. 예판 대기와 접수 보관 수량은 추첨에 사용하지 않습니다. 매장 예상은 현판·예판 대기·접수 보관의 합입니다. 추가 입고는 +, 차감은 −로 수정합니다.')}
+  ${help('재고 보는 방법','빵은 판매와 빵 당첨, 우유는 판매와 점수·주사위 보상에 같은 현판 재고를 사용합니다. 예판 대기와 접수 보관 수량은 추첨에 사용하지 않습니다. 매장 예상은 현판·예판 대기·접수 보관의 합입니다. 추가 입고는 +, 차감은 −로 수정합니다.')}
   ${preorderStatusPanel()}
+  <section class="content-card event-supply-card"><div><h2>이벤트 물품</h2><p>오트밀 미니바이트 <strong>${data().event_supplies?.find(s=>s.key==='oatmeal')?.stock||0}개</strong></p></div><button class="secondary-button" data-action="admin-supply-adjust">수정</button></section>
   <div class="table-wrap"><table><thead><tr><th>품목</th><th>현판·이벤트 가능</th><th>예판 대기</th><th>접수 보관</th><th>매장 예상</th><th></th></tr></thead><tbody>${productList().map(p=>{
     const held=heldStock(p.id);
     return `<tr><td><strong>${escape(p.name)}</strong></td><td>${p.stock}</td><td>${p.preorder_stock}</td><td>${held}</td><td><strong>${p.stock+p.preorder_stock+held}</strong></td><td><button class="secondary-button" data-action="admin-adjust" data-product="${p.id}">수정</button></td></tr>`;
@@ -171,12 +182,12 @@ async function lookupManualPreorder(name,phone) {
 function manualPickupAccount(reservation, order) {
   if (order) {
     const name=order.customer_name || list('users').find(u=>u.id===order.user_id)?.name || reservation.name;
-    return `<input type="hidden" name="user_id" value="${order.user_id}"><p class="callout">수령 계정: ${escape(name)}<span>이미 접수한 계정에 주사위를 추가합니다.</span></p>`;
+    return `<input type="hidden" name="user_id" value="${order.user_id}"><p class="callout">수령 계정: ${buyerIdentity(order.user_id,name)}<span>이미 접수한 계정에 주사위를 추가합니다.</span></p>`;
   }
   const sameName=list('users').some(u=>u.name===reservation.name);
   const existing=manualPickupMode!=='new'||sameName;
   return `<div class="admin-subtabs" role="group" aria-label="예약 수령 계정"><button class="tab-chip ${existing?'active':''}" data-action="admin-pickup-mode" data-mode="existing" type="button" aria-pressed="${existing}" ${!list('users').length?'disabled':''}>기존 계정에 추가</button><button class="tab-chip ${!existing?'active':''}" data-action="admin-pickup-mode" data-mode="new" type="button" aria-pressed="${!existing}" ${sameName?'disabled':''}>새 계정 만들기</button></div>
-    ${existing?`${searchField('users','admin-pickup-user-search','기존 계정 검색','계정 이름 검색')}<div class="field"><label for="admin-pickup-user">수령할 구매자 계정</label><select id="admin-pickup-user" name="user_id" required>${buyerOptions(manualPickupUser,'수령 계정 선택',staffSearch.users)}</select><p id="pickup-account-count" class="search-count" role="status">검색된 계정 ${list('users').filter(u=>matchesSearch(staffSearch.users,u.name)).length}명</p><p class="form-hint">검색 후 수령 계정을 선택해 주세요. 주사위는 선택한 계정에 추가됩니다.</p></div>`:`<p class="form-hint">${escape(reservation.name)} 님의 계정을 함께 만듭니다. 아래 비밀번호를 구매자에게 알려주세요.</p><div class="field"><label for="admin-pickup-pin">새 구매자 숫자 4자리 비밀번호</label><input id="admin-pickup-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" required autocomplete="new-password"></div>`}`;
+    ${existing?`${searchField('users','admin-pickup-user-search','기존 계정 검색','계정 이름 검색')}<div class="field"><label for="admin-pickup-user">수령할 구매자 계정</label><select id="admin-pickup-user" name="user_id" required>${buyerOptions(manualPickupUser,'수령 계정 선택',staffSearch.users)}</select><div class="selected-profile" data-selected-profile>${manualPickupUser?buyerIdentity(Number(manualPickupUser)):''}</div><p id="pickup-account-count" class="search-count" role="status">검색된 계정 ${list('users').filter(u=>matchesSearch(staffSearch.users,u.name)).length}명</p><p class="form-hint">검색 후 수령 계정을 선택해 주세요. 주사위는 선택한 계정에 추가됩니다.</p></div>`:`<p class="form-hint">${escape(reservation.name)} 님의 계정을 함께 만듭니다. 아래 비밀번호를 구매자에게 알려주세요.</p><div class="field"><label for="admin-pickup-pin">새 구매자 숫자 4자리 비밀번호</label><input id="admin-pickup-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" required autocomplete="new-password"></div>`}`;
 }
 
 function manualPreorderPage() {
@@ -195,15 +206,15 @@ function salesPage() {
   const intro = `${heading('수기 판매','구매자가 직접 입력하기 어려울 때 사용합니다.')}<div class="admin-subtabs" role="group" aria-label="수기 판매 유형">${[['walkin','현장 구매'],['preorder','예약한 빵 수령']].map(([key,label])=>`<button class="tab-chip ${manualSaleType===key?'active':''}" data-action="admin-sale-type" data-type="${key}" aria-pressed="${manualSaleType===key}">${label}</button>`).join('')}</div>`;
   if (manualSaleType==='preorder') return intro+manualPreorderPage();
   return `${intro}${help('수기 판매 방법','입금과 빵 전달을 먼저 확인합니다. 구매자와 수량을 입력한 뒤 판매 완료를 누르면 즉시 승인되고 빵 개수만큼 주사위가 지급됩니다. 우유는 제외합니다.')}<section class="content-card narrow"><div class="admin-subtabs"><button class="tab-chip ${customerMode==='existing'?'active':''}" data-action="admin-customer-mode" data-mode="existing">기존 구매자</button><button class="tab-chip ${customerMode==='new'?'active':''}" data-action="admin-customer-mode" data-mode="new">새 구매자</button></div><form id="admin-manual-sale">
-  ${customerMode==='existing'?`<div class="field"><label for="admin-sale-user">구매자</label><select id="admin-sale-user" name="user_id" required>${buyerOptions()}</select></div>`:`<div class="form-grid"><div class="field"><label for="admin-sale-name">구매자 이름</label><input id="admin-sale-name" name="name" maxlength="30" required autocomplete="off"></div><div class="field"><label for="admin-sale-pin">숫자 4자리 비밀번호</label><input id="admin-sale-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" required autocomplete="new-password"></div></div>`}
+  ${customerMode==='existing'?`<div class="field"><label for="admin-sale-user">구매자</label><select id="admin-sale-user" name="user_id" required>${buyerOptions()}</select><div class="selected-profile" data-selected-profile></div></div>`:`<div class="form-grid"><div class="field"><label for="admin-sale-name">구매자 이름</label><input id="admin-sale-name" name="name" maxlength="30" required autocomplete="off"></div><div class="field"><label for="admin-sale-pin">숫자 4자리 비밀번호</label><input id="admin-sale-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" required autocomplete="new-password"></div></div>`}
   ${productList().map(p=>`<div class="qty-input"><label for="admin-sale-qty-${p.id}">${escape(p.name)}<small>${won(p.price)} · 재고 ${p.stock}</small></label><input id="admin-sale-qty-${p.id}" type="number" name="quantity_${p.id}" min="0" max="${Math.min(p.stock,100)}" step="1" value="0" data-sale-product="${p.id}" data-price="${p.price}" aria-label="${escape(p.name)} 구매 수량" ${p.stock<1?'disabled':''}></div>`).join('')}
   <div class="form-total"><span>총 금액</span><strong><span data-sale-total>0</span>원</strong></div><button class="primary-button full" type="submit">판매 완료</button></form></section>`;
 }
 
 function eventsPage() {
-  return `${heading('인스타 이벤트','등록된 사용자의 인스타 이벤트 참여를 인증합니다.')}${help('인스타 이벤트 인증 방법','등록된 사용자를 선택하고 인증 완료를 누릅니다. 주사위와 우유는 각각 1개씩 기본 선택되어 있으며, 지급하지 않을 항목은 체크를 해제합니다. 두 항목을 모두 해제해도 인증만 기록할 수 있습니다. 한 사람당 한 번만 인증할 수 있습니다.')}<section class="content-card narrow"><form id="admin-instagram"><div class="field"><label for="admin-event-user">등록 사용자</label><select id="admin-event-user" name="user_id" required>${buyerOptions('','사용자 선택')}</select></div><div class="benefit-options"><label class="benefit-option" for="admin-event-dice"><input id="admin-event-dice" type="checkbox" name="dice" value="1" checked><span>주사위 1개 지급</span></label><label class="benefit-option" for="admin-event-milk"><input id="admin-event-milk" type="checkbox" name="milk_quantity" value="1" checked><span>우유 1개 지급 <small>남은 우유 ${number(data().stats?.milk_stock)}개</small></span></label></div><button class="primary-button full" type="submit">인스타 이벤트 인증 완료</button></form></section>
-  <details id="instagram-history" class="history-section"><summary>인스타 이벤트 기록 · ${list('events').length}명</summary><div class="table-wrap"><table><thead><tr><th>시간</th><th>구매자</th><th>우유</th><th>추가 주사위</th></tr></thead><tbody>${list('events').map(e=>`<tr><td>${stamp(e.created_at)}</td><td>${escape(e.customer_name)}</td><td>${e.milk_quantity}</td><td>${e.dice}</td></tr>`).join('')}</tbody></table></div></details>
-  <details id="reward-history" class="history-section"><summary>랜덤 빵 당첨 기록 · ${list('rewards').length}건</summary><p class="form-hint">당첨 화면을 확인하고 빵을 전달합니다. 현판 재고는 이미 차감됐습니다.</p><div class="table-wrap"><table><thead><tr><th>시간</th><th>구매자</th><th>빵</th><th>점수</th></tr></thead><tbody>${list('rewards').map(r=>`<tr><td>${stamp(r.created_at)}</td><td>${escape(r.customer_name)}</td><td>${escape(r.product_name)}</td><td>${r.threshold}</td></tr>`).join('')}</tbody></table></div></details>`;
+  return `${heading('인스타 이벤트','등록된 사용자의 인스타 이벤트 참여를 인증합니다.')}${help('인스타 이벤트 인증 방법','등록된 사용자를 선택하고 인증 완료를 누릅니다. 인싸 마법사의 주사위 1개를 지급하며, 한 사람당 한 번만 인증할 수 있습니다. 우유는 직접 지급하지 않습니다.')}<section class="content-card narrow"><form id="admin-instagram"><div class="field"><label for="admin-event-user">등록 사용자</label><select id="admin-event-user" name="user_id" required>${buyerOptions('','사용자 선택')}</select><div class="selected-profile" data-selected-profile></div></div><p class="callout">인싸 마법사의 주사위 1개 지급</p><button class="primary-button full" type="submit">인스타 이벤트 인증 완료</button></form></section>
+  <details id="instagram-history" class="history-section"><summary>인스타 이벤트 기록 · ${list('events').length}명</summary><div class="table-wrap"><table><thead><tr><th>시간</th><th>구매자</th><th>지급 주사위</th></tr></thead><tbody>${list('events').map(e=>`<tr><td>${stamp(e.created_at)}</td><td>${buyerIdentity(e.user_id,e.customer_name)}</td><td>${e.dice}개</td></tr>`).join('')}</tbody></table></div></details>
+  <details id="reward-history" class="history-section"><summary>이벤트 보상 기록 · ${list('rewards').length}건</summary><p class="form-hint">물품 당첨 화면을 확인하고 전달합니다. 물품 재고는 이미 차감됐습니다.</p><div class="table-wrap"><table><thead><tr><th>시간</th><th>구매자</th><th>보상</th><th>구분</th></tr></thead><tbody>${list('rewards').map(r=>`<tr><td>${stamp(r.created_at)}</td><td>${buyerIdentity(r.user_id,r.customer_name)}</td><td>${escape(r.product_name)}</td><td>${r.kind==='dice_milk'?'주사위':`${r.kind==='legacy_bread'?'이전 이벤트 ':''}${r.threshold}점`} #${r.id}</td></tr>`).join('')}</tbody></table></div></details>`;
 }
 
 function notesPage() {
@@ -243,6 +254,7 @@ function memoModal() {
 }
 
 export async function handleAdminClick(action, element) {
+  if(action==='admin-supply-adjust'){helpers.modal(`<h2>오트밀 미니바이트 재고 수정</h2><form id="admin-event-supply"><div class="field"><label for="supply-delta">수정할 수량</label><input id="supply-delta" name="delta" type="number" min="-10000" max="10000" required></div><div class="field"><label for="supply-reason">수정 사유</label><input id="supply-reason" name="reason" maxlength="200" required></div><button type="submit" class="primary-button full">재고에 반영하기</button></form>`);return true;}
   if (!action?.startsWith('admin-')) return false;
   const { state, api, refresh, render, closeModal, toast } = helpers;
   if (action === 'admin-route') { state.route = element.dataset.route; location.hash = state.route; render(); }
@@ -311,7 +323,7 @@ function formError(form, error) {
 }
 
 export async function handleAdminSubmit(form) {
-  const accepted = ['staff-login','admin-inventory','admin-manual-sale','admin-instagram','admin-memo','admin-preorder-import','admin-cancel-confirm','admin-manual-preorder-complete'];
+  const accepted = ['admin-event-supply','staff-login','admin-inventory','admin-manual-sale','admin-instagram','admin-memo','admin-preorder-import','admin-cancel-confirm','admin-manual-preorder-complete'];
   if (!accepted.includes(form.id)) return false;
   const { state, api, submitButton, refresh, render, toast, closeModal } = helpers;
   const values = new FormData(form);
@@ -328,6 +340,9 @@ export async function handleAdminSubmit(form) {
       state.route = 'queue';
       history.replaceState(null,'','#queue');
       message = `${response.user.name}님, 오늘도 잘 부탁드려요.`;
+    } else if(form.id==='admin-event-supply'){
+      await createAction('event-supply','/api/staff/event-supplies',{key:'oatmeal',delta:Number(values.get('delta')),reason:values.get('reason')});
+      message='이벤트 물품 재고를 반영했어요.';
     } else if (form.id === 'admin-inventory') {
       await createAction('inventory', '/api/staff/inventory', { product_id: Number(values.get('product_id')), bucket: values.get('bucket'), delta: Number(values.get('delta')), reason: values.get('reason') });
       message = '재고와 수정 기록을 반영했어요.';
@@ -349,8 +364,8 @@ export async function handleAdminSubmit(form) {
       if (manualSaleType==='preorder' && version===manualLookupVersion && manualReservation?.id===reservation.id) manualReservation = response.reservation;
       message = response.already_completed ? '이미 수령 완료한 예약이에요.' : `예약 수령을 완료했어요.${response.order.dice_quantity?` 주사위 ${response.order.dice_quantity}개를 지급했어요.`:''}`;
     } else if (form.id === 'admin-instagram') {
-      await createAction('instagram', '/api/staff/instagram', { user_id: Number(values.get('user_id')), milk_quantity: values.has('milk_quantity') ? 1 : 0, dice: values.has('dice') ? 1 : 0 });
-      message = '인스타 이벤트 인증과 선택한 지급 내역을 기록했어요.';
+      await createAction('instagram', '/api/staff/instagram', { user_id: Number(values.get('user_id')) });
+      message = '인스타 이벤트를 인증하고 전용 주사위 1개를 지급했어요.';
     } else if (form.id === 'admin-memo') {
       await api('/api/staff/memos', { method: 'POST', body: { content: values.get('content') } });
       message = '다음 담당자를 위한 메모를 남겼어요.';

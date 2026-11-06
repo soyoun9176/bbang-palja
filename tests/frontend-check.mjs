@@ -6,8 +6,9 @@ import test from 'node:test';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 
-const source = readFileSync(new URL('../frontend/app.js', import.meta.url), 'utf8')
-  .replace(/^import[^\n]+\n/, '')
+const profileSource = readFileSync(new URL('../frontend/profile.js', import.meta.url),'utf8').replace(/\bexport /g,'');
+const source = profileSource + '\n' + readFileSync(new URL('../frontend/app.js', import.meta.url), 'utf8')
+  .replace(/^import[^\n]+\n/gm, '')
   .replace(/\nboot\(\);\s*$/, '');
 
 function fixture({guest = false, storage = new Map()} = {}) {
@@ -31,7 +32,9 @@ function fixture({guest = false, storage = new Map()} = {}) {
   context.normalFetch = async (path, options = {}) => {
     const token = options.headers?.Authorization;
     const id = token === 'Bearer token-B' ? 2 : 1;
-    const user = {id, name: `구매자${id}`, role: 'buyer', score: 0, dice_balance: remote.approved ? 1 : 2, rewards_claimed: 0};
+    const user = {id, name: `구매자${id}`, role: 'buyer', score: 0, dice_balance: remote.approved ? 1 : 2, rewards_claimed: 0,
+      ...(remote.profileCustomized===undefined?{}:{profile_customized:remote.profileCustomized}),...(remote.avatar?{avatar:remote.avatar}:{}),
+      ...(remote.unlockedHairpins?{unlocked_hairpins:remote.unlockedHairpins}:{})};
     if (path === '/api/config') return response({demo: false, reward_step: 10});
     if (path === '/api/products') return response({products: [{id: 1, stock: remote.stock}]});
     if (path === '/api/auth/me') return response({user});
@@ -52,6 +55,160 @@ function fixture({guest = false, storage = new Map()} = {}) {
     get renders() {return renderCount;},
   };
 }
+
+const chosenAvatar={face_shape:'financier',skin:'warm',expression:'wink',glasses:'sunglasses',hairpin:'none'};
+function profileForm(f) {
+  const error={hidden:true,textContent:''},fields=[{disabled:false},{disabled:false}];
+  const form={dataset:{userId:'1'},isConnected:true,querySelectorAll:selector=>selector==='fieldset'?fields:[],
+    querySelector:selector=>selector==='.profile-editor-error'?error:null};
+  Object.assign(f.context,{profileForm:form,chosenAvatar});
+  return {form,error,fields};
+}
+
+test('first sign-in offers character choices while returning customized users continue normally',async()=>{
+  const f=fixture({guest:true});
+  f.remote.profileCustomized=false;
+  f.context.opened=[];f.context.authForm={dataset:{mode:'login'}};
+  f.run('modal=html=>opened.push(html);closeModal=()=>{};');
+  f.context.fetchOverride=(path,options)=>path==='/api/auth/login'
+    ?f.response({token:'token-A',user:{id:1,name:'구매자1',profile_customized:f.remote.profileCustomized}})
+    :f.context.normalFetch(path,options);
+  await f.run("signInBuyer(authForm,{name:'구매자1',pin:'1234'})");
+  assert.equal(f.context.opened.length,1);
+  assert.match(f.context.opened[0],/나만의 연금술사 만들기/);
+  for(const label of ['얼굴 종류','표정','안경','구매한 빵 머리핀','다음에 꾸미기'])assert.match(f.context.opened[0],new RegExp(label));
+  assert.equal(f.requests.filter(r=>r.path==='/api/profile').length,0);
+  f.remote.profileCustomized=true;f.context.opened.length=0;
+  await f.run("signInBuyer(authForm,{name:'구매자1',pin:'1234'})");
+  assert.equal(f.context.opened.length,0);
+});
+
+test('profile preview changes do not save or replace the current account appearance',async()=>{
+  const f=fixture();await f.run('refresh()');
+  const preview={innerHTML:''},original=f.context.document.querySelector;
+  f.context.document.querySelector=selector=>selector==='[data-profile-preview]'?preview:original(selector);
+  const {form}=profileForm(f);form.values=new Map(Object.entries(chosenAvatar));
+  f.context.FormData=function(form){return form.values;};
+  const before=f.run('JSON.stringify(state.user)');
+  f.run('updateProfilePreview(profileForm)');
+  assert.match(preview.innerHTML,/프로필 캐릭터/);
+  assert.equal(preview.innerHTML,f.run("profileAvatar({...state.user,avatar:chosenAvatar},{className:'profile-preview-picture'})"));
+  assert.equal(f.run('JSON.stringify(state.user)'),before);
+  assert.equal(f.requests.filter(r=>r.path==='/api/profile').length,0);
+});
+
+test('failed profile saves retain choices, show an inline error and block duplicate saves',async()=>{
+  const f=fixture();await f.run('refresh()');
+  const {form,error,fields}=profileForm(f);
+  let finish;
+  f.context.fetchOverride=(path,options)=>path==='/api/profile'?new Promise(resolve=>finish=()=>resolve(f.response({error:'저장 연결을 확인해 주세요.'},503))):f.context.normalFetch(path,options);
+  const first=f.run('saveProfile(profileForm,chosenAvatar)');
+  await f.run('saveProfile(profileForm,chosenAvatar)');
+  assert.equal(f.requests.filter(r=>r.path==='/api/profile').length,1);
+  assert.ok(fields.every(field=>field.disabled));
+  finish();await first;
+  assert.equal(error.hidden,false);
+  assert.equal(error.textContent,'저장 연결을 확인해 주세요.');
+  assert.equal(form.isConnected,true);
+  assert.ok(fields.every(field=>!field.disabled));
+  assert.equal(f.run('state.user.avatar'),undefined);
+});
+
+test('saving a profile persists only appearance and updates the account response',async()=>{
+  const f=fixture();await f.run('refresh()');profileForm(f);
+  f.run('closeModal=()=>{};');
+  f.context.fetchOverride=(path,options)=>{
+    if(path==='/api/profile'){
+      f.remote.avatar=JSON.parse(options.body).avatar;f.remote.profileCustomized=true;
+      return f.context.normalFetch('/api/auth/me').then(r=>r.json()).then(user=>f.response(user));
+    }
+    return f.context.normalFetch(path,options);
+  };
+  await f.run('saveProfile(profileForm,chosenAvatar)');
+  const request=f.requests.find(r=>r.path==='/api/profile');
+  assert.equal(request.method,'POST');
+  assert.deepEqual(JSON.parse(request.body),{avatar:chosenAvatar});
+  assert.equal(f.run('JSON.stringify(state.user.avatar)'),JSON.stringify(chosenAvatar));
+  assert.equal(f.run('state.user.profile_customized'),true);
+  assert.equal(f.run('profileSaving'),false);
+});
+
+test('a delayed profile response cannot replace a different signed-in account',async()=>{
+  const f=fixture();await f.run('refresh()');const {form}=profileForm(f);
+  let finish;
+  f.context.fetchOverride=(path,options)=>path==='/api/profile'?new Promise(resolve=>finish=()=>resolve(f.response({user:{id:1,name:'이전 계정',avatar:chosenAvatar}}))):f.context.normalFetch(path,options);
+  const first=f.run('saveProfile(profileForm,chosenAvatar)');
+  form.isConnected=false;
+  f.run("state.token='token-B';state.user={id:2,name:'새 계정'}");
+  finish();await first;
+  assert.equal(f.run('state.user.name'),'새 계정');
+  assert.equal(f.run('state.user.avatar'),undefined);
+  assert.equal(f.run('profileSaving'),false);
+});
+
+test('rankings show a portrait for every person, including uncustomized accounts',async()=>{
+  const f=fixture();await f.run('refresh()');
+  f.context.chosenAvatar=chosenAvatar;
+  f.run("state.route='ranking';const people=[{id:1,name:'하나',rank:1,score:9,is_me:true,avatar:chosenAvatar},{id:2,name:'둘',rank:2,score:3},{id:3,name:'셋',rank:3,score:0}];state.leaderboard={leaders:people,neighbors:people,me:people[0],total_participants:3};renderPage()");
+  for(const name of ['하나','둘','셋'])assert.equal(f.root.innerHTML.split(`${name}의 프로필 캐릭터`).length-1,2);
+  assert.match(f.root.innerHTML,/구매자1 계정 관리/);
+  assert.equal((f.root.innerHTML.match(/character-unknown/g)||[]).length,1);
+});
+
+test('bread face choices preserve legacy profiles and expose named bread options',()=>{
+  const f=fixture();
+  for(const [old,value] of [['round','madeleine'],['oval','financier'],['square','pound'],['soboro','madeleine'],['salt','financier'],['toast','pound']]){
+    f.context.legacy={face_shape:old};
+    assert.equal(f.run('normalizeAvatar(legacy,1).face_shape'),value);
+  }
+  const editor=f.run("profileEditor({id:1,name:'빵 얼굴',avatar:{face_shape:'pound'}})");
+  for(const label of ['마들렌','휘낭시에','파운드케이크','굽기 정도'])assert.match(editor,new RegExp(label));
+  assert.doesNotMatch(editor,/동그란 얼굴|갸름한 얼굴|각진 얼굴|피부색|소보로빵|소금빵|식빵/);
+});
+
+test('profile editor locks sunglasses until the fifteen-point reward',()=>{
+  const f=fixture();
+  const html=f.run("profileEditor({id:1,name:'구매자',unlocked_hairpins:['none','bread_101']})");
+  for(const label of ['얼굴','표정','꾸미기','방긋','활짝','윙크','깜짝','멋진 선글라스'])assert.match(html,new RegExp(label));
+  assert.doesNotMatch(html,/머리 모양|머리색|별 머리핀|꽃 머리핀/);
+  assert.doesNotMatch(html.match(/<input[^>]*value="bread_101"[^>]*>/)[0],/disabled/);
+  assert.match(html.match(/<input[^>]*value="bread_102"[^>]*>/)[0],/disabled/);
+  assert.match(html.match(/<input[^>]*value="sunglasses"[^>]*>/)[0],/disabled/);
+  const unlocked=f.run("profileEditor({id:1,name:'구매자',sunglasses_unlocked:true})");
+  assert.doesNotMatch(unlocked.match(/<input[^>]*value="sunglasses"[^>]*>/)[0],/disabled/);
+  assert.match(html,/아직 잠긴 머리핀 · 10종/);
+  f.context.portrait={id:1,name:'구매자',avatar:{...chosenAvatar,hairpin:'bread_101'}};
+  assert.match(f.run('profileAvatar(portrait)'),/data-pin-product="101"/);
+  assert.match(f.run('profileAvatar(portrait)'),/cool-sunglasses/);
+});
+
+test('purchase approval refreshes pins in an open editor without discarding the expression draft',async()=>{
+  const f=fixture();await f.run('refresh()');
+  const {form}=profileForm(f);form.values=new Map(Object.entries(chosenAvatar));
+  f.context.FormData=function(form){return form.values;};
+  let replaced='';
+  const original=f.context.document.querySelector;
+  const updated={querySelector:()=>null};
+  const target={dataset:{unlocks:'["none"]'},contains:()=>false,querySelector:()=>null,
+    set outerHTML(html){replaced=html;}};
+  f.context.document.querySelector=selector=>selector==='#profile-editor'?form:selector==='[data-profile-hairpins]'?(replaced?updated:target):original(selector);
+  f.remote.unlockedHairpins=['none','bread_101'];
+  await f.run('refresh()');
+  assert.match(replaced,/data-expression="wink"/);
+  assert.doesNotMatch(replaced.match(/<input[^>]*value="bread_101"[^>]*>/)[0],/disabled/);
+  assert.match(replaced.match(/<input[^>]*value="bread_102"[^>]*>/)[0],/disabled/);
+  assert.equal(form.values.get('expression'),'wink');
+  assert.equal(f.requests.filter(r=>r.path==='/api/profile').length,0);
+});
+
+test('avatar rendering restricts untrusted selections to local options and escapes names',()=>{
+  const f=fixture();f.context.untrusted={id:1,name:'<script>bad</script>',avatar:{expression:'https://evil.example',glasses:'<svg onload=bad>'}};
+  const svg=f.run('profileAvatar(untrusted)');
+  assert.doesNotMatch(svg,/<script>|https:\/\/evil|onload=/);
+  assert.match(svg,/&lt;script&gt;bad&lt;\/script&gt;/);
+  assert.equal(f.run('normalizeAvatar(untrusted.avatar,1).glasses'),'none');
+  assert.equal(f.run('normalizeAvatar(untrusted.avatar,1).expression'),'smile');
+});
 
 test('polling renders changed stock and leaderboard, including guest stock', async () => {
   for (const guest of [false, true]) {
@@ -79,34 +236,34 @@ test('purchase and event have separate content and only two main menus', async (
   await f.run('refresh()');
   f.run('renderPage()');
   assert.match(f.root.innerHTML, /aria-label="현판 빵 목록"/);
-  assert.doesNotMatch(f.root.innerHTML, /현재 점수|랜덤 빵 뽑기|주사위 1개 굴리기/);
+  assert.doesNotMatch(f.root.innerHTML, /현재 점수|랜덤 빵 뽑기|선택한 주사위 굴리기/);
   const nav = f.root.innerHTML.match(/<nav class="primary-nav"[^>]*>(.*?)<\/nav>/s)[1];
   assert.equal((nav.match(/<button/g) || []).length, 2);
   f.run("state.route='ranking'; renderPage()");
-  assert.match(f.root.innerHTML, /주사위 1개 굴리기/);
+  assert.match(f.root.innerHTML, /선택한 주사위 굴리기/);
   assert.match(f.root.innerHTML, /현재 점수/);
   assert.match(f.root.innerHTML, /최고의 연금술사 TOP 3/);
   assert.doesNotMatch(f.root.innerHTML, /현판 빵 목록|구매 요청하기/);
   assert.doesNotMatch(f.root.innerHTML, /data-admin-search|admin-pickup-search/);
 });
 
-test('reaching ten points opens level-up without claiming bread automatically', async () => {
+test('crossing the first milestone offers its reward without claiming automatically', async () => {
   const f = fixture();
   await f.run('refresh()');
-  f.run("state.config.reward_step=10; state.user.score=8; state.route='ranking'");
+  f.run("state.user.score=3; state.route='ranking'");
   let prompt='';
   f.context.captureModal = html => {prompt=html;};
   f.run('modal = captureModal');
   f.context.fetchOverride = async (path, options) => {
-    if(path==='/api/dice/roll') return f.response({value: 3, score: 11, dice_balance: 1});
-    if(path==='/api/auth/me') return f.response({user:{id:1,name:'구매자1',role:'buyer',score:11,dice_balance:1,rewards_claimed:0}});
+    if(path==='/api/dice/roll') return f.response({result:'score',value:3,score:6,dice_balance:1});
+    if(path==='/api/auth/me') return f.response({user:{id:1,name:'구매자1',role:'buyer',score:6,dice_balance:1,rewards_claimed:0}});
     return f.context.normalFetch(path, options);
   };
   await f.run('rollDice()');
-  assert.match(prompt, /10점 달성/);
+  assert.match(prompt, /5점 달성/);
+  assert.match(prompt,/오트밀 미니바이트/);
   assert.match(prompt, /data-action="claim-reward"/);
-  assert.match(prompt, /character-unknown/);
-  assert.doesNotMatch(prompt, /alchemist-1\.svg|견습 연금술사/);
+  assert.doesNotMatch(prompt, /data-character-level="1"|견습 연금술사/);
   assert.equal(f.requests.filter(r=>r.path==='/api/rewards/claim').length,0);
 });
 
@@ -196,7 +353,7 @@ test('one event page shows rankings and a direct roll action that follows dice b
   assert.match(f.run('navButton(buyerNav[1])'), /data-route="ranking"/);
   f.run("state.route='ranking'; renderPage()");
   assert.match(f.root.innerHTML, /최고의 연금술사 TOP 3/);
-  assert.match(f.root.innerHTML, /data-action="roll-dice"[^>]*>.*주사위 1개 굴리기/);
+  assert.match(f.root.innerHTML, /data-action="roll-dice"[^>]*>.*선택한 주사위 굴리기/);
   assert.match(f.root.innerHTML, /남은 주사위 <strong>2개/);
   assert.equal((f.root.innerHTML.match(/data-action="roll-dice"/g)||[]).length,1);
   assert.doesNotMatch(f.root.innerHTML, /class="subnav"|data-route="dice"/);
@@ -255,31 +412,26 @@ test('event actions remain available while the leaderboard is loading',async()=>
   assert.match(f.root.innerHTML,/현재 점수/);
 });
 
-test('score milestones wait for a successful bread claim before changing character', async () => {
-  const f=fixture();
-  await f.run('refresh()');
-  f.run("state.route='ranking'; state.user.score=9; renderPage()");
-  assert.match(f.root.innerHTML, /1점 더 모으면 레벨업!/);
-  assert.equal((f.root.innerHTML.match(/character-unknown/g)||[]).length,6);
-  assert.doesNotMatch(f.root.innerHTML,/alchemist-[0-5]\.svg/);
-  assert.doesNotMatch(f.root.innerHTML, /data-action="claim-reward"/);
-  f.run('state.user.score=10; renderPage()');
-  assert.equal(f.run('eventProgress().level'), 0);
-  assert.match(f.root.innerHTML, /레벨업하고 빵 받기/);
-  assert.match(f.root.innerHTML, /현재 점수 <strong>10점/);
-  f.run('state.user.rewards_claimed=1; renderPage()');
-  assert.equal(f.run('eventProgress().level'), 1);
-  assert.match(f.root.innerHTML,/alchemist-1\.svg/);
-  assert.doesNotMatch(f.root.innerHTML,/alchemist-[2-5]\.svg/);
-  assert.equal((f.root.innerHTML.match(/character-unknown/g)||[]).length,4);
-  assert.match(f.root.innerHTML, /10점 더 모으면 레벨업!/);
-  f.run('state.user.score=60; state.user.rewards_claimed=5; renderPage()');
-  assert.equal(f.run('eventProgress().level'), 5);
-  assert.match(f.root.innerHTML, /빵 보상 받기/);
-  assert.doesNotMatch(f.root.innerHTML, /레벨업하고 빵 받기/);
+test('milestone roadmap shows five once-only rewards and growth waits for claim', async()=>{
+  const f=fixture();await f.run('refresh()');
+  f.run("state.route='ranking'; state.user.score=4; renderPage()");
+  assert.match(f.root.innerHTML,/1점 더 모으면 레벨업!/);
+  assert.match(f.root.innerHTML,/character-unknown/);
+  assert.doesNotMatch(f.root.innerHTML,/data-action="claim-reward"/);
+  for(const reward of ['오트밀 미니바이트','프로필 배지 1 · 추후 추가','우유','프로필 배지 2 · 추후 추가','멋진 선글라스','멋쟁이 마법사','커스텀 칭호'])assert.match(f.root.innerHTML,new RegExp(reward));
+  assert.doesNotMatch(f.root.innerHTML,/10점마다|50점까지/);
+  f.run('state.user.score=5; renderPage()');
+  assert.equal(f.run('eventProgress().level'),0);
+  assert.match(f.root.innerHTML,/5점 보상 받기/);
+  f.run('state.user.claimed_milestones=[5];state.user.level=1;renderPage()');
+  assert.match(f.root.innerHTML,/data-character-level="1"/);
+  assert.match(f.root.innerHTML,/5점 더 모으면 레벨업!/);
+  f.run('state.user.score=60;state.user.level=5;state.user.claimed_milestones=[5,10,15,20,30];renderPage()');
+  assert.match(f.root.innerHTML,/30점 보상까지 모두 받았어요/);
+  assert.doesNotMatch(f.root.innerHTML,/data-action="claim-reward"/);
 });
 
-test('level-up waits for one server claim and reveals character together with bread', async () => {
+test('level-up waits for one server claim before revealing the reward', async () => {
   const f=fixture();
   await f.run('refresh()');
   f.run('state.user.score=10');
@@ -289,8 +441,8 @@ test('level-up waits for one server claim and reveals character together with br
   f.run('modal=captureModal');
   f.context.fetchOverride=async (path,options)=>{
     if(path==='/api/rewards/claim')return new Promise(resolve=>{release=()=>{
-      user={...user,rewards_claimed:1,level:1};
-      resolve(f.response({user,reward:{id:1,product_id:1,product_name:'플레인 휘낭시에',threshold:10}}));
+      user={...user,rewards_claimed:1,level:1,claimed_milestones:[5]};
+      resolve(f.response({user,reward:{id:1,product_id:null,product_name:'오트밀 미니바이트',kind:'oatmeal',threshold:5}}));
     };});
     if(path==='/api/auth/me')return f.response({user});
     return f.context.normalFetch(path,options);
@@ -303,14 +455,48 @@ test('level-up waits for one server claim and reveals character together with br
   await first;
   assert.equal(f.run('eventProgress().level'),1);
   assert.match(prompt,/LEVEL UP!/);
-  assert.match(prompt,/Lv. 1 견습 연금술사/);
-  assert.match(prompt,/alchemist-1\.svg/);
+  assert.match(prompt,/견습 연금술사/);
+  assert.match(prompt,/data-character-level="1"/);
   assert.doesNotMatch(prompt,/character-unknown/);
-  assert.match(prompt,/함께 받은 랜덤 빵/);
-  assert.match(prompt,/플레인 휘낭시에/);
+  assert.match(prompt,/오트밀 미니바이트/);
 });
 
 const adminSource=readFileSync(new URL('../frontend/admin.js',import.meta.url),'utf8').replace(/\bexport /g,'');
+test('typed dice show quantities and colors without exposing face distributions',async()=>{
+  const f=fixture();await f.run('refresh()');
+  f.run("state.route='ranking';state.user.dice=[{kind:'preorder_gold',name:'준비된 마법사의 주사위',color:'gold',quantity:1},{kind:'instagram',name:'인싸 마법사의 주사위',color:'pink',quantity:1}];state.selectedDice='instagram';renderPage()");
+  assert.match(f.root.innerHTML,/준비된 마법사의 주사위/);
+  assert.match(f.root.innerHTML,/인싸 마법사의 주사위/);
+  assert.match(f.root.innerHTML,/data-kind="instagram" aria-pressed="true"/);
+  assert.doesNotMatch(f.root.innerHTML,/5천원|2만원|faces|1, 1, 2|6, 9, 11/);
+  assert.equal(f.run('selectedDie().kind'),'instagram');
+  f.run("state.user.dice=state.user.dice.filter(d=>d.kind!=='instagram')");
+  assert.equal(f.run('selectedDie().kind'),'preorder_gold');
+});
+
+test('a selected typed die sends only its kind and a retry-safe identifier',async()=>{
+  const f=fixture();await f.run('refresh()');
+  f.run("state.user.dice=[{kind:'preorder_gold',name:'준비된 마법사의 주사위',color:'gold',quantity:1}];state.selectedDice='preorder_gold'");
+  f.context.fetchOverride=(path,options)=>path==='/api/dice/roll'?f.response({result:'score',value:22,score:22,dice_balance:0}):f.context.normalFetch(path,options);
+  await f.run('rollDice()');
+  const body=JSON.parse(f.requests.find(r=>r.path==='/api/dice/roll').body);
+  assert.deepEqual(Object.keys(body).sort(),['kind','request_id']);
+  assert.equal(body.kind,'preorder_gold');
+  assert.match(f.run("die(22,'gold')"),/<b>22<\/b>/);
+});
+
+test('milk dice outcomes show milk instead of a zero-point die or automatic milestone claim',async()=>{
+  const f=fixture();await f.run('refresh()');let prompt='';
+  f.context.capture=html=>prompt=html;f.run('modal=capture');
+  f.context.fetchOverride=(path,options)=>path==='/api/dice/roll'?f.response({id:4,result:'milk',value:0,score:0,dice_balance:1,dice:{color:'pink'}}):f.context.normalFetch(path,options);
+  await f.run('rollDice()');
+  assert.match(prompt,/우유 당첨!/);
+  assert.match(prompt,/당첨 #4/);
+  assert.doesNotMatch(prompt,/\+0점|주사위 0/);
+  assert.equal(f.requests.filter(r=>r.path==='/api/rewards/claim').length,0);
+  assert.match(f.run("die('milk','pink')"),/우유 당첨/);
+});
+
 function adminFixture() {
   const requests=[],messages=[];
   const listeners={};
@@ -329,7 +515,7 @@ function adminFixture() {
     api:async(path,options)=>{requests.push(JSON.parse(JSON.stringify({path,...options})));return context.respond?context.respond(path,options):{};},
     submitButton(){},refresh:async()=>{},render(){renderCalls++;},toast:message=>messages.push(message),closeModal(){}};
   vm.createContext(context);
-  vm.runInContext(adminSource+'\ninitAdmin(shared);',context);
+  vm.runInContext(profileSource+'\n'+adminSource+'\nshared.profileAvatar=profileAvatar;initAdmin(shared);',context);
   return {state,requests,messages,context,listeners,nodes,run:script=>vm.runInContext(script,context),
     get renders(){return renderCalls;},
     search(key,value){listeners.input({target:{dataset:{adminSearch:key},value,closest:()=>null}});},
@@ -574,7 +760,7 @@ test('a queued pickup uses its linked buyer and an approved queue order cannot b
   let html=f.run('renderAdmin()');
   assert.match(html,/수령 요청 접수됨/);
   assert.match(html,/name="user_id" value="21"/);
-  assert.match(html,/수령 계정: 실제계정/);
+  assert.match(html.replace(/<[^>]*>/g,''),/수령 계정:\s*실제계정/);
   assert.doesNotMatch(html,/<select[^>]*name="user_id"|admin-pickup-mode/);
   f.state.staffData.orders=[{id:9,reservation_id:7,user_id:21,status:'approved'}];
   html=f.run('renderAdmin()');
@@ -597,27 +783,17 @@ test('editing a reservation lookup or switching sale type ignores an older respo
   }
 });
 
-test('Instagram certification selects a registered user and defaults both benefits on',()=>{
-  const f=adminFixture();
-  const html=f.run('renderAdmin()');
-  assert.match(html,/등록 사용자/);
+test('Instagram certification grants one special die without milk controls',()=>{
+  const f=adminFixture(),html=f.run('renderAdmin()');
   assert.match(html,/<option value="10"[^>]*>등록사용자/);
-  assert.match(html,/type="checkbox" name="dice" value="1" checked/);
-  assert.match(html,/type="checkbox" name="milk_quantity" value="1" checked/);
-  assert.match(html,/인스타 이벤트 인증 완료/);
-  assert.doesNotMatch(html,/<select[^>]*name="(?:dice|milk_quantity)"/);
-  assert.doesNotMatch(html,/<input[^>]*name="(?:name|pin)"/);
+  assert.match(html,/인싸 마법사의 주사위 1개 지급/);
+  assert.doesNotMatch(html,/<input[^>]*name="(?:dice|milk_quantity|name|pin)"/);
 });
 
-test('Instagram checkbox combinations submit explicit zeros for unchecked benefits',async()=>{
-  for(const milk of [false,true])for(const dice of [false,true]) {
-    const f=adminFixture();
-    await f.submit({user_id:'10',...(milk?{milk_quantity:'1'}:{}),...(dice?{dice:'1'}:{})});
-    assert.equal(f.requests.length,1);
-    assert.deepEqual(f.requests[0],{path:'/api/staff/instagram',method:'POST',body:{
-      user_id:10,milk_quantity:milk?1:0,dice:dice?1:0,request_id:'request-1'}});
-    assert.equal(f.messages[0],'인스타 이벤트 인증과 선택한 지급 내역을 기록했어요.');
-  }
+test('Instagram submits only the registered user and request identifier',async()=>{
+  const f=adminFixture();await f.submit({user_id:'10'});
+  assert.deepEqual(f.requests[0],{path:'/api/staff/instagram',method:'POST',body:{user_id:10,request_id:'request-1'}});
+  assert.equal(f.messages[0],'인스타 이벤트를 인증하고 전용 주사위 1개를 지급했어요.');
 });
 
 test('milk uses the product inventory table and normal stock adjustment',()=>{

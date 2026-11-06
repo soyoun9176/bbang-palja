@@ -60,22 +60,22 @@ class ManualPreorderTests(unittest.TestCase):
 
     def test_reserved_pickup_uses_original_prices_and_only_reserved_stock_once(self):
         buyer=self.buyer();r=self.reserve(buyer['user']['name'])
-        self.assertEqual((r['status'],r['dice_quantity'],r['total'],r['order']),('reserved',2,7600,None))
+        self.assertEqual((r['status'],r['dice_quantity'],r['total'],r['order']),('reserved',1,7600,None))
         before=[self.product(p)['stock'] for p in [101,112]]
         with self.app.db.transaction(write=True) as tx:tx.execute('UPDATE products SET price=9999 WHERE id=101')
         identity=uuid.uuid4().hex
         result=self.complete(r,{'user_id':buyer['user']['id']},identity)
         self.assertEqual(self.complete(r,{'user_id':buyer['user']['id']},identity),result)
         self.assertEqual((result['order']['type'],result['order']['status'],result['order']['total']),('preorder','approved',7600))
-        self.assertEqual(result['order']['dice_quantity'],2)
-        self.assertEqual(self.me(buyer)['dice_balance'],2)
+        self.assertEqual(result['order']['dice_quantity'],1)
+        self.assertEqual(self.me(buyer)['dice_balance'],1)
         self.assertEqual([self.product(p)['stock'] for p in [101,112]],before)
         self.assertEqual([self.product(p)['preorder_stock'] for p in [101,112]],[0,0])
         repeat=self.complete(r,{'user_id':buyer['user']['id']})
         self.assertTrue(repeat['already_completed'])
         self.assertEqual(repeat['order']['id'],result['order']['id'])
         self.assertEqual(self.claim(r,buyer)['id'],result['order']['id'])
-        self.assertEqual(self.me(buyer)['dice_balance'],2)
+        self.assertEqual(self.me(buyer)['dice_balance'],1)
         with self.app.db.transaction() as tx:self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM orders')['n'],1)
 
     def test_existing_customer_pickup_request_is_approved_without_another_deduction(self):
@@ -86,10 +86,10 @@ class ManualPreorderTests(unittest.TestCase):
         result=self.complete(r,{'user_id':buyer['user']['id']})
         self.assertEqual(result['order']['id'],order['id'])
         self.assertEqual(result['order']['status'],'approved')
-        self.assertEqual(self.me(buyer)['dice_balance'],2)
+        self.assertEqual(self.me(buyer)['dice_balance'],1)
         self.assertEqual(self.product(101)['preorder_stock'],0)
         self.request('POST',f"/api/staff/orders/{order['id']}/approve",{},self.staff)
-        self.assertEqual(self.me(buyer)['dice_balance'],2)
+        self.assertEqual(self.me(buyer)['dice_balance'],1)
 
     def test_new_buyer_can_collect_milk_without_purchase_dice(self):
         r=self.reserve('첫방문예약자',[{'product_id':112,'quantity':2}])
@@ -114,7 +114,7 @@ class ManualPreorderTests(unittest.TestCase):
             self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM orders')['n'],0)
             self.assertEqual(tx.one('SELECT status FROM reservations WHERE id=?',(r['id'],))['status'],'reserved')
         with self.app.db.transaction(write=True) as tx:tx.execute('UPDATE products SET preorder_stock=1 WHERE id=112')
-        self.assertEqual(self.complete(r,{'pin':'2345'},identity)['user']['dice_balance'],2)
+        self.assertEqual(self.complete(r,{'pin':'2345'},identity)['user']['dice_balance'],1)
 
     def test_invalid_phone_account_pin_and_buyer_access_do_not_fulfill(self):
         buyer=self.buyer();r=self.reserve(buyer['user']['name'])
@@ -147,7 +147,7 @@ class ManualPreorderTests(unittest.TestCase):
         result=self.complete(r,{'user_id':buyer['user']['id']},identity)
         self.assertEqual((result['order']['user_id'],result['order']['customer_name']),
                          (buyer['user']['id'],'기존닉네임'))
-        self.assertEqual((self.me(buyer)['dice_balance'],self.me(buyer)['score']),(7,12))
+        self.assertEqual((self.me(buyer)['dice_balance'],self.me(buyer)['score']),(6,12))
         self.assertEqual(self.me(other)['dice_balance'],0)
         self.assertEqual(result['reservation']['name'],'예약자실명')
         self.assertEqual(result['reservation']['status'],'approved')
@@ -161,7 +161,7 @@ class ManualPreorderTests(unittest.TestCase):
         with self.assertRaises(APIError) as error:self.claim(r,other)
         self.assertEqual(error.exception.status,409)
         self.assertEqual(self.product(101)['preorder_stock'],0)
-        self.assertEqual(self.me(buyer)['dice_balance'],7)
+        self.assertEqual(self.me(buyer)['dice_balance'],6)
 
     def test_queued_pickup_cannot_switch_to_another_account(self):
         buyer=self.buyer();other=self.buyer();r=self.reserve(buyer['user']['name'])
@@ -172,7 +172,7 @@ class ManualPreorderTests(unittest.TestCase):
         self.assertEqual(self.lookup(r['name'])['order']['status'],'pending')
         result=self.complete(r,{'user_id':buyer['user']['id']})
         self.assertEqual(result['order']['id'],order['id'])
-        self.assertEqual(self.me(buyer)['dice_balance'],2)
+        self.assertEqual(self.me(buyer)['dice_balance'],1)
 
     def test_dashboard_lists_every_reservation_and_tracks_pickup_and_cancellation(self):
         buyer=self.buyer()
@@ -246,7 +246,7 @@ class ManualPreorderTests(unittest.TestCase):
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(complete,buyers))
         self.assertEqual(sum(isinstance(result,dict) for result in results),1)
         self.assertIn(409,results)
-        self.assertEqual(sorted(self.me(b)['dice_balance'] for b in buyers),[0,2])
+        self.assertEqual(sorted(self.me(b)['dice_balance'] for b in buyers),[0,1])
         self.assertEqual(self.product(101)['preorder_stock'],0)
         with self.app.db.transaction() as tx:self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM orders')['n'],1)
 
@@ -257,7 +257,7 @@ class ManualPreorderTests(unittest.TestCase):
         self.assertEqual(self.product(101)['preorder_stock'],2)
         result=self.complete(r,{'user_id':buyer['user']['id']})
         self.assertNotEqual(result['order']['id'],order['id'])
-        self.assertEqual(self.me(buyer)['dice_balance'],2)
+        self.assertEqual(self.me(buyer)['dice_balance'],1)
         self.assertEqual(self.product(101)['preorder_stock'],0)
 
     def test_two_staff_cannot_complete_the_same_reservation_twice(self):
@@ -270,7 +270,7 @@ class ManualPreorderTests(unittest.TestCase):
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(complete,[self.staff,second]))
         self.assertEqual(results[0]['order']['id'],results[1]['order']['id'])
         self.assertEqual(sorted(x['already_completed'] for x in results),[False,True])
-        self.assertEqual(self.me(buyer)['dice_balance'],2)
+        self.assertEqual(self.me(buyer)['dice_balance'],1)
         with self.app.db.transaction() as tx:
             self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM orders')['n'],1)
             self.assertEqual(tx.one("SELECT COUNT(*) AS n FROM inventory_logs WHERE bucket='preorder_stock' AND delta<0")['n'],2)
@@ -286,7 +286,7 @@ class ManualPreorderTests(unittest.TestCase):
             return self.request('POST',f"/api/preorders/{r['id']}/claim",{'request_id':uuid.uuid4().hex},buyer['token'])['order']
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:orders=list(pool.map(compete,['staff','buyer']))
         self.assertEqual(orders[0]['id'],orders[1]['id'])
-        self.assertEqual(self.me(buyer)['dice_balance'],2)
+        self.assertEqual(self.me(buyer)['dice_balance'],1)
         self.assertEqual(self.product(101)['preorder_stock'],0)
 
     def test_historical_menu_reservation_uses_its_reserved_price(self):
@@ -298,7 +298,7 @@ class ManualPreorderTests(unittest.TestCase):
         r=self.lookup(buyer['user']['name'])
         result=self.complete(r,{'user_id':buyer['user']['id']})
         self.assertEqual(result['order']['total'],5000)
-        self.assertEqual(self.me(buyer)['dice_balance'],2)
+        self.assertEqual(self.me(buyer)['dice_balance'],1)
         self.assertEqual((self.product(1)['stock'],self.product(1)['preorder_stock']),(9,0))
         dashboard=self.request('GET','/api/staff/dashboard',token=self.staff)
         self.assertNotIn(1,[p['id'] for p in dashboard['products']])

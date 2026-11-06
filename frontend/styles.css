@@ -19,6 +19,7 @@
 @media(max-width:800px){.ranking-layout{grid-template-columns:1fr}.character-summary{gap:12px}.character-summary>.alchemist{width:100px;height:100px}.level-milestones .alchemist{max-height:70px}.level-up-result h2{font-size:18px}}
 
 .benefit-options{display:grid;gap:12px;margin:8px 0 24px}.benefit-option{display:flex;align-items:center;gap:12px;padding:16px;border:1px solid var(--line);border-radius:10px;cursor:pointer;background:#fafbf7;font-size:14px;font-weight:600}.benefit-option input{width:20px;height:20px;margin:0;accent-color:#536446;flex-shrink:0}.benefit-option small{display:block;font-size:12px;color:var(--muted);font-weight:400;margin-top:5px}
+.dice-picker{display:grid;gap:8px;margin:14px 0}.dice-choice{display:flex;align-items:center;gap:12px;text-align:left;width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:#fff;cursor:pointer;color:#252923}.dice-choice.selected{border-color:#8b739f;box-shadow:0 0 0 1px #8b739f;background:#f8f4fc}.dice-choice>span:nth-child(2){flex:1;min-width:0}.dice-choice strong{display:block;font-size:13px}.dice-choice small{display:block;font-size:12px;color:var(--muted);margin-top:4px}.dice-choice .icon{width:18px;height:18px;color:#78618f}.dice-color-mark{display:block;flex-shrink:0;width:27px;height:27px;border:1px solid #c9c3d2;border-radius:7px;background:#fff;box-shadow:2px 2px 0 #dfd8e6;transform:rotate(-8deg)}.die-rainbow.big-dice,.die-rainbow .dice-color-mark{background:linear-gradient(135deg,#ffd1d9,#f8e99e,#c5e8c2,#bcd9fb,#dec3ed)}.die-silver.big-dice,.die-silver .dice-color-mark{background:linear-gradient(135deg,#fdfefe,#c4ccd7,#edf0f4);border-color:#a5afbd}.die-gold.big-dice,.die-gold .dice-color-mark{background:linear-gradient(135deg,#fff3b6,#e6bd59,#ffe495);border-color:#c49b3f}.die-pink.big-dice,.die-pink .dice-color-mark{background:#f6d8e8;border-color:#d7a6c1}.big-dice.die-symbol{display:grid;grid-template-columns:1fr;grid-template-rows:1fr;place-items:center;padding:12px}.die-symbol b{font-size:36px;color:#65507f}.die-symbol .icon{width:44px;height:44px;color:#65507f}.next-prize{font-size:12px;color:var(--muted);margin:6px 0 0}.milestone-roadmap{margin-top:24px;padding-top:22px;border-top:1px solid var(--line)}.milestone-roadmap h3{font-size:16px;margin:0 0 6px}.milestone-roadmap>p{font-size:12px;color:var(--muted);margin:0 0 16px}.milestone-roadmap ol{list-style:none;padding:0;margin:0;display:grid;gap:9px}.milestone-roadmap li{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #eee8f2;background:#fcfafc;border-radius:10px}.milestone-roadmap li.next{border-color:#c7b6d8;background:#f3edf8}.milestone-roadmap li.unlocked{background:#f2f5ed;border-color:#dce6d3}.milestone-score{font-size:22px;font-weight:800;color:#79618f;min-width:35px;text-align:center}.milestone-score small{font-size:10px;margin-left:2px}.milestone-roadmap li>div{flex:1}.milestone-roadmap strong{display:block;font-size:13px;line-height:1.4}.milestone-roadmap li>div>small{display:block;font-size:11px;line-height:1.5;color:var(--muted);margin-top:4px}.milestone-state{color:#8c779e}.milestone-state .icon{width:20px;height:20px}.event-supply-card{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}.event-supply-card h2{font-size:16px;margin:0 0 6px}.event-supply-card p{font-size:14px;margin:0}.event-supply-card strong{margin-left:10px}
 .product-price .menu-concept{margin:0;font-size:11px}
 
 .character-unknown{display:grid;place-items:center;width:160px;height:160px;border:1px dashed #cbbfda;border-radius:22px;background:#f2eef7;color:#9581ab;font-size:64px;font-weight:800;line-height:1}.level-milestones .character-unknown{height:auto;aspect-ratio:1;border-radius:8px;font-size:clamp(24px,4vw,36px)}
@@ -71,3 +72,54 @@
 .preorder-match button{flex-shrink:0;font-size:12px;min-height:42px;padding:10px 12px}
 
 .order-stock-note{font-size:12px;font-weight:400;color:var(--muted);margin-left:6px}
+
+/* Shared character portraits and the account editor. */
+.profile-avatar{display:block;width:38px;height:38px;flex-shrink:0;border-radius:50%;background:#f4f0e5;border:1px solid #e5dfd1}
+.profile-button>.profile-avatar{width:32px;height:32px;margin-right:3px}
+.profile-button>span{max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.profile-name{display:inline-flex;align-items:center;gap:10px;min-width:0;vertical-align:middle}
+.profile-name>span{min-width:0;overflow-wrap:anywhere}
+.profile-name>.profile-avatar{width:36px;height:36px}
+.pending-title h3 .profile-name{font-size:18px}
+.pending-title h3>small{margin-top:9px}
+.selected-profile{margin-top:10px;font-size:13px;color:var(--muted)}
+.selected-profile:empty{display:none}
+.profile-avatar.alchemist{border:0;border-radius:18px;background:transparent}
+.profile-avatar.level-preview{width:160px;height:160px}
+.profile-editor>h2{margin-bottom:8px}
+.profile-editor>.form-hint{margin:0;color:var(--muted);line-height:1.6}
+.profile-editor-preview{display:grid;justify-items:center;gap:5px;margin:15px 0 18px}
+.profile-preview-picture{width:112px;height:112px;border:3px solid #e8dfc5;box-shadow:0 5px 15px #4037200a}
+.profile-editor-preview>strong{font-size:16px;margin-top:3px}
+.profile-editor-preview>small{font-size:11px;color:var(--muted)}
+.profile-tabs{display:flex;gap:6px;margin-bottom:18px}
+.profile-tabs .tab-chip{font-size:13px;min-height:40px}
+.profile-options{border:0;padding:0;margin:0 0 17px;min-width:0}
+.profile-options legend{padding:0;margin-bottom:9px;font-size:13px;font-weight:700}
+.profile-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+.profile-choices.choices-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.profile-choices.profile-expressions{grid-template-columns:repeat(2,minmax(0,1fr))}
+.profile-expressions .profile-choice-picture{width:72px;height:66px}
+.profile-choice{position:relative;cursor:pointer;min-width:0}
+.profile-choice>input{position:absolute;opacity:0;width:1px;height:1px}
+.profile-choice>span{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:1px solid #dfe2d7;border-radius:10px;padding:8px 3px;background:#fafbf7;height:100%}
+.profile-choice b{font-size:11px;font-weight:500;text-align:center;line-height:1.4;word-break:keep-all;overflow-wrap:anywhere;max-width:100%}
+.profile-choice>input:checked+span{border-color:#a183b9;background:#f4eff8;box-shadow:inset 0 0 0 1px #a183b9}
+.profile-choice>input:focus-visible+span{outline:3px solid #ad91c9;outline-offset:3px}
+.profile-choice>input:disabled+span{opacity:.65;cursor:wait}
+.profile-choice-picture{width:52px;height:52px;max-width:100%;border:0}
+[data-profile-panel="face"] .profile-choice-picture{width:62px;height:62px}
+.profile-color{display:block;width:27px;height:27px;border:2px solid #ffffff;box-shadow:0 0 0 1px #d9d8cd;border-radius:50%;margin:3px}
+.profile-save{margin-top:2px}
+.profile-editor-footer{display:flex;margin:13px auto 0;justify-content:center}
+.profile-editor-error{margin-bottom:14px;padding:12px;background:#fcf0ed;color:#8a4c43;border-radius:8px;font-size:13px;line-height:1.6}
+.profile-editor [hidden]{display:none!important}
+.profile-options legend small{font-size:11px;color:var(--muted);font-weight:400;margin-left:5px}
+.profile-locked-pins{margin-top:13px}
+.profile-locked-pins>summary{cursor:pointer;font-size:12px;color:var(--muted);padding:7px 0}
+.profile-locked-pins>.profile-choices{margin-top:10px}
+.profile-choice-locked>span{background:#f1f2ee}
+.profile-choice-locked small{font-size:10px;color:var(--muted)}
+.profile-choice-locked>input:disabled+span{opacity:.65;cursor:not-allowed}
+@media(max-width:800px){.profile-button>span{max-width:96px}.profile-button>.profile-avatar{width:30px;height:30px}.leaders li,.rank-row{gap:10px;padding-left:5px;padding-right:5px}.profile-name{gap:7px}.profile-name>.profile-avatar{width:33px;height:33px}.leaders strong,.rank-row strong{font-size:13px}.profile-preview-picture{width:104px;height:104px}.profile-choice-picture{width:48px;height:48px}}
+@media(max-width:360px){.profile-button>span{max-width:72px}.profile-button>.profile-avatar{width:27px;height:27px}}
