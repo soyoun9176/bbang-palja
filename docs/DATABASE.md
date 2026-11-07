@@ -2,7 +2,7 @@
 
 코드 기준 갱신일: **2026-11-07 (KST)**. 기준 코드는 [server/db.py](../server/db.py)의 `SCHEMA`, 데이터 처리 코드는 [server/app.py](../server/app.py), 상품 규칙은 [server/catalog.py](../server/catalog.py)입니다.
 
-현재 로컬 코드의 애플리케이션 테이블은 **24개**, 컬럼은 **147개**, 실제 외래키는 **31개**, CHECK 제약은 **39개**, 명시적 인덱스는 **5개**입니다. SQLite 내부 테이블·자동 인덱스는 제외합니다. 전화번호 계정 이전의 구 DB만 명시적 재생성이 필요합니다. 전화번호 계정 DB에는 비회원 주문 구조·임의 지급 테이블을 기존 기록을 유지하며 자동 추가합니다.
+현재 로컬 코드의 애플리케이션 테이블은 **29개**, 컬럼은 **191개**, 실제 외래키는 **48개**, CHECK 제약은 **49개**, 명시적 인덱스는 **5개**입니다. SQLite 내부 테이블·자동 인덱스는 제외합니다. 전화번호 계정 이전의 구 DB만 명시적 재생성이 필요합니다. 전화번호 계정 DB에는 비회원 주문 구조·임의 지급 테이블을 기존 기록을 유지하며 자동 추가합니다.
 
 ## 1. 실행 환경과 저장 위치
 
@@ -21,7 +21,12 @@
 | 영역 | 테이블 | 저장하는 것 |
 | --- | --- | --- |
 | 계정 | `users` | 구매자·담당자 계정, 점수, 남은 주사위, 보상 수령 횟수 |
-| 프로필 | `user_profiles` | 계정별 얼굴·머리·안경·머리핀 선택, 저장 시각 |
+| 프로필 | `user_profiles` | 계정별 외모·착용 배지·착용 칭호, 저장 시각 |
+| 배지 종류 | `badges` | 이름·그림·획득 안내·자동/수동 조건 |
+| 배지 보유 | `user_badges` | 계정별 획득 배지·시각·획득 경로·담당자 |
+| 칭호 종류 | `titles` | 이름·스타일·획득 안내·점수/도전과제/수동 조건 |
+| 칭호 보유 | `user_titles` | 계정별 획득 칭호·시각·원본 보상·담당자 |
+| 도전과제 | `user_achievements` | 구매 조건별 달성·날짜별 선착순 독점 기록 |
 | 인증 | `sessions` | 로그인 토큰의 해시와 만료 시각 |
 | 상품·재고 | `products` | 빵·우유 정보와 현판·예판 재고 |
 | 재고 이력 | `inventory_logs` | 품목별 재고 증감, 사유, 처리자 이름 |
@@ -54,6 +59,16 @@ erDiagram
     users o|--o{ orders : user_id
     orders ||--o| guest_order_access : order_id
     users ||--o| user_profiles : user_id
+    badges o|--o{ user_profiles : badge_id
+    titles o|--o{ user_profiles : title_id
+    users ||--o{ user_titles : user_id
+    titles ||--o{ user_titles : title_id
+    users ||--o{ user_achievements : user_id
+    user_achievements o|--o{ user_badges : achievement_id
+    user_achievements o|--o{ user_titles : achievement_id
+    users ||--o{ user_badges : user_id
+    badges ||--o{ user_badges : badge_id
+    milestone_claims o|--o{ user_badges : milestone_id
     users o|--o{ reservations : user_id
     reservations o|--o{ orders : reservation_id
     reservations ||--o{ reservation_items : reservation_id
@@ -89,7 +104,7 @@ erDiagram
 - 구매자 식별자는 UNIQUE phone입니다. 닉네임은 중복 가능하며 담당자 이름만 부분 UNIQUE 인덱스 idx_staff_name으로 제한합니다. CHECK로 구매자 전화번호 필수·담당자 NULL과 정해진 ASCII 숫자/대시 형식을 검사합니다.
 - 구매자 PIN은 숫자 네 자리이며 PBKDF2-HMAC-SHA256, 임의 salt, 160,000회 반복으로 저장합니다.
 - 담당자 공용 비밀번호는 이 테이블에 저장하지 않고 `STAFF_PASSWORD` 환경 변수로 확인합니다.
-- 가입·로그인은 전화번호를 정규화하고 사용자 응답/순위/프로필에는 번호를 넣지 않습니다. 담당자 구매자 목록에만 번호를 제공합니다. 예약 번호도 같은 형식으로 저장하며 본인 조회는 가입 번호와 일치해야 합니다.
+- 가입·로그인은 전화번호를 정규화하고 공개 사용자 정보/순위/프로필에는 번호를 넣지 않습니다. 담당자 구매자 목록과 인증한 본인의 예약 조회 기본값(`pickup_defaults`)에 번호를 제공합니다. 예약 조회는 이름·전화번호를 수정해 다른 예약을 찾을 수 있으며 계정 정보는 수정하지 않습니다.
 - 캐릭터 레벨은 별도 컬럼 없이 `min(5, rewards_claimed)`로 계산합니다.
 
 ### 4.2 `sessions` — 로그인 세션
@@ -126,7 +141,7 @@ erDiagram
 | --- | --- | --- | --- |
 | `id` | INTEGER | PK, 자동 증가 | 예약 번호 |
 | `name` | TEXT | NN | 원래 예약자 이름 |
-| `phone` | TEXT | NN | 숫자만 남긴 10~11자리 전화번호 |
+| `phone` | TEXT | NN | 010-NNNN-NNNN 예약 전화번호 |
 | `status` | TEXT | NN, 기본 `reserved` | `reserved` / `pending` / `approved` |
 | `user_id` | INTEGER | NULL 허용, FK → `users.id` | 예약을 수령하는 구매자 계정 |
 | `order_id` | INTEGER | NULL 허용, 코드상 → `orders.id` | 현재 수령 주문. DB 외래키 선언 없음 |
@@ -162,7 +177,7 @@ erDiagram
 | `reservation_id` | INTEGER | NN, 복합 PK, FK → `reservations.id` | 확인한 예약 |
 | `expires_at` | TEXT | NN | 확인 유효기간 |
 
-복합 기본키는 `(user_id, reservation_id)`입니다. 구매자가 본인 이름과 전화번호로 예약을 조회하면 24시간 유효한 확인을 기록합니다. 구매자 수령 요청 API는 이 확인과 예약 소유권을 검사합니다. 담당자의 조회는 이 확인 기록을 만들지 않습니다.
+복합 기본키는 `(user_id, reservation_id)`입니다. 구매자가 입력한 예약자 이름·전화번호로 예약을 조회하면 해당 계정에 24시간 유효한 확인을 기록합니다. 가입 정보와 다른 조회값도 허용합니다. 수령 요청은 이 확인을 검사하며, 이미 다른 계정에 연결된 예약은 가져올 수 없습니다. 담당자의 조회는 이 확인 기록을 만들지 않습니다.
 
 ### 4.7 `orders` — 구매와 수령 주문
 
@@ -311,6 +326,8 @@ DB에 `UNIQUE(user_id, threshold)`는 없고 쓰기 잠금·보상 횟수·요�
 | --- | --- | --- | --- |
 | `user_id` | INTEGER | NN, PK, FK → `users.id` | 프로필 소유 계정 |
 | `appearance` | TEXT | NN | `face_shape`, `skin`, `expression`, `glasses`, `hairpin`의 JSON 객체 |
+| `badge_id` | TEXT | NULL 허용, FK → `badges.id` | 착용 배지 하나. 미착용은 NULL |
+| `title_id` | TEXT | NULL 허용, FK → `titles.id` | 착용 칭호 하나. 미착용은 NULL |
 | `updated_at` | TEXT | NN | 마지막 저장 시각 |
 
 저장한 프로필이 없는 기존 계정에는 ID를 기준으로 만든 기본 외모를 응답하며 읽기만으로 행을 만들지 않습니다. 로그인한 계정 자신의 프로필만 수정할 수 있고 허용한 선택값만 저장합니다. 계정당 한 행을 UPSERT하므로 반복 저장해도 행을 추가하지 않습니다. 저장은 기존 쓰기 잠금 안에서 처리하며 점수·주사위·보상 횟수는 변경하지 않습니다. 실제 사진 파일이나 외부 이미지 URL은 저장하지 않습니다.
@@ -352,7 +369,7 @@ DB에 `UNIQUE(user_id, threshold)`는 없고 쓰기 잠금·보상 횟수·요�
 | `product_name` | TEXT | NN | 보상명 |
 | `created_at` | TEXT | NN | 수령 확정 시각 |
 
-`UNIQUE(user_id,threshold)`로 중복 지급을 막습니다. 선택한 기준 점수의 달성 여부·미수령 여부를 확인하여 순서와 무관하게 한 번씩 지급하며 30점에서 끝납니다. API에서 기준 점수를 생략하면 미수령 최저 기준을 사용합니다. 배지·칭호는 화면 예고만 있고 저장·지급하지 않습니다. 빵만 현판 `stock²` 가중치로 추첨하며 우유 보상은 112번 우유·113번 두유를 선택하고, 오트밀은 `event_supplies`를 사용합니다. 물리적 지급은 `reward_requests`에 연결합니다. 지급 취소가 확정된 점수 단계·캐릭터 레벨을 되돌리지는 않습니다.
+`UNIQUE(user_id,threshold)`로 중복 지급을 막습니다. 선택한 기준 점수의 달성 여부·미수령 여부를 확인하여 순서와 무관하게 한 번씩 지급하며 30점에서 끝납니다. API에서 기준 점수를 생략하면 미수령 최저 기준을 사용합니다. 5·10점 보상은 배지도 함께 저장·지급합니다. 15·30점 보상은 칭호도 함께 저장·지급합니다. 빵만 현판 `stock²` 가중치로 추첨하며 우유 보상은 112번 우유·113번 두유를 선택하고, 오트밀은 `event_supplies`를 사용합니다. 물리적 지급은 `reward_requests`에 연결합니다. 지급 취소가 확정된 점수 단계·캐릭터 레벨을 되돌리지는 않습니다.
 
 ### 4.21 `event_supplies` — 판매하지 않는 이벤트 재고
 
@@ -419,6 +436,74 @@ CHECK로 두 원본 중 정확히 하나만 연결하고 각 원본의 UNIQUE로
 빵·음료는 현판 재고, 오트밀은 해당 물품 재고를 같은 쓰기 트랜잭션에서 차감합니다. 기타 상품은 이름과 수량만 기록합니다. 비회원 점수·프로필 선글라스 지급은 거부합니다. 점수는 `users.score`에 더하고 선글라스는 지급 기록 자체로 착용 권한을 확인합니다. 주사위·매출·구매 기록·점수 보상 수령 기록은 추가하지 않습니다.
 
 담당자 인증, 대상·수량·사유 확인, 재고/점수 변경, 임의 지급 기록과 `idempotency` 기록을 함께 반영합니다. 기존 지급 대기 요청은 자동으로 승인·취소하지 않습니다. 이 테이블 추가에 DB 초기화는 필요하지 않습니다.
+
+### 4.25 `badges` — 배지 종류와 획득 조건
+
+| 컬럼 | 타입 | 제약 | 의미 |
+| --- | --- | --- | --- |
+| `id` | TEXT | PK | 기본 배지 고정 ID 또는 서버 생성 custom ID |
+| `name` | TEXT | NN | 배지 이름 |
+| `description` | TEXT | NN | 미획득 배지를 눌렀을 때 보이는 획득 안내 |
+| `icon` | TEXT | NN, 고정 6종 | spark/flask/star/heart/bread/trophy |
+| `rule` | TEXT | NN | milestone: 점수 보상, achievement: 구매 도전과제, manual: 담당자 확인 |
+| `threshold` | INTEGER | 조건부 양수/NULL | 자동 배지의 보상 점수. 수동은 NULL |
+| `created_at` | TEXT | NN | 등록 시각 |
+| `created_by` | INTEGER | NULL 허용, FK → `users.id` | 수동 배지 등록 담당자. 기본 배지는 NULL |
+
+기본 종류는 5점 보상의 **마법의 씨앗**, 10점 보상의 **빛나는 연금술**, 구매 도전과제 4종(원소 수집가·VVIP·빵 몰입가·번개)입니다. 추가 배지는 관리자에게서 이름·획득 안내·그림을 받아 등록하며 조건 충족을 확인한 담당자가 지급합니다.
+
+### 4.26 `user_badges` — 계정별 보유 배지
+
+| 컬럼 | 타입 | 제약 | 의미 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PK, 자동 증가 | 획득 기록 번호 |
+| `user_id` | INTEGER | NN, FK → `users.id` | 보유 계정 |
+| `badge_id` | TEXT | NN, FK → `badges.id` | 획득 배지 |
+| `source` | TEXT | NN | milestone/manual/achievement |
+| `milestone_id` | INTEGER | NULL 허용, FK → `milestone_claims.id` | 자동 지급의 원래 점수 보상 |
+| `achievement_id` | INTEGER | NULL 허용, FK → `user_achievements.id` | 구매 도전과제 달성 원본 |
+| `granted_by` | INTEGER | NULL 허용, FK → `users.id` | 수동 지급 담당자 |
+| `reason` | TEXT | NN | 지급 사유 |
+| `earned_at` | TEXT | NN | 최초 획득 시각 |
+
+`UNIQUE(user_id,badge_id)`로 같은 배지의 중복 보유를 막습니다. source별로 milestone_id / achievement_id / granted_by 중 정확히 하나가 필요합니다. 보유 목록과 착용 선택은 분리하며, 프로필 저장 API는 본인이 보유한 배지만 허용합니다. 공개 순위에는 착용 배지의 ID·이름·그림만 제공하고 전체 보유 목록은 본인/담당자에게만 제공합니다.
+
+새 구조는 배지 테이블과 `user_profiles.badge_id`를 자동 추가하고 기존 프로필·계정·세션·주문을 보존합니다. 기존 5·10점 정상 보상 기록은 원래 시각으로 소급 지급하며 자동 착용하지 않습니다. DB 초기화는 필요하지 않습니다.
+
+### 4.27 `titles` — 칭호 정의
+
+| 컬럼 | 타입 | 제약·의미 |
+| --- | --- | --- |
+| `id` | TEXT | PK. 기본 고정 ID 또는 서버 생성 custom ID |
+| `name` / `description` | TEXT | NN. 칭호 이름·획득 안내 |
+| `style` | TEXT | NN. magic / gold / lightning |
+| `rule` | TEXT | NN. milestone / achievement / manual |
+| `threshold` | INTEGER | milestone이면 양수, 나머지는 NULL |
+| `created_at` | TEXT | NN. 등록 시각 |
+| `created_by` | INTEGER | NULL 허용, FK → users. 수동 등록 담당자 |
+
+기본 칭호는 15점 멋쟁이 마법사, 30점 대현자 연금술사, 원소 수집가, 캄딜 VVIP, ⚡ 우사인볼트 연금술사, 빵 11종의 메뉴명 몰입가(총 16종)입니다. 추가 칭호는 담당자가 이름·획득 방법·스타일을 정합니다.
+
+### 4.28 `user_achievements` — 도전과제 달성 기록
+
+| 컬럼 | 타입 | 제약·의미 |
+| --- | --- | --- |
+| `id` | INTEGER | PK, 자동 증가 |
+| `user_id` | INTEGER | NN, FK → users |
+| `achievement_key` | TEXT | NN. elements / all_breads / focus / preorder_fast / walkin_fast |
+| `scope` | TEXT | NN, 기본 빈 문자열. focus는 품목 ID, walkin_fast는 KST 날짜 |
+| `exclusive_key` | TEXT | NULL 허용, UNIQUE. 일별 현판/예약 전화번호별 선착순 독점 키 |
+| `order_id` | INTEGER | NULL 허용, FK → orders. 선착순 근거 주문 |
+| `reservation_id` | INTEGER | NULL 허용, FK → reservations. 예판 선착순 근거 |
+| `earned_at` | TEXT | NN. 달성 시각 |
+
+`UNIQUE(user_id,achievement_key,scope)`로 같은 달성을 반복 기록하지 않습니다. 승인된 예판·현판·수기 빵 판매만 합산하고 대기/취소·음료·무료 지급은 제외합니다. 주문 승인·취소와 같은 쓰기 잠금 안에서 달성과 배지·칭호를 함께 반영합니다. 현판은 같은 KST 날짜의 첫 유효 빵 주문만 인정하며, 앞 대기 주문이 있으면 지급을 기다립니다. 비회원 첫 주문도 선착순 자리를 차지합니다. 예판은 등록 순서의 전화번호가 다른 첫 10명이 수령 승인 시 인정됩니다.
+
+### 4.29 `user_titles` — 계정별 보유 칭호
+
+`id`(자동 증가 PK), `user_id`(users FK), `title_id`(titles FK), `source`, `milestone_id`(milestone_claims FK), `achievement_id`(user_achievements FK), `granted_by`(users FK), `reason`, `earned_at`를 저장합니다. `UNIQUE(user_id,title_id)`, source별 원본 하나만 허용하는 CHECK는 user_badges와 같습니다. 전체 보유 목록은 본인·담당자 전용이며 공개 순위에는 착용 칭호 ID·이름·스타일만 제공합니다.
+
+첫 칭호는 자동 착용하고 VVIP는 우선 착용합니다. 사용자 저장은 보유 여부를 다시 확인하며 미보유 칭호는 403으로 전체 저장을 거부합니다. 반복 조회·재시작은 이미 선택/해제한 칭호를 바꾸지 않습니다.
 
 ## 5. DB에 저장하지 않고 계산하는 값
 
@@ -495,7 +580,7 @@ PK·UNIQUE용 인덱스는 SQLite가 별도로 생성합니다. 관리자 이름
 
 ## 8. 초기화·이전 데이터·백업
 
-앱 시작 시 `CREATE TABLE/INDEX IF NOT EXISTS`를 실행합니다. 별도 마이그레이션 버전 테이블이나 일반적인 `ALTER TABLE` 마이그레이션 도구는 현재 없습니다. 이미 있는 컬럼 정의를 자동으로 수정하는 구조는 아닙니다.
+앱 시작 시 `CREATE TABLE/INDEX IF NOT EXISTS`를 실행합니다. 별도 마이그레이션 버전 테이블이나 일반적인 `ALTER TABLE` 마이그레이션 도구는 현재 없습니다. 전화번호 계정 이후 구조는 제한된 자동 이전 함수로 확장합니다. 배지·칭호 컬럼과 테이블을 추가하고, 이전 배지 CHECK를 achievement 지원으로 교체하며 기존 ID·소유권·프로필·시퀀스를 보존합니다. SQLite는 원자적 테이블 교체 후 외래키 검사를 수행합니다.
 
 상품 카탈로그 동기화는 현재 메뉴의 이름·가격·컨셉을 갱신하고 부족한 상품 행을 추가합니다. 기존 재고·주문·예약을 초기화하지 않습니다. 데모 데이터는 `settings.demo_seeded`로 한 번만 준비합니다. 데모가 아닌 새 DB의 상품 재고는 0으로 시작합니다.
 
