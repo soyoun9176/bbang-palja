@@ -19,6 +19,7 @@ function fixture({guest = false, storage = new Map(), admin=false} = {}) {
   const routeChanges = [];
   const response = (body, status = 200) => ({ok: status < 400, status, json: async () => body});
   const context = {
+    URLSearchParams,
     crypto: {getRandomValues: bytes => webcrypto.getRandomValues(bytes)},
     location: {pathname: admin?'/admin/':'/', hash: '#shop'}, history: {replaceState(...args) {routeChanges.push(args[2]);}},
     localStorage: {getItem: () => guest ? null : 'token-A', removeItem() {}, setItem() {}},
@@ -82,6 +83,84 @@ test('login sends normalized phone and password without nickname',async()=>{
   f.context.fetchOverride=(path,options)=>path==='/api/auth/login'?f.response({token:'token-A',user:{id:1,name:'닉네임'}}):f.context.normalFetch(path,options);
   await f.run("signInBuyer(authForm,{phone:'01012345678',pin:'1234'})");
   assert.deepEqual(JSON.parse(f.requests.find(r=>r.path==='/api/auth/login').body),{phone:'010-1234-5678',pin:'1234'});
+});
+
+function pickupFixture(){
+  const f=fixture();
+  f.context.fetchOverride=async(path,options)=>{
+    if(path==='/api/auth/me'){
+      const base=await (await f.context.normalFetch(path,options)).json();
+      return f.response({...base,pickup_defaults:{name:base.user.name,phone:base.user.id===1?'010-1234-5678':'010-9999-8888'}});
+    }
+    return f.context.normalFetch(path,options);
+  };
+  return f;
+}
+
+test('pickup form defaults to the logged-in nickname and phone and both fields are editable',async()=>{
+  const f=pickupFixture();await f.run('refresh()');
+  const html=f.run('renderPickup()');
+  assert.match(html,/id="preorder-name"[^>]*value="구매자1"/);
+  assert.match(html,/id="preorder-phone"[^>]*value="010-1234-5678"/);
+  assert.doesNotMatch(html,/readonly|가입한 전화번호의 예약만/);
+  assert.doesNotMatch(f.run('profileEditor(state.user)'),/010-1234-5678|name="phone"/);
+});
+
+test('edited pickup inputs survive refreshes without changing account defaults',async()=>{
+  const f=pickupFixture();await f.run('refresh()');
+  f.run("state.reservation={id:1};editPickupField('name','다른 예약자');editPickupField('phone','01055556666')");
+  await f.run('refresh()');
+  const html=f.run('renderPickup()');
+  assert.match(html,/id="preorder-name"[^>]*value="다른 예약자"/);
+  assert.match(html,/id="preorder-phone"[^>]*value="01055556666"/);
+  assert.equal(f.run('state.reservation'),null);
+  assert.equal(f.run('state.user.name'),'구매자1');
+  assert.equal(f.run('state.pickupDefaults.phone'),'010-1234-5678');
+});
+
+test('pickup lookup submits the edited pair with normalized phone and retains the query',async()=>{
+  const f=pickupFixture();await f.run('refresh()');
+  const normal=f.context.fetchOverride;
+  f.context.fetchOverride=(path,options)=>path.startsWith('/api/preorders/lookup?')?
+    f.response({reservation:{id:7,name:'예약한 실명',items:[],total:2800}}):normal(path,options);
+  await f.run("lookupPreorder({name:' 예약한 실명 ',phone:'01055556666'})");
+  const request=f.requests.find(r=>r.path.startsWith('/api/preorders/lookup?'));
+  const query=new URL('http://test'+request.path).searchParams;
+  assert.equal(query.get('name'),'예약한 실명');assert.equal(query.get('phone'),'010-5555-6666');
+  assert.equal(request.headers.Authorization,'Bearer token-A');
+  assert.equal(f.run('state.reservation.id'),7);
+  assert.equal(f.run('state.pickupDraft.phone'),'010-5555-6666');
+  assert.equal(f.run('state.pickupDefaults.phone'),'010-1234-5678');
+});
+
+test('a failed lookup clears the previous reservation and preserves edited inputs',async()=>{
+  const f=pickupFixture();await f.run('refresh()');
+  f.run('state.reservation={id:7}');
+  f.context.fetchOverride=()=>f.response({error:'해당 예약이 없습니다.'},404);
+  await assert.rejects(f.run("lookupPreorder({name:'다른 이름',phone:'01055556666'})"),/해당 예약이 없습니다/);
+  assert.equal(f.run('state.reservation'),null);
+  assert.equal(f.run('state.pickupDraft.name'),'다른 이름');
+});
+
+test('a response from an earlier pickup query cannot overwrite a later edit',async()=>{
+  const f=pickupFixture();await f.run('refresh()');
+  let release;
+  f.context.fetchOverride=()=>new Promise(resolve=>{release=resolve;});
+  const lookup=f.run("lookupPreorder({name:'첫 예약자',phone:'01055556666'})");
+  f.run("editPickupField('name','두번째 예약자')");
+  release(f.response({reservation:{id:7,name:'첫 예약자'}}));await lookup;
+  assert.equal(f.run('state.reservation'),null);
+  assert.equal(f.run('state.pickupDraft.name'),'두번째 예약자');
+});
+
+test('switching accounts resets the pickup draft to the new accounts own defaults',async()=>{
+  const f=pickupFixture();await f.run('refresh()');
+  f.run("editPickupField('name','조회 중인 예약자');editPickupField('phone','01055556666');state.token='token-B'");
+  await f.run('refresh()');
+  assert.equal(f.run('state.pickupDraft'),null);
+  assert.equal(f.run('pickupValues().name'),'구매자2');
+  assert.equal(f.run('pickupValues().phone'),'010-9999-8888');
+  assert.equal(f.run('state.reservation'),null);
 });
 
 test('guest entry is available from login and signup and only asks for a buyer name',()=>{

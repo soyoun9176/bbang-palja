@@ -183,7 +183,7 @@ class APIIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 403)
         query = urllib.parse.urlencode({"name": second["name"], "phone": "01012345678"})
         status, _ = self.call("GET", "/api/preorders/lookup?" + query, token=first_token)
-        self.assertEqual(status, 403)
+        self.assertEqual(status, 404)
         self.transition(order["id"], "cancel")
 
     def test_last_unit_concurrent_orders_and_cancel_exactly_once(self):
@@ -287,7 +287,7 @@ class APIIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 403)
         wrong = urllib.parse.urlencode({"name": "김소연", "phone": "01000000000"})
         status, _ = self.call("GET", "/api/preorders/lookup?" + wrong, token=token)
-        self.assertEqual(status, 403)
+        self.assertEqual(status, 404)
         status, _ = self.call("POST", path, {"request_id": request_id()}, token)
         self.assertEqual(status, 403)
         correct = urllib.parse.urlencode({"name": "김소연", "phone": "01012345678"})

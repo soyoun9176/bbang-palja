@@ -65,20 +65,23 @@ class PhoneAccountTests(unittest.TestCase):
             with self.assertRaises(APIError) as error:self.call('/api/auth/login',body)
             self.assertEqual(error.exception.status,status)
 
-    def test_phone_is_hidden_from_buyer_responses_and_cannot_be_changed_in_profile(self):
+    def test_phone_is_private_except_for_own_pickup_defaults_and_is_not_editable_in_profile(self):
         account=self.register();token=account['token']
         self.assertNotIn('phone',account['user'])
-        self.assertNotIn('phone',self.call('/api/auth/me',token=token,method='GET')['user'])
+        me=self.call('/api/auth/me',token=token,method='GET')
+        self.assertNotIn('phone',me['user'])
+        self.assertEqual(me['pickup_defaults'],{'name':'같은 닉네임','phone':'010-1234-5678'})
         board=self.call('/api/leaderboard',token=token,method='GET')
         self.assertTrue(all('phone' not in person for person in board['leaders']))
         avatar=account['user']['avatar']
         with self.assertRaises(APIError) as error:self.call('/api/profile',{'avatar':avatar,'phone':'010-9999-9999'},token)
         self.assertEqual(error.exception.status,400)
         staff=self.call('/api/staff/login',{'name':'같은 닉네임','password':'test-phone-password'})
+        self.assertNotIn('pickup_defaults',self.call('/api/auth/me',token=staff['token'],method='GET'))
         users=self.call('/api/staff/dashboard',token=staff['token'],method='GET')['users']
         self.assertEqual(users[0]['phone'],'010-1234-5678')
 
-    def test_reservation_ownership_uses_account_phone_not_nickname(self):
+    def test_edited_lookup_can_claim_another_phone_reservation_without_changing_the_account(self):
         account=self.register();other=self.register('01011112222')
         staff=self.call('/api/staff/login',{'name':'담당','password':'test-phone-password'})['token']
         with self.app.db.transaction(write=True) as tx:tx.execute('UPDATE products SET stock=2 WHERE id=101')
@@ -88,9 +91,35 @@ class PhoneAccountTests(unittest.TestCase):
         with self.assertRaises(APIError) as error:self.call('/api/preorders/lookup',token=other['token'],method='GET',query={'name':['예약한 실명']})
         self.assertEqual(error.exception.status,404)
         with self.assertRaises(APIError) as error:self.call(f"/api/preorders/{found['id']}/claim",{'request_id':uuid.uuid4().hex},other['token'])
-        self.assertEqual(error.exception.status,404)
-        result=self.call(f"/api/preorders/{found['id']}/claim",{'request_id':uuid.uuid4().hex},account['token'])
-        self.assertEqual(result['order']['user_id'],account['user']['id'])
+        self.assertEqual(error.exception.status,403)
+        edited=self.call('/api/preorders/lookup',token=other['token'],method='GET',
+                         query={'name':['예약한 실명'],'phone':['01012345678']})['reservation']
+        self.assertEqual(edited['id'],found['id'])
+        result=self.call(f"/api/preorders/{found['id']}/claim",{'request_id':uuid.uuid4().hex},other['token'])
+        self.assertEqual(result['order']['user_id'],other['user']['id'])
+        with self.assertRaises(APIError) as error:self.call(f"/api/preorders/{found['id']}/claim",{'request_id':uuid.uuid4().hex},account['token'])
+        self.assertEqual(error.exception.status,409)
+        me=self.call('/api/auth/me',token=other['token'],method='GET')
+        self.assertEqual(me['pickup_defaults'],{'name':'같은 닉네임','phone':'010-1111-2222'})
+        with self.app.db.transaction() as tx:
+            row=tx.one('SELECT name,phone FROM reservations WHERE id=?',(found['id'],))
+            self.assertEqual(row,{'name':'예약한 실명','phone':'010-1234-5678'})
+
+    def test_lookup_uses_account_defaults_when_omitted_and_still_validates_edited_phone(self):
+        account=self.register(name='기본 예약자')
+        staff=self.call('/api/staff/login',{'name':'담당','password':'test-phone-password'})['token']
+        with self.app.db.transaction(write=True) as tx:tx.execute('UPDATE products SET stock=1 WHERE id=101')
+        self.call('/api/staff/preorders/import',{'reservations':[{'name':'기본 예약자','phone':'01012345678',
+                  'items':[{'product_id':101,'quantity':1}]}]},staff)
+        found=self.call('/api/preorders/lookup',token=account['token'],method='GET')['reservation']
+        self.assertEqual(found['name'],'기본 예약자')
+        for phone in ['010-12345678','010 1234 5678','0101234abcd']:
+            with self.assertRaises(APIError) as error:self.call('/api/preorders/lookup',token=account['token'],method='GET',query={'phone':[phone]})
+            self.assertEqual(error.exception.status,400)
+        with self.app.db.transaction(write=True) as tx:
+            tx.execute("UPDATE preorder_verifications SET expires_at='2000-01-01T00:00:00Z'")
+        with self.assertRaises(APIError) as error:self.call(f"/api/preorders/{found['id']}/claim",{'request_id':uuid.uuid4().hex},account['token'])
+        self.assertEqual(error.exception.status,403)
 
 
 class DatabaseResetTests(unittest.TestCase):

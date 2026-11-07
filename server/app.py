@@ -669,7 +669,10 @@ class Application:
 
         user = self.authenticate(authorization)
         if method == "GET" and path == "/api/auth/me":
-            return {"user": public_user(user)}
+            result = {"user": public_user(user)}
+            if user['role'] == 'buyer':
+                result['pickup_defaults'] = {'name':user['name'],'phone':user['phone']}
+            return result
         if method == "POST" and path == "/api/profile":
             check(set(body) == {"avatar"}, "저장할 캐릭터 꾸미기 정보만 보내 주세요.")
             avatar = validate_avatar(body["avatar"])
@@ -699,10 +702,8 @@ class Application:
             with self.db.transaction(write=True) as tx:
                 return idempotent(tx, user, "order", body, lambda: {"order": insert_order(tx, user, normalize_items(tx, body.get("items")), "walkin", user["name"])})
         if method == "GET" and path == "/api/preorders/lookup":
-            name = person_name(query.get("name", [""])[0])
-            phone = user['phone']
-            if 'phone' in query:
-                check(phone_number(query['phone'][0])==phone, '가입한 본인의 전화번호로만 예약을 조회할 수 있어요.', 403)
+            name = person_name(query.get('name', [user['name']])[0])
+            phone = phone_number(query.get('phone', [user['phone']])[0])
             with self.db.transaction(write=True) as tx:
                 reservation = tx.one("SELECT * FROM reservations WHERE name = ? AND phone = ?", (name, phone))
                 check(reservation is not None, "해당 이름과 전화번호의 예약이 없습니다. 담당자에게 문의해 주세요.", 404)
@@ -716,7 +717,7 @@ class Application:
             with self.db.transaction(write=True) as tx:
                 def claim_preorder():
                     reservation = tx.one("SELECT * FROM reservations WHERE id = ?", (int(match.group(1)),))
-                    check(reservation is not None and reservation["phone"] == user['phone'], "본인의 예약을 찾을 수 없습니다.", 404)
+                    check(reservation is not None, "예약을 찾을 수 없습니다.", 404)
                     verification = tx.one("SELECT expires_at FROM preorder_verifications WHERE user_id = ? AND reservation_id = ? AND expires_at > ?", (user["id"], reservation["id"], now()))
                     check(verification is not None, "이름과 전화번호로 예약을 먼저 조회해 주세요.", 403)
                     check(reservation["user_id"] in (None, user["id"]), "이미 다른 계정으로 접수된 예약입니다.", 409)
