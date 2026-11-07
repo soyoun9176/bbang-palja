@@ -22,7 +22,13 @@ export function initAdmin(shared) {
   if (!inputListenerAdded) {
     document.addEventListener('input', event => {
       if(event.target.closest?.('#admin-manual-grant')){
-        if(['user_id','name','product_id','quantity','points','reason','gift_name'].includes(event.target.name))grantDraft[event.target.name]=event.target.value;
+        if(['user_id','name','product_id','quantity','points','reason','gift_name','badge_id','title_id'].includes(event.target.name))grantDraft[event.target.name]=event.target.value;
+        if(event.target.name==='user_id'&&['badge','title'].includes(grantKind)){
+          const buyer=list('users').find(u=>u.id===Number(event.target.value));
+          if(buyer?.badges?.some(b=>b.id===grantDraft.badge_id&&b.owned))grantDraft.badge_id='';
+          if(buyer?.titles?.some(t=>t.id===grantDraft.title_id&&t.owned))grantDraft.title_id='';
+          helpers.render();return;
+        }
         if(event.target.name==='gift'){grantGift=event.target.value;helpers.render();return;}
       }
       const search = event.target.dataset?.adminSearch;
@@ -63,7 +69,7 @@ const preorderMenu = r => r.items.map(item=>`${item.name} ${item.quantity}${prod
 function buyerIdentity(id,name='') {
   if(id===null)return `<span class="profile-name"><span>${escape(name)}</span><small class="muted">비회원</small></span>`;
   const user=list('users').find(u=>u.id===id)||{id,name};
-  return `<span class="profile-name">${helpers.profileAvatar?.(user)||''}<span>${escape(name||user.name)}</span></span>`;
+  return `<span class="profile-name">${helpers.profileAvatar?.(user)||''}<span class="profile-identity">${escape(name||user.name)}${helpers.profileTitle?.(user)||''}</span></span>`;
 }
 
 function matchesSearch(query,...fields) {
@@ -238,6 +244,13 @@ function eventResults(){
 function instagramPanel(){
   return `<section class="content-card narrow"><h2>인스타 인증</h2><p class="form-hint">등록 사용자를 선택하면 인싸 마법사의 주사위 1개를 지급합니다. 계정당 한 번만 인증할 수 있습니다.</p><form id="admin-instagram"><div class="field"><label for="admin-event-user">등록 사용자</label><select id="admin-event-user" name="user_id" required>${buyerOptions('','사용자 선택')}</select><div class="selected-profile" data-selected-profile></div></div><p class="callout">인싸 마법사의 주사위 1개 지급</p><button class="primary-button full" type="submit">인스타 이벤트 인증 완료</button></form></section><details id="instagram-history" class="history-section"><summary>인스타 이벤트 기록 · ${list('events').length}명</summary><div class="table-wrap"><table><thead><tr><th>시간</th><th>구매자</th><th>지급 주사위</th></tr></thead><tbody>${list('events').map(e=>`<tr><td>${stamp(e.created_at)}</td><td>${buyerIdentity(e.user_id,e.customer_name)}</td><td>${e.dice}개</td></tr>`).join('')}</tbody></table></div></details>`;
 }
+function badgeManagement(){
+  const picture=badge=>helpers.badgePicture?.(badge)||'';
+  return `<details id="admin-badge-management" class="badge-management"><summary>배지 추가·보유 현황</summary><div class="badge-management-content"><section class="content-card narrow"><h2>새 배지 추가</h2><form id="admin-badge-create"><div class="field"><label for="badge-name">배지 이름</label><input id="badge-name" name="name" maxlength="40" required></div><div class="field"><label for="badge-description">획득 방법 안내</label><input id="badge-description" name="description" maxlength="240" placeholder="OO하면 이 배지를 얻을 수 있어요." required></div><div class="field"><label for="badge-icon">배지 그림</label><select id="badge-icon" name="icon" required>${(helpers.badgeIcons||[]).map(([key,label])=>`<option value="${key}">${escape(label)}</option>`).join('')}</select></div><p class="form-hint">추가한 배지는 획득 조건을 확인한 담당자가 지급합니다.</p><button type="submit" class="primary-button full">배지 추가</button></form></section><div class="table-wrap"><table><thead><tr><th>사용자</th><th>보유 배지·획득 시각</th><th>착용 배지</th></tr></thead><tbody>${list('users').map(user=>`<tr><td>${buyerIdentity(user.id,user.name)}<br><small class="muted">${escape(user.phone||'')}</small></td><td>${(user.badges||[]).filter(b=>b.owned).map(b=>`<span class="badge-mini" title="${stamp(b.earned_at)}">${picture(b)}${escape(b.name)} <small>${stamp(b.earned_at)}</small></span>`).join('')||'없음'}</td><td>${escape(user.equipped_badge?.name||'없음')}</td></tr>`).join('')}</tbody></table></div></div></details>`;
+}
+function titleManagement(){
+  return `<details id="admin-title-management" class="badge-management"><summary>칭호 추가·보유 현황</summary><div class="badge-management-content"><section class="content-card narrow"><h2>커스텀 칭호 추가</h2><form id="admin-title-create"><div class="field"><label for="title-name">칭호 이름</label><input id="title-name" name="name" maxlength="40" required></div><div class="field"><label for="title-description">칭호 획득 방법</label><input id="title-description" name="description" maxlength="240" placeholder="예: 30점 보상을 받고 담당자에게 요청" required></div><div class="field"><label for="title-style">칭호 스타일</label><select id="title-style" name="style" required>${(helpers.titleStyles||[]).map(([key,label])=>`<option value="${key}">${escape(label)}</option>`).join('')}</select></div><button type="submit" class="primary-button full">칭호 추가</button></form></section><div class="table-wrap"><table><thead><tr><th>사용자</th><th>보유 칭호·획득 시각</th><th>착용 칭호</th></tr></thead><tbody>${list('users').map(user=>`<tr><td>${buyerIdentity(user.id,user.name)}<br><small class="muted">${escape(user.phone||'')}</small></td><td>${(user.titles||[]).filter(t=>t.owned).map(t=>`<span class="badge-mini">${helpers.profileTitle?.({equipped_title:t})||escape(t.name)} <small>${stamp(t.earned_at)}</small></span>`).join('')||'없음'}</td><td>${escape(user.equipped_title?.name||'없음')}</td></tr>`).join('')}</tbody></table></div></div></details>`;
+}
 function manualGrantPanel(){
   const guest=grantRecipientMode==='guest',supplies=data().event_supplies||[];
   const giftOptions=[['oatmeal',`오트밀 미니바이트 · 재고 ${supplies.find(s=>s.key==='oatmeal')?.stock||0}`],
@@ -247,27 +260,33 @@ function manualGrantPanel(){
   const recipients=guest?`<input type="hidden" name="guest" value="1"><div class="field"><label for="grant-name">받는 사람 이름</label><input id="grant-name" name="name" maxlength="30" required value="${escape(grantDraft.name||'')}" autocomplete="off"></div>`:
     `<div class="field"><label for="grant-user">등록 사용자</label><select id="grant-user" name="user_id" required>${buyerOptions(grantDraft.user_id||'','사용자 선택')}</select><div class="selected-profile" data-selected-profile>${grantDraft.user_id?buyerIdentity(Number(grantDraft.user_id)):''}</div></div>`;
   let itemFields='';
-  if(grantKind==='score')itemFields=`<div class="field"><label for="grant-points">지급할 점수</label><input id="grant-points" name="points" type="number" min="1" max="10000" step="1" value="${escape(grantDraft.points||1)}" required></div>`;
+  if(grantKind==='badge'){
+    const buyer=list('users').find(u=>u.id===Number(grantDraft.user_id));
+    itemFields=`<div class="field"><label for="grant-badge">지급할 배지</label><select id="grant-badge" name="badge_id" required><option value="">배지 선택</option>${list('badges').map(b=>{const owned=buyer?.badges?.some(own=>own.id===b.id&&own.owned);return `<option value="${escape(b.id)}" ${grantDraft.badge_id===b.id?'selected':''} ${owned?'disabled':''}>${escape(b.name)}${owned?' · 보유 중':''}</option>`;}).join('')}</select></div>`;
+  }else if(grantKind==='title'){
+    const buyer=list('users').find(u=>u.id===Number(grantDraft.user_id));
+    itemFields=`<div class="field"><label for="grant-title">지급할 칭호</label><select id="grant-title" name="title_id" required><option value="">칭호 선택</option>${list('titles').map(t=>{const owned=buyer?.titles?.some(own=>own.id===t.id&&own.owned);return `<option value="${escape(t.id)}" ${grantDraft.title_id===t.id?'selected':''} ${owned?'disabled':''}>${escape(t.name)}${owned?' · 보유 중':''}</option>`;}).join('')}</select></div>`;
+  }else if(grantKind==='score')itemFields=`<div class="field"><label for="grant-points">지급할 점수</label><input id="grant-points" name="points" type="number" min="1" max="10000" step="1" value="${escape(grantDraft.points||1)}" required></div>`;
   else{
     itemFields=grantKind==='bread'?`<div class="field"><label for="grant-product">지급할 빵</label><select id="grant-product" name="product_id" required><option value="">빵 선택</option>${productList().filter(p=>p.reward_eligible??(p.dice_per_unit!==0)).map(p=>`<option value="${p.id}" ${String(p.id)===grantDraft.product_id?'selected':''} ${p.stock<1?'disabled':''}>${escape(p.name)} · 재고 ${p.stock}${escape(p.unit||'개')}</option>`).join('')}</select></div>`:
       `<div class="field"><label for="grant-gift">지급할 상품</label><select id="grant-gift" name="gift" required>${giftOptions.map(([key,label])=>`<option value="${key}" ${key===grantGift?'selected':''} ${guest&&key==='sunglasses'?'disabled':''}>${escape(label)}</option>`).join('')}</select></div>${grantGift==='custom'?`<div class="field"><label for="grant-gift-name">상품 이름</label><input id="grant-gift-name" name="gift_name" maxlength="80" value="${escape(grantDraft.gift_name||'')}" required></div><p class="form-hint">기타 상품은 지급 기록만 남깁니다.</p>`:grantGift==='sunglasses'?'<p class="form-hint">선택한 계정에서 프로필 선글라스를 착용할 수 있게 됩니다.</p>':''}`;
     itemFields+=grantKind==='gift'&&grantGift==='sunglasses'?'<input type="hidden" name="quantity" value="1">':`<div class="field"><label for="grant-quantity">지급 수량</label><input id="grant-quantity" name="quantity" type="number" min="1" max="100" step="1" value="${escape(grantDraft.quantity||1)}" required></div>`;
   }
-  const history=list('manual_grants');
-  return `${help('임의 지급 방법','물품을 전달한 뒤 등록합니다. 빵·우유·두유·오트밀은 재고가 차감되고 점수는 계정에 즉시 추가됩니다. 기존 지급 대기 요청은 먼저 해당 요청에서 승인하거나 취소해 주세요. 임의 지급은 구매 주사위나 매출을 추가하지 않습니다.')}
+  const history=[...list('manual_grants'),...list('badge_grants').map(g=>({...g,kind:'badge',quantity:1})),...list('title_grants').map(g=>({...g,kind:'title',quantity:1}))].sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).slice(0,300);
+  return `${help('임의 지급 방법',['badge','title'].includes(grantKind)?'획득 조건을 확인한 뒤 배지·칭호를 지급합니다. 계정마다 한 번씩만 지급하며 착용은 사용자가 선택합니다.':'물품을 전달한 뒤 등록합니다. 빵·우유·두유·오트밀은 재고가 차감되고 점수는 계정에 즉시 추가됩니다. 기존 지급 대기 요청은 먼저 해당 요청에서 승인하거나 취소해 주세요. 임의 지급은 구매 주사위나 매출을 추가하지 않습니다.')}
     <section class="content-card narrow"><h2>임의 지급</h2>
     <div class="admin-subtabs" role="group" aria-label="임의 지급 대상">${[['account','등록 사용자'],['guest','계정 없이 지급']].map(([key,label])=>`<button class="tab-chip ${grantRecipientMode===key?'active':''}" data-action="admin-grant-recipient" data-mode="${key}" aria-pressed="${grantRecipientMode===key}">${label}</button>`).join('')}</div>
     <form id="admin-manual-grant">${recipients}
-      <div class="admin-subtabs" role="group" aria-label="지급 항목">${[['bread','빵'],['gift','상품'],['score','점수']].map(([key,label])=>`<button type="button" class="tab-chip ${grantKind===key?'active':''}" data-action="admin-grant-kind" data-kind="${key}" aria-pressed="${grantKind===key}" ${guest&&key==='score'?'disabled':''}>${label}</button>`).join('')}</div>
+      <div class="admin-subtabs" role="group" aria-label="지급 항목">${[['bread','빵'],['gift','상품'],['score','점수'],['badge','배지'],['title','칭호']].map(([key,label])=>`<button type="button" class="tab-chip ${grantKind===key?'active':''}" data-action="admin-grant-kind" data-kind="${key}" aria-pressed="${grantKind===key}" ${guest&&['score','badge','title'].includes(key)?'disabled':''}>${label}</button>`).join('')}</div>
       ${guest?'<p class="form-hint">계정 없이 빵·실물 상품 지급만 기록합니다. 점수와 프로필 소품은 등록 계정이 필요합니다.</p>':''}${itemFields}
       <div class="field"><label for="grant-reason">지급 사유</label><input id="grant-reason" name="reason" maxlength="200" value="${escape(grantDraft.reason||'')}" placeholder="예: 이벤트 지급 오류 보완" required></div>
-      <button class="primary-button full" type="submit">${grantKind==='score'?'점수 지급하기':'지급 완료로 기록'}</button>
-    </form></section>
-    <section class="manual-grant-history"><h2>임의 지급 기록 · ${history.length}건</h2>${history.length?`<div class="table-wrap"><table><thead><tr><th>번호·시간</th><th>받는 사람</th><th>지급 내용</th><th>사유</th><th>담당자</th></tr></thead><tbody>${history.map(g=>`<tr><td>#${g.id}<br>${stamp(g.created_at)}</td><td>${buyerIdentity(g.user_id,g.customer_name)}</td><td>${g.kind==='score'?`${number(g.points)}점`:`${escape(g.item_name)} × ${number(g.quantity)}${escape(productList().find(p=>p.id===g.product_id)?.unit||'개')}`}</td><td>${escape(g.reason)}</td><td>${escape(g.staff_name)}</td></tr>`).join('')}</tbody></table></div>`:'<p class="form-hint">아직 임의 지급 기록이 없습니다.</p>'}</section>`;
+      <button class="primary-button full" type="submit">${grantKind==='score'?'점수 지급하기':grantKind==='badge'?'배지 지급하기':grantKind==='title'?'칭호 지급하기':'지급 완료로 기록'}</button>
+    </form></section>${grantKind==='badge'?badgeManagement():grantKind==='title'?titleManagement():''}
+    <section class="manual-grant-history"><h2>임의 지급 기록 · ${history.length}건</h2>${history.length?`<div class="table-wrap"><table><thead><tr><th>번호·시간</th><th>받는 사람</th><th>지급 내용</th><th>사유</th><th>담당자</th></tr></thead><tbody>${history.map(g=>`<tr><td>${g.kind==='badge'?'배지 ':g.kind==='title'?'칭호 ':''}#${g.id}<br>${stamp(g.created_at)}</td><td>${buyerIdentity(g.user_id,g.customer_name)}</td><td>${g.kind==='score'?`${number(g.points)}점`:['badge','title'].includes(g.kind)?`${g.kind==='badge'?'배지':'칭호'} · ${escape(g.item_name)}`:`${escape(g.item_name)} × ${number(g.quantity)}${escape(productList().find(p=>p.id===g.product_id)?.unit||'개')}`}</td><td>${escape(g.reason)}</td><td>${escape(g.staff_name)}</td></tr>`).join('')}</tbody></table></div>`:'<p class="form-hint">아직 임의 지급 기록이 없습니다.</p>'}</section>`;
 }
 function eventsPage() {
   const history=list('rewards').filter(r=>!r.fulfillment);
-  return `${heading('이벤트',eventTab==='manual'?'빵·상품·점수 지급과 담당자 기록을 관리합니다.':'당첨 물품을 전달한 뒤 승인해 주세요.',`<button class="secondary-button" data-action="admin-refresh">새로고침</button>`)}<div class="admin-subtabs"><button class="tab-chip ${eventTab==='requests'?'active':''}" data-action="admin-event-tab" data-tab="requests">물품 지급</button><button class="tab-chip ${eventTab==='instagram'?'active':''}" data-action="admin-event-tab" data-tab="instagram">인스타 인증</button><button class="tab-chip ${eventTab==='manual'?'active':''}" data-action="admin-event-tab" data-tab="manual">임의 지급</button></div>${eventTab==='manual'?manualGrantPanel():eventTab==='instagram'?instagramPanel():`${help('이벤트 지급 방법','구매자가 당첨되면 물품 1개를 확보하고 지급 대기에 표시합니다. 우유 보상은 구매자가 우유·두유 중 재고 있는 품목을 선택한 뒤 접수됩니다. 전달 완료·승인은 재고를 추가 차감하지 않으며, 취소하면 확보했던 재고 1개가 돌아옵니다. 취소 후 재추첨은 하지 않습니다. 선글라스 등 디지털 보상은 자동 지급합니다.')}<div class="admin-subtabs">${[['pending','지급 대기'],['awaiting_choice','음료 선택 중'],['approved','지급 완료'],['cancelled','취소']].map(([key,label])=>`<button class="tab-chip ${eventFilter===key?'active':''}" data-action="admin-event-filter" data-filter="${key}">${label} ${list('reward_requests').filter(r=>r.status===key).length}</button>`).join('')}</div>${searchField('events','admin-event-search','이벤트 요청 검색','이름 · 물품 검색')}<div id="admin-event-results">${eventResults()}</div><details id="reward-history" class="history-section"><summary>이전·자동 지급 기록 · ${history.length}건</summary><div class="table-wrap"><table><thead><tr><th>시간</th><th>구매자</th><th>보상</th></tr></thead><tbody>${history.map(r=>`<tr><td>${stamp(r.created_at)}</td><td>${buyerIdentity(r.user_id,r.customer_name)}</td><td>${escape(r.product_name)}</td></tr>`).join('')}</tbody></table></div></details>`}`;
+  return `${heading('이벤트',eventTab==='manual'?'빵·상품·점수·배지·칭호 지급과 담당자 기록을 관리합니다.':'당첨 물품을 전달한 뒤 승인해 주세요.',`<button class="secondary-button" data-action="admin-refresh">새로고침</button>`)}<div class="admin-subtabs"><button class="tab-chip ${eventTab==='requests'?'active':''}" data-action="admin-event-tab" data-tab="requests">물품 지급</button><button class="tab-chip ${eventTab==='instagram'?'active':''}" data-action="admin-event-tab" data-tab="instagram">인스타 인증</button><button class="tab-chip ${eventTab==='manual'?'active':''}" data-action="admin-event-tab" data-tab="manual">임의 지급</button></div>${eventTab==='manual'?manualGrantPanel():eventTab==='instagram'?instagramPanel():`${help('이벤트 지급 방법','구매자가 당첨되면 물품 1개를 확보하고 지급 대기에 표시합니다. 우유 보상은 구매자가 우유·두유 중 재고 있는 품목을 선택한 뒤 접수됩니다. 전달 완료·승인은 재고를 추가 차감하지 않으며, 취소하면 확보했던 재고 1개가 돌아옵니다. 취소 후 재추첨은 하지 않습니다. 선글라스 등 디지털 보상은 자동 지급합니다.')}<div class="admin-subtabs">${[['pending','지급 대기'],['awaiting_choice','음료 선택 중'],['approved','지급 완료'],['cancelled','취소']].map(([key,label])=>`<button class="tab-chip ${eventFilter===key?'active':''}" data-action="admin-event-filter" data-filter="${key}">${label} ${list('reward_requests').filter(r=>r.status===key).length}</button>`).join('')}</div>${searchField('events','admin-event-search','이벤트 요청 검색','이름 · 물품 검색')}<div id="admin-event-results">${eventResults()}</div><details id="reward-history" class="history-section"><summary>이전·자동 지급 기록 · ${history.length}건</summary><div class="table-wrap"><table><thead><tr><th>시간</th><th>구매자</th><th>보상</th></tr></thead><tbody>${history.map(r=>`<tr><td>${stamp(r.created_at)}</td><td>${buyerIdentity(r.user_id,r.customer_name)}</td><td>${escape(r.product_name)}</td></tr>`).join('')}</tbody></table></div></details>`}`;
 }
 
 function notesPage() {
@@ -314,11 +333,11 @@ export async function handleAdminClick(action, element) {
   else if(action==='admin-event-tab'){eventTab=element.dataset.tab;render();}
   else if(action==='admin-grant-recipient'){
     grantRecipientMode=element.dataset.mode==='guest'?'guest':'account';
-    if(grantRecipientMode==='guest'){if(grantKind==='score')grantKind='bread';if(grantGift==='sunglasses')grantGift='oatmeal';}
+    if(grantRecipientMode==='guest'){if(['score','badge','title'].includes(grantKind))grantKind='bread';if(grantGift==='sunglasses')grantGift='oatmeal';}
     render();
   }
   else if(action==='admin-grant-kind'){
-    if(['bread','gift','score'].includes(element.dataset.kind)&&!(grantRecipientMode==='guest'&&element.dataset.kind==='score'))grantKind=element.dataset.kind;
+    if(['bread','gift','score','badge','title'].includes(element.dataset.kind)&&!(grantRecipientMode==='guest'&&['score','badge','title'].includes(element.dataset.kind)))grantKind=element.dataset.kind;
     render();
   }
   else if(action==='admin-event-filter'){eventFilter=element.dataset.filter;render();}
@@ -396,7 +415,7 @@ function formError(form, error) {
 }
 
 export async function handleAdminSubmit(form) {
-  const accepted = ['admin-manual-grant','admin-event-supply','staff-login','admin-inventory','admin-manual-sale','admin-instagram','admin-memo','admin-preorder-import','admin-cancel-confirm','admin-manual-preorder-complete'];
+  const accepted = ['admin-title-create','admin-badge-create','admin-manual-grant','admin-event-supply','staff-login','admin-inventory','admin-manual-sale','admin-instagram','admin-memo','admin-preorder-import','admin-cancel-confirm','admin-manual-preorder-complete'];
   if (!accepted.includes(form.id)) return false;
   const { state, api, submitButton, refresh, render, toast, closeModal } = helpers;
   const values = new FormData(form);
@@ -413,19 +432,28 @@ export async function handleAdminSubmit(form) {
       state.route = 'queue';
       history.replaceState(null,'','#queue');
       message = `${response.user.name}님, 오늘도 잘 부탁드려요.`;
+    } else if(form.id==='admin-title-create'){
+      await createAction('title-create','/api/staff/titles',{name:values.get('name'),description:values.get('description'),style:values.get('style')});
+      message='칭호와 획득 안내를 추가했어요.';
+    } else if(form.id==='admin-badge-create'){
+      await createAction('badge-create','/api/staff/badges',{name:values.get('name'),description:values.get('description'),icon:values.get('icon')});
+      message='배지와 획득 안내를 추가했어요.';
     } else if(form.id==='admin-manual-grant'){
       const body={kind:grantKind,reason:values.get('reason')};
       if(values.has('guest')){body.guest=true;body.name=values.get('name');}
       else body.user_id=Number(values.get('user_id'));
-      if(grantKind==='score')body.points=Number(values.get('points'));
+      if(grantKind==='badge')body.badge_id=values.get('badge_id');
+      else if(grantKind==='title')body.title_id=values.get('title_id');
+      else if(grantKind==='score')body.points=Number(values.get('points'));
       else{
         body.quantity=Number(values.get('quantity'));
         if(grantKind==='bread')body.product_id=Number(values.get('product_id'));
         else{body.gift=values.get('gift');if(body.gift==='custom')body.gift_name=values.get('gift_name');}
       }
-      const {grant}=await createAction('manual-event-grant','/api/staff/manual-event-grants',body);
+      const {grant}=grantKind==='badge'?await createAction('badge-grant','/api/staff/badge-grants',
+        {user_id:body.user_id,badge_id:body.badge_id,reason:body.reason}):grantKind==='title'?await createAction('title-grant','/api/staff/title-grants',{user_id:body.user_id,title_id:body.title_id,reason:body.reason}):await createAction('manual-event-grant','/api/staff/manual-event-grants',body);
       grantDraft={};
-      message=`임의 지급 #${grant.id} 기록을 남겼어요.`;
+      message=grantKind==='badge'?`배지 지급 #${grant.id} 기록을 남겼어요.`:grantKind==='title'?`칭호 지급 #${grant.id} 기록을 남겼어요.`:`임의 지급 #${grant.id} 기록을 남겼어요.`;
     } else if(form.id==='admin-event-supply'){
       await createAction('event-supply','/api/staff/event-supplies',{key:'oatmeal',delta:Number(values.get('delta')),reason:values.get('reason')});
       message='이벤트 물품 재고를 반영했어요.';

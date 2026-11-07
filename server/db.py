@@ -21,9 +21,33 @@ CREATE TABLE IF NOT EXISTS users (
   AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(phone,
   '0',''),'1',''),'2',''),'3',''),'4',''),'5',''),'6',''),'7',''),'8',''),'9','')='--'))
 );
+CREATE TABLE IF NOT EXISTS badges (
+ id TEXT PRIMARY KEY,
+ name TEXT NOT NULL,
+ description TEXT NOT NULL,
+ icon TEXT NOT NULL CHECK (icon IN ('spark','flask','star','heart','bread','trophy')),
+ rule TEXT NOT NULL CHECK (rule IN ('milestone','manual','achievement')),
+ threshold INTEGER,
+ created_at TEXT NOT NULL,
+ created_by INTEGER REFERENCES users(id),
+ CHECK ((rule='milestone' AND threshold IS NOT NULL AND threshold>0) OR (rule IN ('manual','achievement') AND threshold IS NULL))
+);
+CREATE TABLE IF NOT EXISTS titles (
+ id TEXT PRIMARY KEY,
+ name TEXT NOT NULL,
+ description TEXT NOT NULL,
+ style TEXT NOT NULL CHECK (style IN ('magic','gold','lightning')),
+ rule TEXT NOT NULL CHECK (rule IN ('milestone','manual','achievement')),
+ threshold INTEGER,
+ created_at TEXT NOT NULL,
+ created_by INTEGER REFERENCES users(id),
+ CHECK ((rule='milestone' AND threshold IS NOT NULL AND threshold>0) OR (rule IN ('manual','achievement') AND threshold IS NULL))
+);
 CREATE TABLE IF NOT EXISTS user_profiles (
  user_id INTEGER NOT NULL PRIMARY KEY REFERENCES users(id),
  appearance TEXT NOT NULL,
+ badge_id TEXT REFERENCES badges(id),
+ title_id TEXT REFERENCES titles(id),
  updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -154,6 +178,47 @@ CREATE TABLE IF NOT EXISTS event_supplies (
  key TEXT PRIMARY KEY,
  name TEXT NOT NULL,
  stock INTEGER NOT NULL CHECK (stock >= 0)
+);
+CREATE TABLE IF NOT EXISTS user_achievements (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ user_id INTEGER NOT NULL REFERENCES users(id),
+ achievement_key TEXT NOT NULL,
+ scope TEXT NOT NULL DEFAULT '',
+ exclusive_key TEXT UNIQUE,
+ order_id INTEGER REFERENCES orders(id),
+ reservation_id INTEGER REFERENCES reservations(id),
+ earned_at TEXT NOT NULL,
+ UNIQUE(user_id,achievement_key,scope)
+);
+CREATE TABLE IF NOT EXISTS user_badges (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ user_id INTEGER NOT NULL REFERENCES users(id),
+ badge_id TEXT NOT NULL REFERENCES badges(id),
+ source TEXT NOT NULL CHECK (source IN ('milestone','manual','achievement')),
+ milestone_id INTEGER REFERENCES milestone_claims(id),
+ achievement_id INTEGER REFERENCES user_achievements(id),
+ granted_by INTEGER REFERENCES users(id),
+ reason TEXT NOT NULL,
+ earned_at TEXT NOT NULL,
+ UNIQUE(user_id,badge_id),
+ CHECK ((source='milestone' AND milestone_id IS NOT NULL AND achievement_id IS NULL AND granted_by IS NULL)
+     OR (source='manual' AND milestone_id IS NULL AND achievement_id IS NULL AND granted_by IS NOT NULL)
+     OR (source='achievement' AND milestone_id IS NULL AND achievement_id IS NOT NULL AND granted_by IS NULL))
+);
+CREATE TABLE IF NOT EXISTS user_titles (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ user_id INTEGER NOT NULL REFERENCES users(id),
+ title_id TEXT NOT NULL REFERENCES titles(id),
+ source TEXT NOT NULL CHECK (source IN ('milestone','manual','achievement')),
+ milestone_id INTEGER REFERENCES milestone_claims(id),
+ achievement_id INTEGER REFERENCES user_achievements(id),
+ granted_by INTEGER REFERENCES users(id),
+ reason TEXT NOT NULL,
+ earned_at TEXT NOT NULL,
+ UNIQUE(user_id,title_id),
+ CHECK ((source='milestone' AND milestone_id IS NOT NULL AND achievement_id IS NULL AND granted_by IS NULL)
+     OR (source='manual' AND milestone_id IS NULL AND achievement_id IS NULL AND granted_by IS NOT NULL)
+     OR (source='achievement' AND milestone_id IS NULL AND achievement_id IS NOT NULL AND granted_by IS NULL))
 );
 CREATE TABLE IF NOT EXISTS manual_event_grants (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -312,7 +377,63 @@ class Database:
             for statement in schema.split(";"):
                 if statement.strip():
                     tx.execute(statement)
+            if self.postgres:
+                columns=tx.all("SELECT column_name AS name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='user_profiles'")
+            else:
+                columns=tx.all('PRAGMA table_info(user_profiles)')
+            if 'badge_id' not in {row['name'] for row in columns}:
+                tx.execute('ALTER TABLE user_profiles ADD COLUMN badge_id TEXT REFERENCES badges(id)')
+            if 'title_id' not in {row['name'] for row in columns}:
+                tx.execute('ALTER TABLE user_profiles ADD COLUMN title_id TEXT REFERENCES titles(id)')
             tx.execute("INSERT INTO settings(key,value) VALUES('schema_version','phone_accounts_v1') ON CONFLICT(key) DO NOTHING")
+        self.allow_achievement_badges()
+
+    def allow_achievement_badges(self):
+        """Extend the previous badge CHECKs without resetting ownership or profiles."""
+        if self.postgres:
+            with self.transaction(write=True) as tx:
+                columns=tx.all("SELECT column_name AS name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='user_badges'")
+                if 'achievement_id' in {row['name'] for row in columns}:
+                    return
+                tx.execute('ALTER TABLE user_badges ADD COLUMN achievement_id BIGINT REFERENCES user_achievements(id)')
+                for table in ('badges','user_badges'):
+                    constraints=tx.all("SELECT conname FROM pg_constraint WHERE conrelid=?::regclass AND contype='c' AND pg_get_constraintdef(oid) LIKE ?",(table,'%rule%' if table=='badges' else '%source%'))
+                    for row in constraints:
+                        name=row['conname'].replace('"','""')
+                        tx.execute(f'ALTER TABLE {table} DROP CONSTRAINT "{name}"')
+                tx.execute("ALTER TABLE badges ADD CHECK (rule IN ('milestone','manual','achievement'))")
+                tx.execute("ALTER TABLE badges ADD CHECK ((rule='milestone' AND threshold IS NOT NULL AND threshold>0) OR (rule IN ('manual','achievement') AND threshold IS NULL))")
+                tx.execute("ALTER TABLE user_badges ADD CHECK (source IN ('milestone','manual','achievement'))")
+                tx.execute("ALTER TABLE user_badges ADD CHECK ((source='milestone' AND milestone_id IS NOT NULL AND achievement_id IS NULL AND granted_by IS NULL) OR (source='manual' AND milestone_id IS NULL AND achievement_id IS NULL AND granted_by IS NOT NULL) OR (source='achievement' AND milestone_id IS NULL AND achievement_id IS NOT NULL AND granted_by IS NULL))")
+            return
+        conn=self.connect()
+        try:
+            conn.execute('PRAGMA foreign_keys=OFF')
+            conn.execute('BEGIN IMMEDIATE')
+            for table in ('badges','user_badges'):
+                old=conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?",(table,)).fetchone()
+                if "'achievement'" in old['sql']:
+                    continue
+                columns=','.join(row['name'] for row in conn.execute(f'PRAGMA table_info({table})'))
+                sequence=conn.execute('SELECT seq FROM sqlite_sequence WHERE name=?',(table,)).fetchone()
+                objects=conn.execute("SELECT sql FROM sqlite_master WHERE tbl_name=? AND type IN ('index','trigger') AND sql IS NOT NULL",(table,)).fetchall()
+                ddl=SCHEMA[SCHEMA.index(f'CREATE TABLE IF NOT EXISTS {table} ('):].split(';',1)[0]
+                conn.execute(ddl.replace(f'IF NOT EXISTS {table}',f'{table}_achievement_upgrade',1))
+                conn.execute(f'INSERT INTO {table}_achievement_upgrade ({columns}) SELECT {columns} FROM {table}')
+                conn.execute(f'DROP TABLE {table}')
+                conn.execute(f'ALTER TABLE {table}_achievement_upgrade RENAME TO {table}')
+                if sequence:
+                    conn.execute('UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name=?',(sequence['seq'],table))
+                for row in objects:
+                    conn.execute(row['sql'])
+            if conn.execute('PRAGMA foreign_key_check').fetchone():
+                raise RuntimeError('배지·도전과제 구조 업데이트 중 외래키 검사에 실패했습니다. 기존 DB를 유지합니다.')
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def allow_guest_orders(self):
         """Make the existing order owner optional, preserving records and IDs."""

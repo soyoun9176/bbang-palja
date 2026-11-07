@@ -35,7 +35,8 @@ function fixture({guest = false, storage = new Map(), admin=false} = {}) {
     const id = token === 'Bearer token-B' ? 2 : 1;
     const user = {id, name: `구매자${id}`, role: 'buyer', score: 0, dice_balance: remote.approved ? 1 : 2, rewards_claimed: 0,
       ...(remote.profileCustomized===undefined?{}:{profile_customized:remote.profileCustomized}),...(remote.avatar?{avatar:remote.avatar}:{}),
-      ...(remote.unlockedHairpins?{unlocked_hairpins:remote.unlockedHairpins}:{})};
+      ...(remote.unlockedHairpins?{unlocked_hairpins:remote.unlockedHairpins}:{}),
+      ...(remote.badges?{badges:remote.badges}:{}),...(remote.titles?{titles:remote.titles}:{}),...(remote.achievements?{achievements:remote.achievements}:{}),...(Object.hasOwn(remote,'equippedTitle')?{equipped_title:remote.equippedTitle}:{}),...(Object.hasOwn(remote,'equippedBadge')?{equipped_badge:remote.equippedBadge}:{})};
     if (path === '/api/config') return response({demo: false, reward_step: 10});
     if (path === '/api/products') return response({products: [{id: 1, stock: remote.stock}]});
     if (path === '/api/auth/me') return response({user});
@@ -419,7 +420,7 @@ test('rankings show a portrait for every person, including uncustomized accounts
   const f=fixture();await f.run('refresh()');
   f.context.chosenAvatar=chosenAvatar;
   f.run("state.route='ranking';const people=[{id:1,name:'하나',rank:1,score:9,is_me:true,avatar:chosenAvatar},{id:2,name:'둘',rank:2,score:3},{id:3,name:'셋',rank:3,score:0}];state.leaderboard={leaders:people,neighbors:people,me:people[0],total_participants:3};renderPage()");
-  for(const name of ['하나','둘','셋'])assert.equal(f.root.innerHTML.split(`${name}의 프로필 캐릭터`).length-1,2);
+  for(const name of ['하나','둘','셋'])assert.equal(f.root.innerHTML.split(`${name}의 프로필 캐릭터`).length-1,1);
   assert.match(f.root.innerHTML,/구매자1 계정 관리/);
   assert.equal((f.root.innerHTML.match(/character-unknown/g)||[]).length,1);
 });
@@ -693,7 +694,7 @@ test('score bar has image bubbles that unlock by score and reveal claim controls
   assert.doesNotMatch(f.root.innerHTML,/data-action="claim-reward"|milestone-roadmap|10점마다|50점까지/);
   f.run('openMilestone(5)');
   assert.match(prompt,/오트밀 미니바이트/);
-  assert.match(prompt,/프로필 배지 1 · 추후 추가/);
+  assert.match(prompt,/프로필 배지 · 마법의 씨앗/);
   assert.match(prompt,/1점 더 모으면/);
   assert.match(prompt,/\/assets\/oatmeal.svg/);
   assert.doesNotMatch(prompt,/data-action="claim-reward"/);
@@ -810,7 +811,7 @@ function adminFixture() {
     api:async(path,options)=>{requests.push(JSON.parse(JSON.stringify({path,...options})));return context.respond?context.respond(path,options):{};},
     submitButton(){},refresh:async()=>{},render(){renderCalls++;},toast:message=>messages.push(message),closeModal(){}};
   vm.createContext(context);
-  vm.runInContext(profileSource+'\n'+adminSource+'\nshared.profileAvatar=profileAvatar;initAdmin(shared);',context);
+  vm.runInContext(profileSource+'\n'+adminSource+'\nshared.profileAvatar=profileAvatar;shared.badgePicture=badgePicture;shared.badgeIcons=badgeIcons;shared.profileTitle=profileTitle;shared.titleStyles=titleStyles;initAdmin(shared);',context);
   return {state,requests,messages,context,listeners,nodes,run:script=>vm.runInContext(script,context),
     get renders(){return renderCalls;},
     search(key,value){listeners.input({target:{dataset:{adminSearch:key},value,closest:()=>null}});},
@@ -1231,4 +1232,205 @@ test('milk purchase and mixed order messages use bread dice rather than total qu
   await f.run('checkout({disabled:false})');
   assert.match(prompt,/음료 구매에는 주사위가 지급되지 않아요/);
   assert.doesNotMatch(prompt,/주사위 2개/);
+});
+
+const testBadges=[
+  {id:'score_5',name:'마법의 씨앗',description:'5점 보상을 받으면 이 배지를 얻을 수 있어요.',icon:'spark',owned:true,earned_at:'2026-11-07T00:00:00Z'},
+  {id:'score_10',name:'빛나는 연금술',description:'10점 보상을 받으면 이 배지를 얻을 수 있어요.',icon:'flask',owned:false,earned_at:null},
+];
+test('equipped badges overlay the upper left of profile pictures but not face or hairpin swatches',()=>{
+  const f=fixture();f.context.badgeUser={id:1,name:'참가자',equipped_badge:testBadges[0]};
+  assert.match(f.run('profileAvatar(badgeUser)'),/data-badge-position="top-left"/);
+  assert.match(f.run('profileAvatar(badgeUser)'),/data-badge-id="score_5"/);
+  assert.match(f.run('profileAvatar(badgeUser,{full:true})'),/profile-badged-avatar badge-full/);
+  assert.doesNotMatch(f.run('profileAvatar(badgeUser,{breadOnly:true})'),/profile-badge-overlay/);
+  assert.doesNotMatch(f.run('profileAvatar(badgeUser,{pinOnly:true})'),/profile-badge-overlay/);
+  f.context.badgeUser.equipped_badge=null;
+  assert.doesNotMatch(f.run('profileAvatar(badgeUser)'),/profile-badge-overlay/);
+});
+test('profile badge tab offers only owned badges as radios and locked badges as question buttons',()=>{
+  const f=fixture();f.context.badgeUser={id:1,name:'참가자',badges:testBadges,equipped_badge:testBadges[0]};
+  const html=f.run('profileEditor(badgeUser)');
+  assert.match(html,/data-tab="badges"/);
+  assert.match(html,/name="badge_id" value="score_5" checked/);
+  assert.match(html,/name="badge_id" value=""/);
+  assert.doesNotMatch(html,/name="badge_id" value="score_10"/);
+  assert.match(html,/data-action="badge-info" data-badge="score_10"/);
+  assert.match(html,/class="badge-unknown"[^>]*>\?<\/i>/);
+});
+test('locked badge clicks reveal the earning hint without replacing the profile form or sending requests',async()=>{
+  const f=fixture();await f.run('refresh()');
+  const info={hidden:true,innerHTML:'',scrollIntoView(){}},original=f.context.document.querySelector;
+  f.context.document.querySelector=selector=>selector==='[data-badge-info]'?info:original(selector);
+  f.context.badgeList=testBadges;f.run('state.user.badges=badgeList');
+  const before=f.requests.length;
+  f.run("showBadgeInfo('score_10')");
+  assert.equal(info.hidden,false);assert.match(info.innerHTML,/10점 보상을 받으면 이 배지를 얻을 수 있어요/);
+  assert.equal(f.requests.length,before);
+  assert.equal(f.run('state.user.equipped_badge'),undefined);
+});
+test('badge selection previews without saving or replacing the equipped account badge',async()=>{
+  const f=fixture();f.remote.badges=testBadges;f.remote.equippedBadge=null;await f.run('refresh()');
+  const {form}=profileForm(f),preview={innerHTML:''},original=f.context.document.querySelector;
+  form.values=new Map([...Object.entries(chosenAvatar),['badge_id','score_5']]);
+  f.context.FormData=class{constructor(form){this.values=form.values;}[Symbol.iterator](){return this.values.entries();}};
+  f.context.document.querySelector=selector=>selector==='[data-profile-preview]'?preview:original(selector);
+  f.run('updateProfilePreview(profileForm)');
+  assert.match(preview.innerHTML,/profile-badge-overlay/);assert.match(preview.innerHTML,/data-badge-id="score_5"/);
+  assert.equal(f.run('state.user.equipped_badge'),null);
+  assert.equal(f.requests.filter(r=>r.path==='/api/profile').length,0);
+});
+test('saving or removing the profile badge uses the existing profile transaction',async()=>{
+  const f=fixture();f.remote.badges=testBadges;f.remote.equippedBadge=null;await f.run('refresh()');profileForm(f);
+  f.context.fetchOverride=async(path,options)=>{
+    if(path==='/api/profile'){
+      const body=JSON.parse(options.body);f.remote.avatar=body.avatar;
+      f.remote.equippedBadge=testBadges.find(b=>b.id===body.badge_id)||null;
+      return f.response(await (await f.context.normalFetch('/api/auth/me')).json());
+    }
+    return f.context.normalFetch(path,options);
+  };
+  await f.run("saveProfile(profileForm,{...chosenAvatar,badge_id:'score_5'})");
+  assert.deepEqual(JSON.parse(f.requests.find(r=>r.path==='/api/profile').body),{avatar:chosenAvatar,badge_id:'score_5'});
+  assert.equal(f.run('state.user.equipped_badge.id'),'score_5');
+  await f.run("saveProfile(profileForm,{...chosenAvatar,badge_id:''})");
+  const requests=f.requests.filter(r=>r.path==='/api/profile');
+  assert.equal(JSON.parse(requests[1].body).badge_id,null);
+  assert.equal(f.run('state.user.equipped_badge'),null);
+});
+test('new badge ownership updates the open picker without discarding the current selection',async()=>{
+  const f=fixture();f.remote.badges=testBadges;await f.run('refresh()');
+  const {form}=profileForm(f),preview={innerHTML:''},target={dataset:{badges:JSON.stringify(testBadges)},outerHTML:''};
+  form.values=new Map([...Object.entries(chosenAvatar),['badge_id','score_5']]);
+  f.context.FormData=class{constructor(form){this.values=form.values;}[Symbol.iterator](){return this.values.entries();}};
+  const original=f.context.document.querySelector;
+  f.context.document.querySelector=selector=>selector==='#profile-editor'?form:selector==='[data-profile-badges]'?target:selector==='[data-profile-preview]'?preview:original(selector);
+  f.context.updatedBadges=testBadges.map(b=>({...b,owned:true}));
+  f.run('state.user.badges=updatedBadges;syncProfileBadges()');
+  assert.match(target.outerHTML,/name="badge_id" value="score_5" checked/);
+  assert.match(target.outerHTML,/name="badge_id" value="score_10"/);
+  assert.equal(f.requests.filter(r=>r.path==='/api/profile').length,0);
+});
+test('staff badge mode shows owned badges, catalog creation and a separate grant endpoint',async()=>{
+  const f=adminFixture();f.state.staffData.badges=testBadges;
+  f.state.staffData.users[0].badges=testBadges;
+  f.run("eventTab='manual';grantDraft.user_id='10'");
+  await f.run("handleAdminClick('admin-grant-kind',{dataset:{kind:'badge'}})");
+  const html=f.run('renderAdmin()');
+  assert.match(html,/id="admin-badge-create"/);assert.match(html,/배지 추가·보유 현황/);
+  assert.match(html,/<option value="score_5"[^>]*disabled/);
+  assert.match(html,/name="badge_id"/);assert.doesNotMatch(html,/name="quantity"/);
+  f.context.respond=async()=>({grant:{id:9}});
+  await f.submit({user_id:'10',badge_id:'score_10',reason:'이벤트 조건 확인'},'admin-manual-grant');
+  assert.deepEqual(f.requests[0],{path:'/api/staff/badge-grants',method:'POST',body:{
+    user_id:10,badge_id:'score_10',reason:'이벤트 조건 확인',request_id:'request-1'}});
+  await f.run("handleAdminClick('admin-grant-recipient',{dataset:{mode:'guest'}})");
+  assert.match(f.run('renderAdmin()'),/data-kind="badge"[^>]*disabled/);
+});
+test('staff can create a badge with a visible acquisition hint and a local icon',async()=>{
+  const f=adminFixture();f.context.respond=async()=>({badge:{id:'custom_1'}});
+  await f.submit({name:'특별상',description:'이벤트를 완료하면 이 배지를 얻을 수 있어요.',icon:'trophy'},'admin-badge-create');
+  assert.deepEqual(f.requests[0],{path:'/api/staff/badges',method:'POST',body:{
+    name:'특별상',description:'이벤트를 완료하면 이 배지를 얻을 수 있어요.',icon:'trophy',request_id:'request-1'}});
+});
+
+const testTitles=[
+ {id:'elements',name:'원소 수집가',description:'휘낭시에 4종 모두 구매',style:'magic',owned:true},
+ {id:'vvip',name:'캄딜 VVIP',description:'빵 11종 모두 구매',style:'gold',owned:false},
+ {id:'fast',name:'⚡ 우사인볼트 연금술사',description:'선착순 구매',style:'lightning',owned:true},
+];
+const testAchievements=[
+ {id:'elements',name:'원소 수집가',description:'휘낭시에 4종을 모두 구매해요.',current:2,target:4,unit:'종',completed:false,badge_id:'ach_elements',title:'원소 수집가',items:[{name:'플레인 휘낭시에',quantity:2},{name:'초코 휘낭시에',quantity:0}]},
+ {id:'all_breads',name:'캄딜 VVIP',description:'빵 메뉴 11종을 모두 구매해요.',current:11,target:11,unit:'종',completed:true,badge_id:'ach_vvip',title:'캄딜 VVIP',style:'gold'},
+];
+test('event replaces nearby ranks with private achievement progress and retains top three',async()=>{
+ const f=fixture();f.remote.achievements=testAchievements;await f.run('refresh()');
+ f.run("state.route='ranking';renderPage()");
+ assert.doesNotMatch(f.root.innerHTML,/내 주변 순위|ranking-neighbors/);
+ assert.match(f.root.innerHTML,/최고의 연금술사 TOP 3/);
+ assert.match(f.root.innerHTML,/도전과제/);assert.match(f.root.innerHTML,/1\/2 달성/);
+ assert.match(f.root.innerHTML,/width:50%/);assert.match(f.root.innerHTML,/2 \/ 4종/);
+ assert.match(f.root.innerHTML,/achievement-card is-completed/);
+});
+test('achievement details describe rewards and purchase quantities without claim requests',async()=>{
+ const f=fixture();f.remote.achievements=testAchievements;await f.run('refresh()');let html='';
+ f.context.capture=content=>html=content;f.run('modal=capture');
+ const before=f.requests.length;f.run("openAchievement('elements')");
+ assert.match(html,/플레인 휘낭시에/);assert.match(html,/2개/);assert.match(html,/구매 승인 후 자동으로 지급/);
+ assert.doesNotMatch(html,/data-action="profile-rewards"/);
+ f.run("openAchievement('all_breads')");assert.match(html,/title-gold/);assert.match(html,/프로필에서 칭호 고르기/);
+ assert.equal(f.requests.length,before);
+});
+test('generated badge artwork uses four bundled assets while unknown ids keep safe local drawings',()=>{
+ const f=fixture();
+ for(const [id,file] of [['ach_elements','elements'],['ach_vvip','vvip'],['ach_focus','focus'],['ach_fast','fast']]){
+  const html=f.run(`badgePicture({id:'${id}',name:'배지'})`);assert.match(html,new RegExp(`/assets/badges/${file}-v1.webp`));
+  assert.ok(readFileSync(new URL(`../frontend/assets/badges/${file}-v1.webp`,import.meta.url)).length>1000);
+ }
+ f.context.evilBadge={id:'https://evil.test/badge',icon:'x',name:'<script>bad</script>'};
+ assert.doesNotMatch(f.run('badgePicture(evilBadge)'),/<img|<script>|src="https/);
+});
+test('titles use safe styles and escaped text beside nickname in the header and rankings',async()=>{
+ const f=fixture();f.remote.equippedTitle=testTitles[2];await f.run('refresh()');
+ f.run("state.route='ranking';state.leaderboard.leaders[0].equipped_title=state.user.equipped_title;renderPage()");
+ assert.equal((f.root.innerHTML.match(/title-lightning/g)||[]).length,2);
+ assert.match(f.root.innerHTML,/⚡ 우사인볼트 연금술사/);
+ f.context.untrustedTitle={equipped_title:{name:'<img src=x onerror=alert(1)>',style:'evil" onload="x'}};
+ const html=f.run('profileTitle(untrustedTitle)');assert.match(html,/title-magic/);
+ assert.doesNotMatch(html,/<img|class="[^"]*evil/);assert.match(html,/&lt;img/);
+});
+test('title picker offers owned titles and none while locked titles reveal earning instructions',async()=>{
+ const f=fixture();f.remote.titles=testTitles;f.remote.equippedTitle=testTitles[0];await f.run('refresh()');
+ const html=f.run('profileEditor(state.user)');
+ assert.match(html,/data-tab="titles"/);assert.match(html,/name="title_id" value="elements" checked/);
+ assert.match(html,/name="title_id" value=""/);assert.doesNotMatch(html,/name="title_id" value="vvip"/);
+ assert.match(html,/data-action="title-info" data-title="vvip"/);
+ const panel={hidden:true,innerHTML:'',scrollIntoView(){}};const original=f.context.document.querySelector;
+ f.context.document.querySelector=s=>s==='[data-title-info]'?panel:original(s);
+ const before=f.requests.length;f.run("showTitleInfo('vvip')");
+ assert.match(panel.innerHTML,/빵 11종 모두 구매/);assert.equal(panel.hidden,false);assert.equal(f.requests.length,before);
+});
+test('title preview changes locally and save sends title and badge in the same transaction',async()=>{
+ const f=fixture();f.remote.titles=testTitles;f.remote.equippedTitle=null;f.remote.badges=testBadges;await f.run('refresh()');
+ const {form}=profileForm(f),preview={innerHTML:''},titlePreview={innerHTML:''},original=f.context.document.querySelector;
+ form.values=new Map([...Object.entries(chosenAvatar),['title_id','fast'],['badge_id','score_5']]);
+ f.context.FormData=class{constructor(form){this.values=form.values;}[Symbol.iterator](){return this.values.entries();}};
+ f.context.document.querySelector=s=>s==='[data-profile-preview]'?preview:s==='[data-profile-title-preview]'?titlePreview:original(s);
+ f.run('updateProfilePreview(profileForm)');assert.match(titlePreview.innerHTML,/title-lightning/);
+ assert.equal(f.run('state.user.equipped_title'),null);
+ f.context.fetchOverride=async(path,options)=>{
+  if(path==='/api/profile'){const body=JSON.parse(options.body);f.remote.equippedTitle=testTitles.find(t=>t.id===body.title_id)||null;return f.response(await(await f.context.normalFetch('/api/auth/me')).json());}
+  return f.context.normalFetch(path,options);
+ };
+ await f.run("saveProfile(profileForm,{...chosenAvatar,badge_id:'score_5',title_id:'fast'})");
+ assert.deepEqual(JSON.parse(f.requests.find(r=>r.path==='/api/profile').body),{avatar:chosenAvatar,badge_id:'score_5',title_id:'fast'});
+ await f.run("saveProfile(profileForm,{...chosenAvatar,title_id:''})");
+ assert.equal(JSON.parse(f.requests.filter(r=>r.path==='/api/profile')[1].body).title_id,null);
+});
+test('live title ownership refresh retains the current choice and draft avatar',async()=>{
+ const f=fixture();f.remote.titles=testTitles;await f.run('refresh()');const {form}=profileForm(f);
+ const preview={innerHTML:''},titlePreview={innerHTML:''},target={dataset:{titles:JSON.stringify(testTitles)},outerHTML:'',querySelector:()=>null};
+ form.values=new Map([...Object.entries(chosenAvatar),['title_id','elements']]);
+ f.context.FormData=class{constructor(form){this.values=form.values;}[Symbol.iterator](){return this.values.entries();}};
+ const original=f.context.document.querySelector;
+ f.context.document.querySelector=s=>s==='#profile-editor'?form:s==='[data-profile-titles]'?target:s==='[data-profile-preview]'?preview:s==='[data-profile-title-preview]'?titlePreview:original(s);
+ f.context.newTitles=testTitles.map(t=>({...t,owned:true}));f.run('state.user.titles=newTitles;syncProfileTitles()');
+ assert.match(target.outerHTML,/name="title_id" value="elements" checked/);assert.match(target.outerHTML,/name="title_id" value="vvip"/);
+ assert.equal(form.values.get('expression'),'wink');assert.match(titlePreview.innerHTML,/원소 수집가/);
+});
+test('staff title controls track ownership and custom creation and forbid guest grants',async()=>{
+ const f=adminFixture();f.state.staffData.titles=testTitles;f.state.staffData.users[0].titles=testTitles;
+ f.run("eventTab='manual';grantDraft.user_id='10'");await f.run("handleAdminClick('admin-grant-kind',{dataset:{kind:'title'}})");
+ let html=f.run('renderAdmin()');assert.match(html,/칭호 추가·보유 현황/);assert.match(html,/id="admin-title-create"/);
+ assert.match(html,/<option value="elements"[^>]*disabled/);assert.doesNotMatch(html,/name="quantity"/);
+ f.context.respond=async()=>({grant:{id:8}});
+ await f.submit({user_id:'10',title_id:'vvip',reason:'조건 확인'},'admin-manual-grant');
+ assert.deepEqual(f.requests[0],{path:'/api/staff/title-grants',method:'POST',body:{user_id:10,title_id:'vvip',reason:'조건 확인',request_id:'request-1'}});
+ await f.run("handleAdminClick('admin-grant-recipient',{dataset:{mode:'guest'}})");
+ html=f.run('renderAdmin()');assert.match(html,/data-kind="title"[^>]*disabled/);
+});
+test('staff custom title creation sends only the validated name hint and style',async()=>{
+ const f=adminFixture();f.context.respond=async()=>({title:{id:'custom_1'}});
+ await f.submit({name:'캄딜 대마법사',description:'담당자 확인',style:'gold'},'admin-title-create');
+ assert.deepEqual(f.requests[0],{path:'/api/staff/titles',method:'POST',body:{name:'캄딜 대마법사',description:'담당자 확인',style:'gold',request_id:'request-1'}});
 });

@@ -1,5 +1,5 @@
 import {initAdmin, renderAdmin, renderStaffLogin, handleAdminClick, handleAdminSubmit} from './admin.js';
-import {profileAvatar, profileEditor, profileHairpins, normalizeAvatar} from './profile.js';
+import {profileAvatar, profileEditor, profileHairpins, profileBadges, profileTitles, profileTitle, titleStyles, badgePicture, badgeIcons, normalizeAvatar} from './profile.js';
 
 const isAdmin = /^\/admin(?:\/|$)/.test(location.pathname);
 const tokenKey = `kambo.${isAdmin ? 'staff' : 'buyer'}.token`;
@@ -32,7 +32,7 @@ function shell(content) {
   const eventPage=!isAdmin&&['dice','ranking'].includes(state.route);
   return `<div class="shell ${isAdmin?'admin':eventPage?'event-space':'purchase-space'} ${state.user?'signed-in':''}">
     <header class="app-header"><a href="${isAdmin?'/admin/':'/'}" aria-label="캄보딜라이트 홈">${brand()}</a>
-    ${state.user?`<button class="profile-button" data-action="profile" aria-label="${esc(state.user.name)} 계정 관리">${profileAvatar(state.user)}<span>${esc(state.user.name)}${isAdmin?' · 담당자':''}</span> ${icon('chevron')}</button>`:isAdmin?'<span class="muted">담당자 로그인</span>':guestPurchase()?'<button class="text-button" data-action="guest-exit">로그인</button>':''}</header>
+    ${state.user?`<button class="profile-button" data-action="profile" aria-label="${esc(state.user.name)} 계정 관리">${profileAvatar(state.user)}<span class="profile-identity">${esc(state.user.name)}${isAdmin?' · 담당자':''}${profileTitle(state.user)}</span> ${icon('chevron')}</button>`:isAdmin?'<span class="muted">담당자 로그인</span>':guestPurchase()?'<button class="text-button" data-action="guest-exit">로그인</button>':''}</header>
     ${state.user?`<nav class="primary-nav" aria-label="${isAdmin?'담당자 메뉴':'주요 메뉴'}">${(isAdmin?staffNav:buyerNav).map(x=>navButton(x)).join('')}</nav>`:''}
     <main class="main">${content}</main>
     ${!isAdmin&&(state.user&&state.route==='shop'||guestPurchase()&&state.route==='guest')&&cartCount()?`<button class="mobile-cart" data-action="open-cart">선택 수량 ${cartCount()} <strong>${money(cartTotal())}원 · 구매하기 ${icon('arrow')}</strong></button>`:''}
@@ -104,11 +104,11 @@ const characterTiers = [
   {name:'황금 연금술사'}, {name:'별빛 현자'}, {name:'전설의 대연금술사'},
 ];
 const milestonePreview=[
-  {threshold:5,kind:'oatmeal',name:'오트밀 미니바이트',extra:'프로필 배지 1 · 추후 추가'},
-  {threshold:10,kind:'milk',name:'우유 또는 두유',extra:'프로필 배지 2 · 추후 추가'},
-  {threshold:15,kind:'sunglasses',name:'멋진 선글라스',extra:'칭호 「멋쟁이 마법사」 · 추후 추가'},
+  {threshold:5,kind:'oatmeal',name:'오트밀 미니바이트',extra:'프로필 배지 · 마법의 씨앗'},
+  {threshold:10,kind:'milk',name:'우유 또는 두유',extra:'프로필 배지 · 빛나는 연금술'},
+  {threshold:15,kind:'sunglasses',name:'멋진 선글라스',extra:'칭호 「멋쟁이 마법사」'},
   {threshold:20,kind:'bread',name:'랜덤 빵 1개',extra:''},
-  {threshold:30,kind:'bread',name:'랜덤 빵 1개',extra:'담당자가 지어주는 커스텀 칭호 · 추후 추가'},
+  {threshold:30,kind:'bread',name:'랜덤 빵 1개',extra:'칭호 「대현자 연금술사」 · 담당자에게 커스텀 칭호 요청 가능'},
 ];
 function eventProgress(user=state.user) {
   const milestones=state.config.milestones||milestonePreview,claimed=user.claimed_milestones||[];
@@ -194,11 +194,18 @@ async function chooseBeverage(button,decline=false){
 function renderRewardHistory() {
   return state.rewards.length?`<details id="buyer-reward-history" class="content-card reward-history"><summary>이벤트 보상 기록 · ${state.rewards.length}건</summary>${state.rewards.map(r=>`<div class="reward-item"><strong>${esc(r.product_name)}</strong><span>${r.kind==='dice_milk'?'주사위 당첨':r.kind==='legacy_bread'?`이전 이벤트 ${r.threshold}점`:`${r.threshold}점`} · ${r.fulfillment?rewardStatus(r.fulfillment.status):r.kind==='sunglasses'?'자동 지급':'이전 지급 기록'}</span></div>`).join('')}</details>`:'';
 }
+function renderAchievements(){
+  const achievements=state.user?.achievements||[];
+  return `<section class="content-card achievements"><div class="section-heading"><h2>도전과제</h2><span>${achievements.filter(a=>a.completed).length}/${achievements.length} 달성</span></div><p class="form-hint">구매를 모아 배지와 반짝이는 칭호를 얻어요.</p><div class="achievement-list">${achievements.map(a=>`<button type="button" class="achievement-card ${a.completed?'is-completed':''}" data-action="achievement-detail" data-achievement="${esc(a.id)}">${badgePicture({id:a.badge_id,name:a.name})}<span class="achievement-copy"><strong>${esc(a.name)}${a.completed?`<i>${icon('check')} 달성</i>`:''}</strong><small>${esc(a.description)}</small><span class="achievement-progress"><span style="width:${Math.min(100,Math.max(0,a.current/a.target*100))}%"></span></span><small class="achievement-count">${money(a.current)} / ${money(a.target)}${esc(a.unit)}</small></span>${icon('chevron')}</button>`).join('')}</div></section>`;
+}
+function openAchievement(id){
+  const a=state.user?.achievements?.find(a=>a.id===id);if(!a)return;
+  modal(`<div class="achievement-detail">${badgePicture({id:a.badge_id,name:a.name},{decorative:false})}<h2>${esc(a.name)}</h2><p>${esc(a.description)}</p><div class="achievement-rewards"><span>달성 보상</span><strong>프로필 배지</strong>${profileTitle({equipped_title:{name:a.title,style:a.style||'magic'}})}</div>${a.items?`<ul class="achievement-items">${a.items.map(item=>`<li class="${item.quantity>=(a.id==='focus'?5:1)?'is-done':''}"><span>${esc(item.name)}</span><b>${money(item.quantity)}${a.id==='focus'?' / 5':''}개</b></li>`).join('')}</ul>`:''}${a.dates?.length?`<p class="form-hint">달성일 · ${a.dates.map(esc).join(', ')}</p>`:''}<p class="form-hint">${a.completed?'배지와 칭호를 획득했어요.':'구매 승인 후 자동으로 지급돼요.'}</p>${a.completed?'<button type="button" class="primary-button full" data-action="profile-rewards">프로필에서 칭호 고르기</button>':''}</div>`);
+}
 function renderEvent() {
   const board=state.leaderboard;
-  const rankings=board?`<section class="content-card"><h2>최고의 연금술사 TOP 3</h2><p class="form-hint">양일 누적 점수로 최종 1·2·3등을 선정합니다.</p><ol class="leaders">${board.leaders.map(p=>`<li class="${p.is_me?'me':''}"><span class="rank-number">${p.rank}위</span><strong class="profile-name">${profileAvatar(p)}<span>${esc(p.name)}${p.is_me?' (나)':''}</span></strong><b>${money(p.score)}점</b></li>`).join('')}</ol></section>
-  <section class="content-card ranking-neighbors"><h2>내 주변 순위</h2>${board.neighbors.map(p=>`<div class="rank-row ${p.is_me?'me':''}"><span>${p.rank}위</span><strong class="profile-name">${profileAvatar(p)}<span>${esc(p.name)}${p.is_me?' (나)':''}</span></strong><b>${money(p.score)}점</b></div>`).join('')}<p class="form-hint">내 순위 ${board.me?.rank||'-'}위 · 총 ${board.total_participants}명 참여</p></section>`:'<section class="content-card"><h2>점수 순위</h2><p class="form-hint">순위를 불러오는 중입니다.</p></section>';
-  return `${eventHeading()}<div class="event-layout"><div class="event-personal">${renderRewardRequests()}${renderLevelCard()}${renderRewardHistory()}</div><div class="event-rankings">${rankings}</div></div>`;
+  const rankings=board?`<section class="content-card"><h2>최고의 연금술사 TOP 3</h2><p class="form-hint">양일 누적 점수로 최종 1·2·3등을 선정합니다.</p><ol class="leaders">${board.leaders.map(p=>`<li class="${p.is_me?'me':''}"><span class="rank-number">${p.rank}위</span><strong class="profile-name">${profileAvatar(p)}<span class="profile-identity">${esc(p.name)}${p.is_me?' (나)':''}${profileTitle(p)}</span></strong><b>${money(p.score)}점</b></li>`).join('')}</ol><p class="form-hint">내 순위 ${board.me?.rank||'-'}위 · 총 ${board.total_participants}명 참여</p></section>`:'<section class="content-card"><h2>점수 순위</h2><p class="form-hint">순위를 불러오는 중입니다.</p></section>';
+  return `${eventHeading()}<div class="event-layout"><div class="event-personal">${renderRewardRequests()}${renderLevelCard()}${renderRewardHistory()}</div><div class="event-rankings">${rankings}${renderAchievements()}</div></div>`;
 }
 function render() {
   const previousTrackWidth=document.querySelector('.milestone-track-bar > span')?.style.width;
@@ -234,12 +241,12 @@ async function refresh(){
     }
     if(state.token!==token||version!==refreshVersion||guest!==guestPurchase())return;
     state.config=results[0];state.products=results[1].products;
-    if(token){state.user=results[2].user;if(isAdmin)state.staffData=extra;else{if(state.pickupUserId!==state.user.id){resetPickup();state.pickupUserId=state.user.id;}state.pickupDefaults=results[2].pickup_defaults||{name:state.user.name,phone:''};state.orders=extra[0].orders;state.rewards=extra[1].rewards;state.rewardRequests=extra[1].requests||[];state.leaderboard=extra[2];}syncProfileHairpins();}
+    if(token){state.user=results[2].user;if(isAdmin)state.staffData=extra;else{if(state.pickupUserId!==state.user.id){resetPickup();state.pickupUserId=state.user.id;}state.pickupDefaults=results[2].pickup_defaults||{name:state.user.name,phone:''};state.orders=extra[0].orders;state.rewards=extra[1].rewards;state.rewardRequests=extra[1].requests||[];state.leaderboard=extra[2];}syncProfileHairpins();syncProfileBadges();syncProfileTitles();}
     else if(guestResults){state.orders=guestResults.filter(r=>r.order).map(r=>r.order).sort((a,b)=>b.id-a.id);if(guestResults.some(r=>r.missing)){state.guestReceipts=guestResults.filter(r=>!r.missing).map(r=>r.receipt);localStorage.setItem('kambo.guest.orders',JSON.stringify(state.guestReceipts));}}
   }catch(error){if(token!==state.token||version!==refreshVersion)return;throw error;}
 }
 
-initAdmin({state,api,icon,esc,money,time,toast,modal,closeModal,render,refresh,requestId,submitButton,profileAvatar,normalizePhone});
+initAdmin({state,api,icon,esc,money,time,toast,modal,closeModal,render,refresh,requestId,submitButton,profileAvatar,profileTitle,titleStyles,badgePicture,badgeIcons,normalizePhone});
 
 function normalizePhone(value){
   if(typeof value!=='string'||/[^0-9-]/.test(value)||!/^(?:010[0-9]{8}|010-[0-9]{4}-[0-9]{4})$/.test(value))throw new Error('전화번호는 01012345678 또는 010-1234-5678 형식으로 입력해 주세요. 숫자와 정해진 위치의 대시만 사용할 수 있어요.');
@@ -251,19 +258,34 @@ function buyerAuthForm(mode='login') {
 function guestEntry(){return `<div class="guest-entry"><button class="secondary-button full" data-action="guest-start">계정 없이 빵만 구매</button>${state.guestReceipts.length?'<button class="text-button full" data-action="guest-orders">비회원 주문 내역</button>':''}</div>`;}
 function renderBuyerLogin() { return `<section class="login-card content-card"><h1>전화번호와 비밀번호를 입력해 주세요.</h1><p class="form-hint">처음이라면 계정을 만들어 주세요.</p>${buyerAuthForm(state.authMode)}${guestEntry()}</section>`; }
 let profileSaving=false;
-function openProfile(onboarding=false) {
+function openProfile(onboarding=false,tab='face') {
   if(!state.user||profileSaving)return;
   if(state.rolling||state.leveling){toast('진행 중인 이벤트가 끝나면 꾸밀 수 있어요.');return;}
   modal(profileEditor(state.user,{onboarding}));
+  if(tab!=='face')selectProfileTab(document.querySelector('.profile-editor'),tab);
+}
+function selectProfileTab(editor,tab){
+  editor.querySelectorAll('[data-action="profile-tab"]').forEach(button=>{const selected=button.dataset.tab===tab;button.classList.toggle('active',selected);button.setAttribute('aria-pressed',String(selected));});
+  editor.querySelectorAll('[data-profile-panel]').forEach(panel=>panel.hidden=panel.dataset.profilePanel!==tab);
+}
+function selectedProfileBadge(data){
+  const id=Object.hasOwn(data,'badge_id')?data.badge_id:state.user.equipped_badge?.id;
+  return state.user.badges?.find(b=>b.id===id&&b.owned)||null;
+}
+function selectedProfileTitle(data){
+  const id=Object.hasOwn(data,'title_id')?data.title_id:state.user.equipped_title?.id;
+  return state.user.titles?.find(t=>t.id===id&&t.owned)||null;
 }
 function updateProfilePreview(form) {
   const preview=document.querySelector('[data-profile-preview]');
   if(preview&&Number(form.dataset.userId)===state.user?.id){
-    const avatar=normalizeAvatar(Object.fromEntries(new FormData(form)),state.user.id);
-    preview.innerHTML=profileAvatar({...state.user,avatar},{className:'profile-preview-picture'});
+    const data=Object.fromEntries(new FormData(form)),avatar=normalizeAvatar(data,state.user.id);
+    preview.innerHTML=profileAvatar({...state.user,avatar,equipped_badge:selectedProfileBadge(data)},{className:'profile-preview-picture'});
+    const titlePreview=document.querySelector('[data-profile-title-preview]');
+    if(titlePreview)titlePreview.innerHTML=profileTitle({equipped_title:selectedProfileTitle(data)});
     form.querySelectorAll('.profile-choice-picture').forEach(picture=>{
       const input=picture.closest('.profile-choice').querySelector('input');
-      picture.outerHTML=profileAvatar({...state.user,avatar:{...avatar,[input.name]:input.value}},{className:'profile-choice-picture',decorative:true,breadOnly:['face_shape','expression'].includes(input.name),pinOnly:input.name==='hairpin'});
+      picture.outerHTML=profileAvatar({...state.user,equipped_badge:null,avatar:{...avatar,[input.name]:input.value}},{className:'profile-choice-picture',decorative:true,breadOnly:['face_shape','expression'].includes(input.name),pinOnly:input.name==='hairpin'});
     });
   }
 }
@@ -279,6 +301,38 @@ function syncProfileHairpins() {
   const updated=document.querySelector('[data-profile-hairpins]');
   if(expanded&&updated.querySelector('details'))updated.querySelector('details').open=true;
   if(focused)updated.querySelector(`input[value="${focused}"]`)?.focus({preventScroll:true});
+}
+function syncProfileBadges(){
+  const form=document.querySelector('#profile-editor'),target=document.querySelector('[data-profile-badges]');
+  if(!form||!target||profileSaving||Number(form.dataset.userId)!==state.user?.id)return;
+  if(target.dataset.badges===JSON.stringify(state.user.badges||[]))return;
+  const draft=Object.fromEntries(new FormData(form));
+  target.outerHTML=profileBadges(state.user,draft.badge_id??state.user.equipped_badge?.id??'');
+  updateProfilePreview(form);
+}
+function showBadgeInfo(id){
+  if(profileSaving)return;
+  const badge=state.user?.badges?.find(b=>b.id===id),target=document.querySelector('[data-badge-info]');
+  if(!badge||!target)return;
+  target.innerHTML=`<strong>${esc(badge.name)}</strong><p>${esc(badge.description)}</p>`;
+  target.hidden=false;target.scrollIntoView?.({block:'nearest'});
+}
+function syncProfileTitles(){
+  const form=document.querySelector('#profile-editor'),target=document.querySelector('[data-profile-titles]');
+  if(!form||!target||profileSaving||Number(form.dataset.userId)!==state.user?.id)return;
+  if(target.dataset.titles===JSON.stringify(state.user.titles||[]))return;
+  const draft=Object.fromEntries(new FormData(form));
+  const expanded=!!target.querySelector('details[open]');
+  target.outerHTML=profileTitles(state.user,draft.title_id??state.user.equipped_title?.id??'');
+  if(expanded){const details=document.querySelector('[data-profile-titles] details');if(details)details.open=true;}
+  updateProfilePreview(form);
+}
+function showTitleInfo(id){
+  if(profileSaving)return;
+  const title=state.user?.titles?.find(t=>t.id===id),target=document.querySelector('[data-title-info]');
+  if(!title||!target)return;
+  target.innerHTML=`<strong>${esc(title.name)}</strong><p>${esc(title.description)}</p>`;
+  target.hidden=false;target.scrollIntoView?.({block:'nearest'});
 }
 async function signInBuyer(form,data) {
   const result=await api(`/api/auth/${form.dataset.mode}`,{method:'POST',body:{...(form.dataset.mode==='register'?{name:data.name.trim()}:{}),phone:normalizePhone(data.phone),pin:data.pin}});
@@ -297,12 +351,12 @@ async function saveProfile(form,data) {
   const errorNode=form.querySelector('.profile-editor-error');
   if(errorNode)errorNode.hidden=true;
   try {
-    const result=await api('/api/profile',{method:'POST',body:{avatar},token});
+    const result=await api('/api/profile',{method:'POST',body:{avatar,...(Object.hasOwn(data,'badge_id')?{badge_id:data.badge_id||null}:{}),...(Object.hasOwn(data,'title_id')?{title_id:data.title_id||null}:{})},token});
     if(state.token!==token||state.user?.id!==userId)return;
     state.user=result.user;
     if(state.leaderboard){
-      for(const key of ['leaders','neighbors'])state.leaderboard[key]=state.leaderboard[key].map(p=>p.id===userId?{...p,avatar:result.user.avatar}:p);
-      if(state.leaderboard.me?.id===userId)state.leaderboard.me={...state.leaderboard.me,avatar:result.user.avatar};
+      for(const key of ['leaders','neighbors'])state.leaderboard[key]=state.leaderboard[key].map(p=>p.id===userId?{...p,avatar:result.user.avatar,equipped_badge:result.user.equipped_badge||null,equipped_title:result.user.equipped_title||null}:p);
+      if(state.leaderboard.me?.id===userId)state.leaderboard.me={...state.leaderboard.me,avatar:result.user.avatar,equipped_badge:result.user.equipped_badge||null,equipped_title:result.user.equipped_title||null};
     }
     await refreshAfterAction();
     if(state.token!==token||state.user?.id!==userId)return;
@@ -384,10 +438,12 @@ else if(action==='login')isAdmin?document.querySelector('#staff-login input')?.f
 else if(action==='auth-mode'){state.authMode=el.dataset.mode;if(document.querySelector('.modal'))openAuth(el.dataset.mode);else render();}
 else if(action==='close-modal'){if(!profileSaving)closeModal();}
 else if(action==='profile')openProfile();
+else if(action==='profile-rewards')openProfile(false,'titles');
+else if(action==='achievement-detail')openAchievement(el.dataset.achievement);
+else if(action==='badge-info')showBadgeInfo(el.dataset.badge);
+else if(action==='title-info')showTitleInfo(el.dataset.title);
 else if(action==='profile-tab'){
-  const editor=el.closest('.profile-editor');
-  editor.querySelectorAll('[data-action="profile-tab"]').forEach(button=>{const selected=button===el;button.classList.toggle('active',selected);button.setAttribute('aria-pressed',String(selected));});
-  editor.querySelectorAll('[data-profile-panel]').forEach(panel=>panel.hidden=panel.dataset.profilePanel!==el.dataset.tab);
+  selectProfileTab(el.closest('.profile-editor'),el.dataset.tab);
 }
 else if(action==='logout'){if(profileSaving)return;await api('/api/auth/logout',{method:'POST',body:{}});localStorage.removeItem(tokenKey);state.token=null;state.user=null;resetPickup();state.orders=[];state.rewards=[];state.rewardRequests=[];state.staffData=null;state.reservation=null;state.lastRoll=null;state.selectedDice=null;closeModal();render();toast('다음에 또 따뜻한 빵으로 만나요.');}
 else if(action==='cart-plus'||action==='cart-minus'||action==='remove-cart'){const id=Number(el.dataset.id),p=state.products.find(p=>p.id===id);const quantity=action==='remove-cart'?0:(state.cart[id]||0)+(action==='cart-plus'?1:-1);if(quantity>p.stock){toast('지금 남은 수량만큼 담을 수 있어요.','error');return;}const basketOpen=!!document.querySelector('.modal .basket');if(quantity>0)state.cart[id]=quantity;else delete state.cart[id];render();if(basketOpen)modal(renderBasket());}
@@ -410,6 +466,6 @@ window.addEventListener('hashchange',()=>{state.route=location.hash.slice(1)||(i
 let polling=false,pendingRender=false;
 function snapshot(){return JSON.stringify([state.user,state.products,state.orders,state.staffData,state.leaderboard,state.rewards,state.rewardRequests]);}
 function safeToRender(){return !document.querySelector('.modal')&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)&&!state.rolling&&!state.leveling;}
-setInterval(async()=>{if(polling||state.rolling||state.leveling||document.hidden)return;polling=true;try{const before=snapshot();const oldOrders=isAdmin?state.staffData?.orders||[]:state.orders,oldRewards=state.staffData?.reward_requests||[];await refresh();const newOrders=isAdmin?state.staffData?.orders||[]:state.orders;if(isAdmin){const freshRewards=(state.staffData?.reward_requests||[]).filter(r=>r.status==='pending'&&!oldRewards.some(old=>old.id===r.id&&old.status==='pending'));if(freshRewards.length)toast(`${freshRewards[0].customer_name} 님의 이벤트 지급 요청이 도착했어요.`);const fresh=newOrders.filter(o=>o.status==='pending'&&!oldOrders.some(old=>old.id===o.id));if(fresh.length)toast(`${fresh[0].customer_name} 님의 새 주문이 도착했어요.`);}else{const newlyApproved=newOrders.find(o=>o.status==='approved'&&oldOrders.find(old=>old.id===o.id&&old.status==='pending'));if(newlyApproved)toast(newlyApproved.user_id===null?'주문이 승인됐어요. 빵을 받아주세요.':`주문이 승인됐어요. ${orderDice(newlyApproved)?`주사위 ${orderDice(newlyApproved)}개가 도착했어요!`:'음료 구매에는 주사위가 지급되지 않아요.'}`);}if(before!==snapshot())pendingRender=true;if(pendingRender&&safeToRender()){render();pendingRender=false;}}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;render();toast('다시 로그인해 주세요.','error');}}finally{polling=false;}},4000);
-async function boot(){try{await refresh();render();}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;await refresh();render();}else document.querySelector('#app').innerHTML=`<div class="connection-error">${brand()}<h1>빵집에 연결하고 있어요</h1><p>잠시 후 다시 연결해 주세요.<br>${esc(error.message)}</p><button class="primary-button" data-action="retry">다시 연결하기 ${icon('arrow')}</button></div>`;}}
+setInterval(async()=>{if(polling||state.rolling||state.leveling||document.hidden)return;polling=true;try{const before=snapshot();const oldOrders=isAdmin?state.staffData?.orders||[]:state.orders,oldRewards=state.staffData?.reward_requests||[];await refresh();const newOrders=isAdmin?state.staffData?.orders||[]:state.orders;if(isAdmin){const freshRewards=(state.staffData?.reward_requests||[]).filter(r=>r.status==='pending'&&!oldRewards.some(old=>old.id===r.id&&old.status==='pending'));if(freshRewards.length)toast(`${freshRewards[0].customer_name} 님의 이벤트 지급 요청이 도착했어요.`);const fresh=newOrders.filter(o=>o.status==='pending'&&!oldOrders.some(old=>old.id===o.id));if(fresh.length)toast(`${fresh[0].customer_name} 님의 새 주문이 도착했어요.`);}else{const newlyApproved=newOrders.find(o=>o.status==='approved'&&oldOrders.find(old=>old.id===o.id&&old.status==='pending'));if(newlyApproved)toast(newlyApproved.user_id===null?'주문이 승인됐어요. 빵을 받아주세요.':`주문이 승인됐어요. ${orderDice(newlyApproved)?`주사위 ${orderDice(newlyApproved)}개가 도착했어요!`:'음료 구매에는 주사위가 지급되지 않아요.'}`);}if(before!==snapshot())pendingRender=true;if(pendingRender&&safeToRender()){render();pendingRender=false;}}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;resetPickup();render();toast('다시 로그인해 주세요.','error');}}finally{polling=false;}},4000);
+async function boot(){try{await refresh();render();}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;resetPickup();await refresh();render();}else document.querySelector('#app').innerHTML=`<div class="connection-error">${brand()}<h1>빵집에 연결하고 있어요</h1><p>잠시 후 다시 연결해 주세요.<br>${esc(error.message)}</p><button class="primary-button" data-action="retry">다시 연결하기 ${icon('arrow')}</button></div>`;}}
 boot();

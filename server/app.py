@@ -17,6 +17,9 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from .db import Database
 from .catalog import PRODUCT_IDS, PRODUCT_UNITS, PRODUCT_PHOTOS, MILK_PRODUCT_ID, SOYMILK_PRODUCT_ID, DRINK_PRODUCT_IDS, REWARD_PRODUCT_IDS, dice_quantity, sync_catalog
 from .game import DICE, MILESTONES, public_dice, preorder_kind
+from .badges import BADGE_ICONS, catalog as badge_catalog, award as award_badge, award_milestone as award_milestone_badges, initialize as initialize_badges, profile_catalog as user_badge_catalog, equipped as equipped_badge
+from .titles import TITLE_STYLES, catalog as title_catalog, award as award_title, award_milestone as award_milestone_titles, profile_catalog as user_title_catalog, equipped as equipped_title
+from .achievements import initialize as initialize_achievements, reconcile as reconcile_achievements, purchase_totals, progress as achievement_progress
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_CHARACTER_LEVEL = 5
@@ -64,10 +67,24 @@ def profile_rows(tx, rows, user_id=None):
     manual_glasses = {item['user_id'] for item in tx.all(
         "SELECT DISTINCT user_id FROM manual_event_grants WHERE gift_key='sunglasses'" +
         (' AND user_id=?' if user_id is not None else ''), args)}
+    definitions=badge_catalog(tx)
+    earned={}
+    for item in tx.all('SELECT user_id,badge_id,earned_at FROM user_badges'+suffix,args):
+        earned.setdefault(item['user_id'],{})[item['badge_id']]=item
+    title_definitions=title_catalog(tx)
+    earned_titles,achievements={},{}
+    for item in tx.all('SELECT user_id,title_id,earned_at FROM user_titles'+suffix,args):
+        earned_titles.setdefault(item['user_id'],{})[item['title_id']]=item
+    for item in tx.all('SELECT user_id,achievement_key,scope,earned_at FROM user_achievements'+suffix,args):
+        achievements.setdefault(item['user_id'],[]).append(item)
+    totals=purchase_totals(tx,user_id)
     return [{**row, "unlocked_hairpins": owned.get(row["id"], ["none"]),
              "dice": sorted(wallets.get(row['id'], []), key=lambda d: list(DICE).index(d['kind'])),
              "claimed_milestones": sorted(claims.get(row['id'], [])),
-             "manual_sunglasses": row['id'] in manual_glasses} for row in rows]
+             "manual_sunglasses": row['id'] in manual_glasses,
+             "badge_catalog":definitions,"earned_badges":earned.get(row['id'],{}),
+             "title_catalog":title_definitions,"earned_titles":earned_titles.get(row['id'],{}),
+             "achievements":achievement_progress(totals.get(row['id'],{}),achievements.get(row['id'],[]))} for row in rows]
 
 
 def has_sunglasses(user):
@@ -91,7 +108,7 @@ def profile_info(row):
         avatar["hairpin"] = "none"
     if avatar['glasses'] == 'sunglasses' and not has_sunglasses(row):
         avatar['glasses'] = 'none'
-    return {"avatar": avatar, "profile_customized": bool(stored)}
+    return {"avatar": avatar, "profile_customized": bool(stored), 'equipped_badge':equipped_badge(row), 'equipped_title':equipped_title(row)}
 
 
 def validate_avatar(value):
@@ -180,6 +197,9 @@ def public_user(row):
     user['dice'] = row.get('dice', [])
     user['claimed_milestones'] = row.get('claimed_milestones', [])
     user['sunglasses_unlocked'] = has_sunglasses(row)
+    user['badges'] = user_badge_catalog(row)
+    user['titles'] = user_title_catalog(row)
+    user['achievements'] = row.get('achievements',[])
     return user
 
 
@@ -285,7 +305,7 @@ def reward_history(tx, user_id=None):
 
 
 def user_by_id(tx, user_id, buyer=False):
-    user = tx.one("SELECT u.*,p.appearance FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.id = ?", (user_id,))
+    user = tx.one("SELECT u.*,p.appearance,p.badge_id,p.title_id FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.id = ?", (user_id,))
     check(user is not None and (not buyer or user["role"] == "buyer"), "구매자 계정을 찾을 수 없습니다.", 404)
     return profile_rows(tx, [user], user_id)[0]
 
@@ -457,6 +477,7 @@ def approve_order(tx, order):
         grant_dice(tx, order['user_id'], *order_dice(order))
     if order['reservation_id']:
         tx.execute("UPDATE reservations SET status = 'approved' WHERE id = ?", (order['reservation_id'],))
+    reconcile_achievements(tx,now())
     return order_data(tx, order['id'])
 
 
@@ -475,6 +496,8 @@ def insert_order(tx, buyer, items, order_type, actor, approved=False, reservatio
     if approved and buyer['id'] is not None:
         grant_dice(tx, buyer['id'], *order_dice({'items': items, 'type': order_type,
                    'total': sum(i['price'] * i['quantity'] for i in items)}))
+    if approved:
+        reconcile_achievements(tx,stamp)
     return order_data(tx, order_id)
 
 
@@ -542,6 +565,8 @@ class Application:
                 tx.execute("INSERT INTO settings(key,value) VALUES('typed_dice_v1','1')")
             tx.execute("INSERT INTO event_supplies(key,name,stock) VALUES('oatmeal','오트밀 미니바이트',?) ON CONFLICT(key) DO NOTHING",
                        (40 if self.demo else 0,))
+            initialize_badges(tx,now())
+            initialize_achievements(tx,now())
 
     def seed(self):
         with self.db.transaction(write=True) as tx:
@@ -595,7 +620,7 @@ class Application:
         check(len(token) >= 32, "로그인이 만료되었습니다. 다시 로그인해 주세요.", 401)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         with self.db.transaction() as tx:
-            row = tx.one("SELECT u.*,p.appearance FROM sessions s JOIN users u ON u.id = s.user_id LEFT JOIN user_profiles p ON p.user_id=u.id WHERE s.token_hash = ? AND s.expires_at > ?", (token_hash, now()))
+            row = tx.one("SELECT u.*,p.appearance,p.badge_id,p.title_id FROM sessions s JOIN users u ON u.id = s.user_id LEFT JOIN user_profiles p ON p.user_id=u.id WHERE s.token_hash = ? AND s.expires_at > ?", (token_hash, now()))
             if row is not None:
                 row = profile_rows(tx, [row], row["id"])[0]
         check(row is not None, "로그인이 만료되었습니다. 다시 로그인해 주세요.", 401)
@@ -674,18 +699,26 @@ class Application:
                 result['pickup_defaults'] = {'name':user['name'],'phone':user['phone']}
             return result
         if method == "POST" and path == "/api/profile":
-            check(set(body) == {"avatar"}, "저장할 캐릭터 꾸미기 정보만 보내 주세요.")
+            check('avatar' in body and set(body)<={'avatar','badge_id','title_id'}, "저장할 캐릭터·배지·칭호 정보만 보내 주세요.")
             avatar = validate_avatar(body["avatar"])
             with self.db.transaction(write=True) as tx:
                 current = user_by_id(tx, user["id"])
+                selected=body.get('badge_id',current.get('badge_id'))
+                check(selected is None or isinstance(selected,str), '착용할 배지를 선택해 주세요.')
+                check(selected is None or selected in current['earned_badges'], '이 배지를 먼저 획득해 주세요.',403)
+                selected_title=body.get('title_id',current.get('title_id'))
+                check(selected_title is None or isinstance(selected_title,str), '착용할 칭호를 선택해 주세요.')
+                check(selected_title is None or selected_title in current['earned_titles'], '이 칭호를 먼저 획득해 주세요.',403)
                 check(avatar["hairpin"] in current["unlocked_hairpins"], "이 빵의 구매가 승인되면 머리핀을 고를 수 있어요.", 403)
                 check(avatar['glasses'] != 'sunglasses' or has_sunglasses(current),
                       '15점 선글라스 보상을 받은 뒤 착용할 수 있어요.', 403)
                 appearance = json.dumps(avatar, separators=(",", ":"))
-                tx.execute("INSERT INTO user_profiles(user_id,appearance,updated_at) VALUES(?,?,?) "
-                           "ON CONFLICT(user_id) DO UPDATE SET appearance=excluded.appearance,updated_at=excluded.updated_at",
-                           (user["id"], appearance, now()))
+                tx.execute("INSERT INTO user_profiles(user_id,appearance,badge_id,title_id,updated_at) VALUES(?,?,?,?,?) "
+                           "ON CONFLICT(user_id) DO UPDATE SET appearance=excluded.appearance,badge_id=excluded.badge_id,title_id=excluded.title_id,updated_at=excluded.updated_at",
+                           (user["id"], appearance, selected, selected_title, now()))
                 current["appearance"] = appearance
+                current['badge_id'] = selected
+                current['title_id'] = selected_title
                 return {"user": public_user(current)}
         if method == "POST" and path == "/api/auth/logout":
             with self.db.transaction(write=True) as tx:
@@ -751,7 +784,7 @@ class Application:
                 return idempotent(tx, user, "roll", body, roll)
         if method == "GET" and path == "/api/leaderboard":
             with self.db.transaction() as tx:
-                rows = profile_rows(tx, tx.all("SELECT u.id,u.name,u.score,p.appearance FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.role = 'buyer' ORDER BY u.score DESC,u.id ASC"))
+                rows = profile_rows(tx, tx.all("SELECT u.id,u.name,u.score,p.appearance,p.badge_id,p.title_id FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.role = 'buyer' ORDER BY u.score DESC,u.id ASC"))
                 entries = [{"rank": index + 1, "id": row["id"], "name": row["name"], "score": row["score"],
                             **profile_info(row), "is_me": row["id"] == user["id"]} for index, row in enumerate(rows)]
                 position = next(index for index, row in enumerate(entries) if row["is_me"])
@@ -815,6 +848,8 @@ class Application:
                     tx.execute("UPDATE users SET rewards_claimed = rewards_claimed + 1 WHERE id = ?", (user["id"],))
                     result = tx.one('SELECT id,product_id,product_name,threshold,kind,created_at FROM milestone_claims WHERE id=?', (reward_id,))
                     result['fulfillment'] = create_reward_request(tx,current,kind,selected,milestone_id=reward_id) if kind!='sunglasses' else None
+                    award_milestone_badges(tx,tx.one('SELECT * FROM milestone_claims WHERE id=?',(reward_id,)))
+                    award_milestone_titles(tx,tx.one('SELECT * FROM milestone_claims WHERE id=?',(reward_id,)))
                     return {"reward": result, "user": public_user(user_by_id(tx, user["id"]))}
                 return idempotent(tx, user, "reward", body, reward)
         raise APIError(404, "요청한 API를 찾을 수 없습니다.")
@@ -830,13 +865,71 @@ class Application:
                         "event_supplies": tx.all('SELECT * FROM event_supplies ORDER BY key'),
                         'reward_requests': reward_requests(tx),
                         'manual_grants': tx.all('SELECT * FROM manual_event_grants ORDER BY id DESC LIMIT 300'),
+                        'badges': badge_catalog(tx),
+                        'titles': title_catalog(tx),
+                        'title_grants': tx.all("SELECT t.id,t.user_id,t.title_id,t.reason,t.earned_at AS created_at,d.name AS item_name,u.name AS customer_name,s.name AS staff_name "
+                                               "FROM user_titles t JOIN titles d ON d.id=t.title_id JOIN users u ON u.id=t.user_id "
+                                               "JOIN users s ON s.id=t.granted_by WHERE t.source='manual' ORDER BY t.id DESC LIMIT 300"),
+                        'badge_grants': tx.all("SELECT b.id,b.user_id,b.badge_id,b.reason,b.earned_at AS created_at,d.name AS item_name,u.name AS customer_name,s.name AS staff_name "
+                                               "FROM user_badges b JOIN badges d ON d.id=b.badge_id JOIN users u ON u.id=b.user_id "
+                                               "JOIN users s ON s.id=b.granted_by WHERE b.source='manual' ORDER BY b.id DESC LIMIT 300"),
                         "reservations": all_reservations(tx),
-                        "users": [{**public_user(row),'phone':row['phone']} for row in profile_rows(tx, tx.all("SELECT u.*,p.appearance FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.role = 'buyer' ORDER BY u.name,u.id"))],
+                        "users": [{**public_user(row),'phone':row['phone']} for row in profile_rows(tx, tx.all("SELECT u.*,p.appearance,p.badge_id,p.title_id FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.role = 'buyer' ORDER BY u.name,u.id"))],
                         "inventory_logs": tx.all("SELECT * FROM inventory_logs ORDER BY id DESC LIMIT 300"),
                         "events": tx.all("SELECT * FROM events ORDER BY id DESC LIMIT 300"),
                         "memos": tx.all("SELECT * FROM memos ORDER BY id DESC LIMIT 100"),
                         "schedule": tx.all("SELECT * FROM schedule ORDER BY id"),
                         "rewards": reward_history(tx)}
+        if method == 'POST' and path == '/api/staff/badges':
+            with self.db.transaction(write=True) as tx:
+                def create_badge():
+                    check(set(body) <= {'name','description','icon','request_id'}, '배지 이름·획득 방법·그림만 입력해 주세요.')
+                    name=string(body.get('name'),'배지 이름',maximum=40)
+                    description=string(body.get('description'),'배지 획득 방법',maximum=240)
+                    icon=body.get('icon')
+                    check(icon in BADGE_ICONS, '배지 그림을 선택해 주세요.')
+                    badge_id='custom_'+secrets.token_hex(12)
+                    tx.execute("INSERT INTO badges(id,name,description,icon,rule,created_at,created_by) VALUES(?,?,?,?,'manual',?,?)",
+                               (badge_id,name,description,icon,now(),user['id']))
+                    return {'badge':next(b for b in badge_catalog(tx) if b['id']==badge_id)}
+                return idempotent(tx,user,'badge-create',body,create_badge)
+        if method == 'POST' and path == '/api/staff/badge-grants':
+            with self.db.transaction(write=True) as tx:
+                def grant_badge():
+                    check(set(body) <= {'user_id','badge_id','reason','request_id'}, '배지는 등록된 계정에만 지급할 수 있습니다.')
+                    buyer=user_by_id(tx,integer(body.get('user_id'),'구매자 번호',maximum=1_000_000),buyer=True)
+                    badge_id=string(body.get('badge_id'),'배지',maximum=80)
+                    check(any(b['id']==badge_id for b in buyer['badge_catalog']), '배지를 찾을 수 없습니다.',404)
+                    check(badge_id not in buyer['earned_badges'], '이미 보유한 배지입니다.',409)
+                    reason=string(body.get('reason'),'지급 사유',maximum=200)
+                    grant=award_badge(tx,buyer['id'],badge_id,now(),staff_id=user['id'],reason=reason)
+                    return {'grant':grant,'user':public_user(user_by_id(tx,buyer['id']))}
+                return idempotent(tx,user,'badge-grant',body,grant_badge)
+        if method == 'POST' and path == '/api/staff/titles':
+            with self.db.transaction(write=True) as tx:
+                def create_title():
+                    check(set(body)<={'name','description','style','request_id'}, '칭호 이름·획득 방법·스타일만 입력해 주세요.')
+                    name=string(body.get('name'),'칭호 이름',maximum=40)
+                    description=string(body.get('description'),'칭호 획득 방법',maximum=240)
+                    style=body.get('style')
+                    check(style in TITLE_STYLES,'칭호 스타일을 선택해 주세요.')
+                    title_id='custom_'+secrets.token_hex(12)
+                    tx.execute("INSERT INTO titles(id,name,description,style,rule,created_at,created_by) VALUES(?,?,?,?,'manual',?,?)",
+                               (title_id,name,description,style,now(),user['id']))
+                    return {'title':next(t for t in title_catalog(tx) if t['id']==title_id)}
+                return idempotent(tx,user,'title-create',body,create_title)
+        if method == 'POST' and path == '/api/staff/title-grants':
+            with self.db.transaction(write=True) as tx:
+                def grant_title():
+                    check(set(body)<={'user_id','title_id','reason','request_id'}, '칭호는 등록된 계정에만 지급할 수 있습니다.')
+                    buyer=user_by_id(tx,integer(body.get('user_id'),'구매자 번호',maximum=1_000_000),buyer=True)
+                    title_id=string(body.get('title_id'),'칭호',maximum=80)
+                    check(any(t['id']==title_id for t in buyer['title_catalog']),'칭호를 찾을 수 없습니다.',404)
+                    check(title_id not in buyer['earned_titles'],'이미 보유한 칭호입니다.',409)
+                    reason=string(body.get('reason'),'지급 사유',maximum=200)
+                    grant=award_title(tx,buyer['id'],title_id,now(),staff_id=user['id'],reason=reason)
+                    return {'grant':grant,'user':public_user(user_by_id(tx,buyer['id']))}
+                return idempotent(tx,user,'title-grant',body,grant_title)
         if method == 'POST' and path == '/api/staff/event-supplies':
             with self.db.transaction(write=True) as tx:
                 def adjust_supply():
@@ -871,6 +964,7 @@ class Application:
                     tx.execute("UPDATE orders SET status = 'cancelled', cancelled_at = ? WHERE id = ?", (now(), order["id"]))
                     if order["reservation_id"]:
                         tx.execute("UPDATE reservations SET status = 'reserved', user_id = NULL, order_id = NULL WHERE id = ?", (order["reservation_id"],))
+                    reconcile_achievements(tx,now())
                 return {"order": order_data(tx, order["id"])}
         if method == "POST" and path == "/api/staff/inventory":
             with self.db.transaction(write=True) as tx:
