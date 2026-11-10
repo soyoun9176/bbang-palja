@@ -4,7 +4,7 @@ import {profileAvatar, profileEditor, profileHairpins, profileBadges, profileTit
 const isAdmin = /^\/admin(?:\/|$)/.test(location.pathname);
 const tokenKey = `kambo.${isAdmin ? 'staff' : 'buyer'}.token`;
 function loadGuestReceipts(){try{const saved=JSON.parse(localStorage.getItem('kambo.guest.orders')||'[]');return Array.isArray(saved)?saved.filter(r=>Number.isSafeInteger(r.id)&&r.id>0&&typeof r.token==='string'):[];}catch{return [];}}
-const state = {isAdmin,token:localStorage.getItem(tokenKey),user:null,config:{},products:[],orders:[],rewards:[],rewardRequests:[],leaderboard:null,staffData:null,route:location.hash.slice(1)||(isAdmin?'queue':'shop'),cart:{},reservation:null,pickupDefaults:null,pickupDraft:null,pickupUserId:null,authMode:'login',rolling:false,leveling:false,lastRoll:null,selectedDice:null,guestName:sessionStorage.getItem('kambo.guest.name')||'',guestReceipts:isAdmin?[]:loadGuestReceipts()};
+const state = {isAdmin,token:localStorage.getItem(tokenKey),user:null,config:{},products:[],orders:[],rewards:[],rewardRequests:[],eventNotices:[],leaderboard:null,staffData:null,route:location.hash.slice(1)||(isAdmin?'queue':'shop'),cart:{},reservation:null,pickupDefaults:null,pickupDraft:null,pickupUserId:null,authMode:'login',rolling:false,leveling:false,lastRoll:null,selectedDice:null,guestName:sessionStorage.getItem('kambo.guest.name')||'',guestReceipts:isAdmin?[]:loadGuestReceipts()};
 function guestPurchase(){return !isAdmin&&!state.user&&['guest','guest-orders'].includes(state.route);}
 const paths={shop:'M3 10h18M5 10v10h14V10M3 10l2-6h14l2 6M9 20v-6h6v6M2 10c0 3 4 3 4 0 0 3 4 3 4 0 0 3 4 3 4 0 0 3 4 3 4 0 0 3 4 3 4 0',bag:'M5 7h14l1 14H4L5 7ZM8 8V6a4 4 0 0 1 8 0v2',dice:'M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3ZM8 8h.01M16 8h.01M12 12h.01M8 16h.01M16 16h.01',trophy:'M8 3h8v7a4 4 0 0 1-8 0V3ZM8 5H4v3a4 4 0 0 0 4 4m8-7h4v3a4 4 0 0 1-4 4M12 14v6M8 21h8',clock:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM12 7v5l3 2',arrow:'M4 12h15m-5-5 5 5-5 5',plus:'M12 5v14M5 12h14',minus:'M5 12h14',x:'m6 6 12 12M18 6 6 18',check:'m5 12 4 4L19 6',info:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM12 11v6M12 7h.01',bread:'M5 11C-1 4 9 0 12 5c5-6 15 1 7 6v9H5v-9ZM9 11v4m6-4v4',user:'M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM4 21v-2a8 8 0 0 1 16 0v2',users:'M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM2 21v-2a7 7 0 0 1 14 0v2M17 4a4 4 0 0 1 0 7m2 4a6 6 0 0 1 3 5',shield:'m12 2 8 3v6c0 6-8 11-8 11S4 17 4 11V5l8-3ZM8 11l3 3 5-6',box:'m3 7 9-4 9 4v11l-9 4-9-4V7Zm0 0 9 4 9-4M12 11v11M7 5l9 4',note:'M5 3h14v13l-5 5H5V3Zm9 18v-5h5M8 8h8M8 12h5',calendar:'M4 5h16v16H4V5ZM8 3v4m8-4v4M4 10h16M8 14h2m4 0h2m-8 3h2',spark:'m12 2 2.5 7.5L22 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5L12 2Z',logout:'M9 3H4v18h5m4-15 6 6-6 6m-5-6h11',chevron:'m9 5 7 7-7 7',heart:'M12 21 3 12C-2 6 6 0 12 6c6-6 14 0 9 6l-9 9Z',search:'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm5 12 6 6',milk:'M9 3h6v4l3 4v10H6V11l3-4V3Zm0 4h6M6 12h12',upload:'M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6',edit:'m15 4 5 5M4 20l5-1L21 7l-5-5L4 14v6Z'};
 function icon(name){return `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name]||paths.bread}"/></svg>`}
@@ -43,6 +43,10 @@ function subnav(items) { return `<nav class="subnav" aria-label="${['dice','rank
 function purchaseHeading() { return guestPurchase()?`${pageHeading('빵 구매','계정 없이 이름만 입력하고 주문하세요.')}${subnav([['guest','현장 구매'],['guest-orders','주문 내역']])}`:`${pageHeading('빵 구매','예약한 빵 수령 또는 현장 구매를 선택해 주세요.')}${subnav([['shop','현장 구매'],['pickup','예약한 빵 수령'],['orders','주문 내역']])}`; }
 function eventHeading() { return pageHeading('이벤트 참여','주사위를 굴리고, 최고의 연금술사에 도전해요.'); }
 function prototypeNotice() { return window.KAMBO_CONFIG?.prototype||state.config.demo?'<p class="prototype-note">가안 테스트 · 샘플 데이터입니다.</p>':''; }
+function renderEventNotices(notices=[],{manage=false}={}) {
+  if(!notices.length)return '';
+  return `<section class="event-notice-board" aria-label="이벤트 알림판" aria-live="polite"><div class="notice-board-label">${icon('spark')} 이벤트 소식</div>${notices.slice(0,2).map(n=>`<article class="event-notice ${n.kind==='announcement'?'is-announcement':''}">${profileAvatar(n.author)}<div class="event-notice-copy"><div class="event-notice-author"><strong>${esc(n.author.name)}</strong>${profileTitle(n.author)}${n.kind==='announcement'?'<span class="notice-kind">공지</span>':''}</div><p>${esc(n.content)}</p></div>${manage?`<button type="button" class="icon-button notice-delete" data-action="admin-notice-delete" data-id="${Number(n.id)}" aria-label="${esc(n.content)} 알림 삭제">${icon('x')}</button>`:''}</article>`).join('')}</section>`;
+}
 function cartCount(){return Object.values(state.cart).reduce((s,v)=>s+v,0);}
 function cartTotal(){return state.products.reduce((s,p)=>s+p.price*(state.cart[p.id]||0),0);}
 function productImage(product){const name=String(product.image||'salt-bread').replace(/[^a-z-]/g,'');return `/assets/${name}.svg`;}
@@ -205,7 +209,7 @@ function openAchievement(id){
 function renderEvent() {
   const board=state.leaderboard;
   const rankings=board?`<section class="content-card"><h2>최고의 연금술사 TOP 3</h2><p class="form-hint">양일 누적 점수로 최종 1·2·3등을 선정합니다.</p><ol class="leaders">${board.leaders.map(p=>`<li class="${p.is_me?'me':''}"><span class="rank-number">${p.rank}위</span><strong class="profile-name">${profileAvatar(p)}<span class="profile-identity">${esc(p.name)}${p.is_me?' (나)':''}${profileTitle(p)}</span></strong><b>${money(p.score)}점</b></li>`).join('')}</ol><p class="form-hint">내 순위 ${board.me?.rank||'-'}위 · 총 ${board.total_participants}명 참여</p></section>`:'<section class="content-card"><h2>점수 순위</h2><p class="form-hint">순위를 불러오는 중입니다.</p></section>';
-  return `${eventHeading()}<div class="event-layout"><div class="event-personal">${renderRewardRequests()}${renderLevelCard()}${renderRewardHistory()}</div><div class="event-rankings">${rankings}${renderAchievements()}</div></div>`;
+  return `${renderEventNotices(state.eventNotices)}${eventHeading()}<div class="event-layout"><div class="event-personal">${renderRewardRequests()}${renderLevelCard()}${renderRewardHistory()}</div><div class="event-rankings">${rankings}${renderAchievements()}</div></div>`;
 }
 function render() {
   const previousTrackWidth=document.querySelector('.milestone-track-bar > span')?.style.width;
@@ -214,7 +218,7 @@ function render() {
   if(isAdmin)content=state.user?renderAdmin():renderStaffLogin();
   else content=state.user?({shop:renderShop,pickup:renderPickup,orders:renderOrders,ranking:renderEvent}[state.route]||renderShop)():guestPurchase()?(state.route==='guest-orders'?renderOrders():renderShop()):renderBuyerLogin();
   const expanded=[...document.querySelectorAll('#app details[open]')].map(node=>node.id).filter(Boolean);
-  document.querySelector('#app').innerHTML=shell(prototypeNotice()+content);
+  document.querySelector('#app').innerHTML=shell((!isAdmin&&state.user&&state.route==='ranking'?'':prototypeNotice())+content);
   const trackFill=document.querySelector('.milestone-track-bar > span');
   if(previousTrackWidth&&trackFill?.animate&&previousTrackWidth!==trackFill.style.width&&!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches){
     trackFill.animate([{width:previousTrackWidth},{width:trackFill.style.width}],{duration:650,easing:'ease-out'});
@@ -232,7 +236,7 @@ async function refresh(){
     if(token){
       const user=results[2].user;
       if((isAdmin&&user.role!=='staff')||(!isAdmin&&user.role!=='buyer')){if(state.token===token){localStorage.removeItem(tokenKey);state.token=null;state.user=null;resetPickup();}return;}
-      extra=isAdmin?await get('/api/staff/dashboard'):await Promise.all([get('/api/orders'),get('/api/rewards'),get('/api/leaderboard')]);
+      extra=isAdmin?await get('/api/staff/dashboard'):await Promise.all([get('/api/orders'),get('/api/rewards'),get('/api/leaderboard'),get('/api/event-notices')]);
     }else if(guest){
       guestResults=await Promise.all(state.guestReceipts.map(async receipt=>{
         try{return {receipt,order:(await api(`/api/guest/orders/${receipt.id}`,{token:receipt.token})).order};}
@@ -240,13 +244,13 @@ async function refresh(){
       }));
     }
     if(state.token!==token||version!==refreshVersion||guest!==guestPurchase())return;
-    state.config=results[0];state.products=results[1].products;
+    state.config=results[0];state.products=results[1].products;state.eventNotices=token&&!isAdmin?extra[3].notices:[];
     if(token){state.user=results[2].user;if(isAdmin)state.staffData=extra;else{if(state.pickupUserId!==state.user.id){resetPickup();state.pickupUserId=state.user.id;}state.pickupDefaults=results[2].pickup_defaults||{name:state.user.name,phone:''};state.orders=extra[0].orders;state.rewards=extra[1].rewards;state.rewardRequests=extra[1].requests||[];state.leaderboard=extra[2];}syncProfileHairpins();syncProfileBadges();syncProfileTitles();}
     else if(guestResults){state.orders=guestResults.filter(r=>r.order).map(r=>r.order).sort((a,b)=>b.id-a.id);if(guestResults.some(r=>r.missing)){state.guestReceipts=guestResults.filter(r=>!r.missing).map(r=>r.receipt);localStorage.setItem('kambo.guest.orders',JSON.stringify(state.guestReceipts));}}
   }catch(error){if(token!==state.token||version!==refreshVersion)return;throw error;}
 }
 
-initAdmin({state,api,icon,esc,money,time,toast,modal,closeModal,render,refresh,requestId,submitButton,profileAvatar,profileTitle,titleStyles,badgePicture,badgeIcons,productPhoto,normalizePhone});
+initAdmin({state,api,icon,esc,money,time,toast,modal,closeModal,render,refresh,requestId,submitButton,profileAvatar,profileTitle,titleStyles,badgePicture,badgeIcons,productPhoto,normalizePhone,renderEventNotices});
 
 function normalizePhone(value){
   if(typeof value!=='string'||/[^0-9-]/.test(value)||!/^(?:010[0-9]{8}|010-[0-9]{4}-[0-9]{4})$/.test(value))throw new Error('전화번호는 01012345678 또는 010-1234-5678 형식으로 입력해 주세요. 숫자와 정해진 위치의 대시만 사용할 수 있어요.');
@@ -464,7 +468,7 @@ document.addEventListener('submit',async event=>{const form=event.target;event.p
 document.addEventListener('keydown',event=>{if(!document.querySelector('.modal'))return;if(event.key==='Escape'&&!profileSaving)closeModal();if(event.key==='Tab'){const focusables=[...document.querySelectorAll('.modal button:not(:disabled),.modal a[href],.modal input:not([disabled]),.modal select,.modal textarea')].filter(n=>n.offsetParent!==null);const first=focusables[0],last=focusables.at(-1);if(event.shiftKey&&document.activeElement===first){last?.focus();event.preventDefault();}else if(!event.shiftKey&&document.activeElement===last){first?.focus();event.preventDefault();}}});
 window.addEventListener('hashchange',()=>{state.route=location.hash.slice(1)||(isAdmin?'queue':'shop');render();});
 let polling=false,pendingRender=false;
-function snapshot(){return JSON.stringify([state.user,state.products,state.orders,state.staffData,state.leaderboard,state.rewards,state.rewardRequests]);}
+function snapshot(){return JSON.stringify([state.user,state.products,state.orders,state.staffData,state.leaderboard,state.rewards,state.rewardRequests,state.eventNotices]);}
 function safeToRender(){return !document.querySelector('.modal')&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)&&!state.rolling&&!state.leveling;}
 setInterval(async()=>{if(polling||state.rolling||state.leveling||document.hidden)return;polling=true;try{const before=snapshot();const oldOrders=isAdmin?state.staffData?.orders||[]:state.orders,oldRewards=state.staffData?.reward_requests||[];await refresh();const newOrders=isAdmin?state.staffData?.orders||[]:state.orders;if(isAdmin){const freshRewards=(state.staffData?.reward_requests||[]).filter(r=>r.status==='pending'&&!oldRewards.some(old=>old.id===r.id&&old.status==='pending'));if(freshRewards.length)toast(`${freshRewards[0].customer_name} 님의 이벤트 지급 요청이 도착했어요.`);const fresh=newOrders.filter(o=>o.status==='pending'&&!oldOrders.some(old=>old.id===o.id));if(fresh.length)toast(`${fresh[0].customer_name} 님의 새 주문이 도착했어요.`);}else{const newlyApproved=newOrders.find(o=>o.status==='approved'&&oldOrders.find(old=>old.id===o.id&&old.status==='pending'));if(newlyApproved)toast(newlyApproved.user_id===null?'주문이 승인됐어요. 빵을 받아주세요.':`주문이 승인됐어요. ${orderDice(newlyApproved)?`주사위 ${orderDice(newlyApproved)}개가 도착했어요!`:'음료 구매에는 주사위가 지급되지 않아요.'}`);}if(before!==snapshot())pendingRender=true;if(pendingRender&&safeToRender()){render();pendingRender=false;}}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;resetPickup();render();toast('다시 로그인해 주세요.','error');}}finally{polling=false;}},4000);
 async function boot(){try{await refresh();render();}catch(error){if(error.status===401){localStorage.removeItem(tokenKey);state.token=null;state.user=null;resetPickup();await refresh();render();}else document.querySelector('#app').innerHTML=`<div class="connection-error">${brand()}<h1>빵집에 연결하고 있어요</h1><p>잠시 후 다시 연결해 주세요.<br>${esc(error.message)}</p><button class="primary-button" data-action="retry">다시 연결하기 ${icon('arrow')}</button></div>`;}}

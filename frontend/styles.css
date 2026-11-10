@@ -182,3 +182,22 @@
 @media(max-width:520px){.manual-product-grid{grid-template-columns:1fr}.manual-sale-panel .admin-subtabs .tab-chip{flex:1;font-size:12px;padding-left:8px;padding-right:8px}.product-row>.product-photo{flex-basis:64px;width:64px;height:64px}.manual-sale-panel button[type=submit]{max-width:none}}
 @media(max-width:360px){.product-row>.product-photo{flex-basis:52px;width:52px;height:52px}}
 .manual-preorder-product{display:flex;align-items:center;gap:10px;min-width:0}.manual-preorder-product>.product-photo{width:48px;height:48px;flex:0 0 48px}
+
+/* Shared event board: exactly the server's current zero, one or two notices. */
+.event-notice-board{padding:14px 18px;margin:0 0 24px;border:1px solid #c7b1e2;border-radius:14px;background:linear-gradient(120deg,#f0e9fa,#faf6e9);box-shadow:0 3px 12px #65507f0a}
+.notice-board-label{display:flex;align-items:center;gap:6px;margin-bottom:8px;color:#6b4c85;font-size:11px;font-weight:800;letter-spacing:.04em}
+.notice-board-label>.icon{width:14px;height:14px}
+.event-notice{display:flex;align-items:center;gap:12px;padding:10px 0;min-width:0}
+.event-notice+.event-notice{border-top:1px solid #d9cbe5}
+.event-notice>.profile-avatar,.event-notice>.profile-badged-avatar>.profile-avatar{width:44px;height:44px}
+.event-notice-copy{flex:1;min-width:0}
+.event-notice-author{display:flex;align-items:center;flex-wrap:wrap;gap:5px 8px;min-width:0}
+.event-notice-author>strong{font-size:14px;overflow-wrap:anywhere}
+.event-notice-author .profile-title{font-size:10px}
+.event-notice-copy p{font-size:13px;line-height:1.55;margin:5px 0 0;overflow-wrap:anywhere;white-space:pre-line}
+.notice-kind{padding:2px 6px;border-radius:5px;background:#65507f;color:white;font-size:10px;font-weight:700}
+.notice-delete{flex-shrink:0;background:#ffffffa8;align-self:center}
+.notice-management{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:start}
+.notice-management h2{font-size:18px;margin:0 0 14px}
+.notice-preview .event-notice-board{margin-bottom:0}
+@media(max-width:800px){.notice-management{grid-template-columns:1fr}.event-notice-board{padding:12px 14px}.event-notice{gap:10px}.event-notice-author>strong{font-size:13px}.event-notice-author .profile-title{font-size:9px}.event-notice-copy p{font-size:12px}}

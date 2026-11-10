@@ -42,6 +42,7 @@ function fixture({guest = false, storage = new Map(), admin=false} = {}) {
     if (path === '/api/auth/me') return response({user});
     if (path === '/api/orders') return response({orders: [{id: 1, status: remote.approved ? 'approved' : 'pending', quantity: 1}]});
     if (path === '/api/rewards') return response({rewards: []});
+    if (path === '/api/event-notices') return response({notices: remote.notices || []});
     if (path === '/api/leaderboard') return response({leaders: [{name: '다른구매자', score: remote.score}], neighbors: [], me: {rank: 1}, total_participants: 2});
     throw new Error(`Unexpected route: ${path}`);
   };
@@ -794,6 +795,7 @@ test('milk dice outcomes show milk instead of a zero-point die or automatic mile
 });
 
 const adminProductPhoto=fixture().run('productPhoto');
+const sharedEventNotices=fixture().run('renderEventNotices');
 function adminFixture() {
   const requests=[],messages=[];
   const listeners={};
@@ -809,7 +811,7 @@ function adminFixture() {
   }};
   let identity=0;
   context.shared={state,esc:String,icon:()=>'',money:String,time:()=>'',normalizePhone:value=>value,requestId:()=>`request-${++identity}`,
-    productPhoto:adminProductPhoto,api:async(path,options)=>{requests.push(JSON.parse(JSON.stringify({path,...options})));return context.respond?context.respond(path,options):{};},
+    productPhoto:adminProductPhoto,renderEventNotices:sharedEventNotices,api:async(path,options)=>{requests.push(JSON.parse(JSON.stringify({path,...options})));return context.respond?context.respond(path,options):{};},
     submitButton(){},refresh:async()=>{},render(){renderCalls++;},toast:message=>messages.push(message),closeModal(){}};
   vm.createContext(context);
   vm.runInContext(profileSource+'\n'+adminSource+'\nshared.profileAvatar=profileAvatar;shared.badgePicture=badgePicture;shared.badgeIcons=badgeIcons;shared.profileTitle=profileTitle;shared.titleStyles=titleStyles;initAdmin(shared);',context);
@@ -1487,4 +1489,56 @@ test('buyer product illustrations keep sold out controls and omit inventory numb
  assert.match(f.root.innerHTML,/product-row sold-out/);assert.match(f.root.innerHTML,/data-action="cart-plus" data-id="102" disabled/);
  assert.doesNotMatch(f.root.innerHTML,/재고 2|남은 수량 2/);
  assert.match(f.run("productPhoto({id:112,name:'우유'})"),/photo-placeholder/);
+});
+
+
+const testNotices=[
+  {id:3,kind:'achievement',content:'원소 수집가 도전과제를 달성했습니다!',author:{id:10,name:'별빵',equipped_title:{name:'원소 수집가',style:'magic'}}},
+  {id:2,kind:'announcement',content:'오늘 이벤트는 오후 6시에 마감됩니다.',author:{name:'관리자'}},
+];
+test('event board hides at zero, shows one or two, and replaces the prototype notice only on event page',async()=>{
+  const f=fixture();await f.run('refresh()');
+  f.run("state.route='ranking';window.KAMBO_CONFIG.prototype=true;renderPage()");
+  assert.doesNotMatch(f.root.innerHTML,/event-notice-board|가안 테스트/);
+  f.context.notices=testNotices;
+  for(const count of [1,2]){
+    f.run(`state.eventNotices=notices.slice(0,${count});renderPage()`);
+    assert.equal((f.root.innerHTML.match(/<article class="event-notice /g)||[]).length,count);
+    assert.ok(f.root.innerHTML.indexOf('event-notice-board')<f.root.innerHTML.indexOf('<h1>이벤트 참여'));
+    assert.match(f.root.innerHTML,/별빵/);assert.match(f.root.innerHTML,/profile-avatar/);assert.match(f.root.innerHTML,/title-magic/);
+    assert.doesNotMatch(f.root.innerHTML,/가안 테스트/);
+  }
+  f.run("state.route='shop';renderPage()");
+  assert.match(f.root.innerHTML,/가안 테스트/);assert.doesNotMatch(f.root.innerHTML,/event-notice-board/);
+});
+test('shared board escapes author, title and content and has no buyer management controls',()=>{
+  const f=fixture();f.context.badNotices=[{id:1,kind:'announcement',content:'<script>alert(1)</script>',author:{name:'<img src=x>',equipped_title:{name:'<b>칭호</b>',style:'gold'}}}];
+  const html=f.run('renderEventNotices(badNotices)');
+  assert.doesNotMatch(html,/<script>|<img src=x>|<b>칭호|admin-notice-delete/);
+  assert.match(html,/&lt;script&gt;/);assert.match(html,/&lt;img src=x&gt;/);assert.match(html,/공지/);
+});
+test('polling updates shared notices without disturbing an open editor and removes the board at zero',async()=>{
+  const f=fixture();await f.run('refresh()');
+  f.run("state.route='ranking'");f.context.document.activeElement={tagName:'TEXTAREA'};
+  f.remote.notices=testNotices;await f.context.poll();
+  assert.equal(f.renders,0);assert.equal(f.run('state.eventNotices.length'),2);
+  f.context.document.activeElement={tagName:'BODY'};await f.context.poll();assert.equal(f.renders,1);
+  f.remote.notices=[];await f.context.poll();assert.equal(f.renders,2);
+  assert.equal(f.run('renderEventNotices(state.eventNotices)'), '');
+});
+test('admin notices have a separate panel with a short announcement form and delete controls',()=>{
+  const f=adminFixture();f.run("eventTab='notices'");
+  let html=f.run('renderAdmin()');assert.match(html,/data-tab="notices"/);assert.match(html,/id="admin-notice-create"/);
+  assert.match(html,/maxlength="160"/);assert.match(html,/공용 관리자 프로필/);assert.match(html,/표시 중인 알림이 없습니다/);
+  f.state.staffData.event_notices=testNotices;html=f.run('renderAdmin()');
+  assert.equal((html.match(/data-action="admin-notice-delete"/g)||[]).length,2);
+  assert.match(html,/별빵/);assert.match(html,/관리자/);assert.doesNotMatch(html,/name="author"|name="user_id"/);
+});
+test('admin announcement submits content and request id, and deletion calls staff endpoint',async()=>{
+  const f=adminFixture();await f.submit({content:'오늘 행사 안내'},'admin-notice-create');
+  assert.equal(f.requests[0].path,'/api/staff/event-notices');
+  assert.deepEqual(f.requests[0].body,{content:'오늘 행사 안내',request_id:'request-1'});
+  f.context.deleteButton={dataset:{id:'3'},disabled:false};
+  await f.run("handleAdminClick('admin-notice-delete',deleteButton)");
+  assert.deepEqual(f.requests[1],{path:'/api/staff/event-notices/3/delete',method:'POST',body:{}});
 });

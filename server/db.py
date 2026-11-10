@@ -190,6 +190,17 @@ CREATE TABLE IF NOT EXISTS user_achievements (
  earned_at TEXT NOT NULL,
  UNIQUE(user_id,achievement_key,scope)
 );
+CREATE TABLE IF NOT EXISTS event_notices (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ kind TEXT NOT NULL CHECK (kind IN ('achievement','announcement')),
+ user_id INTEGER REFERENCES users(id),
+ achievement_id INTEGER UNIQUE REFERENCES user_achievements(id),
+ content TEXT NOT NULL CHECK (length(content) BETWEEN 1 AND 160),
+ created_at TEXT NOT NULL,
+ created_by INTEGER REFERENCES users(id),
+ CHECK ((kind='achievement' AND user_id IS NOT NULL AND achievement_id IS NOT NULL AND created_by IS NULL)
+     OR (kind='announcement' AND user_id IS NULL AND achievement_id IS NULL AND created_by IS NOT NULL))
+);
 CREATE TABLE IF NOT EXISTS user_badges (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id INTEGER NOT NULL REFERENCES users(id),

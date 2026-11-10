@@ -284,9 +284,13 @@ function manualGrantPanel(){
     </form></section>${grantKind==='badge'?badgeManagement():grantKind==='title'?titleManagement():''}
     <section class="manual-grant-history"><h2>임의 지급 기록 · ${history.length}건</h2>${history.length?`<div class="table-wrap"><table><thead><tr><th>번호·시간</th><th>받는 사람</th><th>지급 내용</th><th>사유</th><th>담당자</th></tr></thead><tbody>${history.map(g=>`<tr><td>${g.kind==='badge'?'배지 ':g.kind==='title'?'칭호 ':''}#${g.id}<br>${stamp(g.created_at)}</td><td>${buyerIdentity(g.user_id,g.customer_name)}</td><td>${g.kind==='score'?`${number(g.points)}점`:['badge','title'].includes(g.kind)?`${g.kind==='badge'?'배지':'칭호'} · ${escape(g.item_name)}`:`${escape(g.item_name)} × ${number(g.quantity)}${escape(productList().find(p=>p.id===g.product_id)?.unit||'개')}`}</td><td>${escape(g.reason)}</td><td>${escape(g.staff_name)}</td></tr>`).join('')}</tbody></table></div>`:'<p class="form-hint">아직 임의 지급 기록이 없습니다.</p>'}</section>`;
 }
+function noticePanel() {
+  const notices=list('event_notices');
+  return `<div class="notice-management"><section class="content-card"><h2>공지 추가</h2><p class="form-hint">공용 관리자 프로필로 표시됩니다. 새 소식이 올라오면 최신 2개만 남습니다.</p><form id="admin-notice-create"><div class="field"><label for="notice-content">공지 내용</label><textarea id="notice-content" name="content" rows="3" maxlength="160" placeholder="예: 오늘 이벤트는 오후 6시에 마감됩니다." required></textarea></div><button type="submit" class="primary-button">공지 올리기</button></form></section><section class="notice-preview"><h2>현재 알림 · ${notices.length}/2</h2>${notices.length?helpers.renderEventNotices(notices,{manage:true}):'<p class="form-hint">표시 중인 알림이 없습니다. 구매자 화면에도 알림판이 표시되지 않습니다.</p>'}</section></div>`;
+}
 function eventsPage() {
   const history=list('rewards').filter(r=>!r.fulfillment);
-  return `${heading('이벤트',eventTab==='manual'?'빵·상품·점수·배지·칭호 지급과 담당자 기록을 관리합니다.':'당첨 물품을 전달한 뒤 승인해 주세요.',`<button class="secondary-button" data-action="admin-refresh">새로고침</button>`)}<div class="admin-subtabs"><button class="tab-chip ${eventTab==='requests'?'active':''}" data-action="admin-event-tab" data-tab="requests">물품 지급</button><button class="tab-chip ${eventTab==='instagram'?'active':''}" data-action="admin-event-tab" data-tab="instagram">인스타 인증</button><button class="tab-chip ${eventTab==='manual'?'active':''}" data-action="admin-event-tab" data-tab="manual">임의 지급</button></div>${eventTab==='manual'?manualGrantPanel():eventTab==='instagram'?instagramPanel():`${help('이벤트 지급 방법','구매자가 당첨되면 물품 1개를 확보하고 지급 대기에 표시합니다. 우유 보상은 구매자가 우유·두유 중 재고 있는 품목을 선택한 뒤 접수됩니다. 전달 완료·승인은 재고를 추가 차감하지 않으며, 취소하면 확보했던 재고 1개가 돌아옵니다. 취소 후 재추첨은 하지 않습니다. 선글라스 등 디지털 보상은 자동 지급합니다.')}<div class="admin-subtabs">${[['pending','지급 대기'],['awaiting_choice','음료 선택 중'],['approved','지급 완료'],['cancelled','취소']].map(([key,label])=>`<button class="tab-chip ${eventFilter===key?'active':''}" data-action="admin-event-filter" data-filter="${key}">${label} ${list('reward_requests').filter(r=>r.status===key).length}</button>`).join('')}</div>${searchField('events','admin-event-search','이벤트 요청 검색','이름 · 물품 검색')}<div id="admin-event-results">${eventResults()}</div><details id="reward-history" class="history-section"><summary>이전·자동 지급 기록 · ${history.length}건</summary><div class="table-wrap"><table><thead><tr><th>시간</th><th>구매자</th><th>보상</th></tr></thead><tbody>${history.map(r=>`<tr><td>${stamp(r.created_at)}</td><td>${buyerIdentity(r.user_id,r.customer_name)}</td><td>${escape(r.product_name)}</td></tr>`).join('')}</tbody></table></div></details>`}`;
+  return `${heading('이벤트',eventTab==='notices'?'구매자 이벤트 페이지에 표시되는 소식을 관리합니다.':eventTab==='manual'?'빵·상품·점수·배지·칭호 지급과 담당자 기록을 관리합니다.':'당첨 물품을 전달한 뒤 승인해 주세요.',`<button class="secondary-button" data-action="admin-refresh">새로고침</button>`)}<div class="admin-subtabs"><button class="tab-chip ${eventTab==='requests'?'active':''}" data-action="admin-event-tab" data-tab="requests">물품 지급</button><button class="tab-chip ${eventTab==='instagram'?'active':''}" data-action="admin-event-tab" data-tab="instagram">인스타 인증</button><button class="tab-chip ${eventTab==='manual'?'active':''}" data-action="admin-event-tab" data-tab="manual">임의 지급</button><button class="tab-chip ${eventTab==='notices'?'active':''}" data-action="admin-event-tab" data-tab="notices">알림판</button></div>${eventTab==='notices'?noticePanel():eventTab==='manual'?manualGrantPanel():eventTab==='instagram'?instagramPanel():`${help('이벤트 지급 방법','구매자가 당첨되면 물품 1개를 확보하고 지급 대기에 표시합니다. 우유 보상은 구매자가 우유·두유 중 재고 있는 품목을 선택한 뒤 접수됩니다. 전달 완료·승인은 재고를 추가 차감하지 않으며, 취소하면 확보했던 재고 1개가 돌아옵니다. 취소 후 재추첨은 하지 않습니다. 선글라스 등 디지털 보상은 자동 지급합니다.')}<div class="admin-subtabs">${[['pending','지급 대기'],['awaiting_choice','음료 선택 중'],['approved','지급 완료'],['cancelled','취소']].map(([key,label])=>`<button class="tab-chip ${eventFilter===key?'active':''}" data-action="admin-event-filter" data-filter="${key}">${label} ${list('reward_requests').filter(r=>r.status===key).length}</button>`).join('')}</div>${searchField('events','admin-event-search','이벤트 요청 검색','이름 · 물품 검색')}<div id="admin-event-results">${eventResults()}</div><details id="reward-history" class="history-section"><summary>이전·자동 지급 기록 · ${history.length}건</summary><div class="table-wrap"><table><thead><tr><th>시간</th><th>구매자</th><th>보상</th></tr></thead><tbody>${history.map(r=>`<tr><td>${stamp(r.created_at)}</td><td>${buyerIdentity(r.user_id,r.customer_name)}</td><td>${escape(r.product_name)}</td></tr>`).join('')}</tbody></table></div></details>`}`;
 }
 
 function scheduleDateLabel(value){
@@ -347,6 +351,11 @@ export async function handleAdminClick(action, element) {
   const { state, api, refresh, render, closeModal, toast } = helpers;
   if (action === 'admin-route') { state.route = element.dataset.route; location.hash = state.route; render(); }
   else if(action==='admin-event-tab'){eventTab=element.dataset.tab;render();}
+  else if(action==='admin-notice-delete'){
+    element.disabled=true;
+    try{await api(`/api/staff/event-notices/${Number(element.dataset.id)}/delete`,{method:'POST',body:{}});await refresh();render();toast('알림을 삭제했어요.');}
+    catch(error){element.disabled=false;toast(error.message,'error');}
+  }
   else if(action==='admin-grant-recipient'){
     grantRecipientMode=element.dataset.mode==='guest'?'guest':'account';
     if(grantRecipientMode==='guest'){if(['score','badge','title'].includes(grantKind))grantKind='bread';if(grantGift==='sunglasses')grantGift='oatmeal';}
@@ -431,7 +440,7 @@ function formError(form, error) {
 }
 
 export async function handleAdminSubmit(form) {
-  const accepted = ['admin-title-create','admin-badge-create','admin-manual-grant','admin-event-supply','staff-login','admin-inventory','admin-manual-sale','admin-instagram','admin-memo','admin-preorder-import','admin-cancel-confirm','admin-manual-preorder-complete'];
+  const accepted = ['admin-notice-create','admin-title-create','admin-badge-create','admin-manual-grant','admin-event-supply','staff-login','admin-inventory','admin-manual-sale','admin-instagram','admin-memo','admin-preorder-import','admin-cancel-confirm','admin-manual-preorder-complete'];
   if (!accepted.includes(form.id)) return false;
   const { state, api, submitButton, refresh, render, toast, closeModal } = helpers;
   const values = new FormData(form);
@@ -448,6 +457,9 @@ export async function handleAdminSubmit(form) {
       state.route = 'queue';
       history.replaceState(null,'','#queue');
       message = `${response.user.name}님, 오늘도 잘 부탁드려요.`;
+    } else if(form.id==='admin-notice-create'){
+      await createAction('event-notice-create','/api/staff/event-notices',{content:values.get('content')});
+      message='구매자 알림판에 공지를 올렸어요.';
     } else if(form.id==='admin-title-create'){
       await createAction('title-create','/api/staff/titles',{name:values.get('name'),description:values.get('description'),style:values.get('style')});
       message='칭호와 획득 안내를 추가했어요.';

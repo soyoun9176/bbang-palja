@@ -92,3 +92,12 @@ Products include `dice_per_unit` (1 for bread, 0 for both drinks) and `reward_el
 
 
 Product `photo` is a local static illustration/photo path. The eleven bread products use distinct WebP artwork under `/assets/products/`; drink products keep the neutral placeholder until artwork is provided. Buyer menu and staff manual-sale/pickup views share the same renderer. This metadata does not change product prices, stock or dice quantities.
+
+
+## Shared event notices
+
+- Public `GET /api/event-notices` → `{notices:[{id,kind,content,created_at,author}]}`. Newest ID first, at most two, identical for every viewer. Achievement `author` exposes only public nickname, avatar, equipped badge/title and profile status. No phone, ownership list or staff identity. Announcements use a fixed shared `관리자` persona.
+- Staff dashboard adds the same `event_notices` list.
+- Staff-only `POST /api/staff/event-notices` body `{content,request_id}` → `{notice}`. Trimmed content must be 1–160 characters. No custom author fields. Idempotent retries never recreate a deleted/evicted notice.
+- Staff-only `POST /api/staff/event-notices/:id/delete` body `{}` → `{ok:true}`. Repeated deletion succeeds; older notices never resurface.
+- New achievement awards publish once in the approval transaction. Creation prunes older rows in the same global write lock, retaining at most two rows across achievements and announcements combined. Startup backfills do not broadcast historical achievements. Clearing the board never erases achievement ownership.
