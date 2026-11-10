@@ -41,11 +41,10 @@ function shell(content) {
 function pageHeading(title,desc='') { return `<div class="page-heading"><div><h1>${title}</h1>${desc?`<p>${desc}</p>`:''}</div></div>`; }
 function subnav(items) { return `<nav class="subnav" aria-label="${['dice','ranking'].includes(state.route)?'이벤트 메뉴':'구매 메뉴'}">${items.map(([route,label])=>`<button class="${state.route===route?'active':''}" data-action="navigate" data-route="${route}" ${state.route===route?'aria-current="page"':''}>${label}</button>`).join('')}</nav>`; }
 function purchaseHeading() { return guestPurchase()?`${pageHeading('빵 구매','계정 없이 이름만 입력하고 주문하세요.')}${subnav([['guest','현장 구매'],['guest-orders','주문 내역']])}`:`${pageHeading('빵 구매','예약한 빵 수령 또는 현장 구매를 선택해 주세요.')}${subnav([['shop','현장 구매'],['pickup','예약한 빵 수령'],['orders','주문 내역']])}`; }
-function eventHeading() { return pageHeading('이벤트 참여','주사위를 굴리고, 최고의 연금술사에 도전해요.'); }
 function prototypeNotice() { return window.KAMBO_CONFIG?.prototype||state.config.demo?'<p class="prototype-note">가안 테스트 · 샘플 데이터입니다.</p>':''; }
 function renderEventNotices(notices=[],{manage=false}={}) {
   if(!notices.length)return '';
-  return `<section class="event-notice-board" aria-label="이벤트 알림판" aria-live="polite"><div class="notice-board-label">${icon('spark')} 이벤트 소식</div>${notices.slice(0,2).map(n=>`<article class="event-notice ${n.kind==='announcement'?'is-announcement':''}">${profileAvatar(n.author)}<div class="event-notice-copy"><div class="event-notice-author"><strong>${esc(n.author.name)}</strong>${profileTitle(n.author)}${n.kind==='announcement'?'<span class="notice-kind">공지</span>':''}</div><p>${esc(n.content)}</p></div>${manage?`<button type="button" class="icon-button notice-delete" data-action="admin-notice-delete" data-id="${Number(n.id)}" aria-label="${esc(n.content)} 알림 삭제">${icon('x')}</button>`:''}</article>`).join('')}</section>`;
+  return `<section class="event-notice-board" aria-label="이벤트 알림판" aria-live="polite">${notices.slice(0,2).map(n=>`<article class="event-notice ${n.kind==='announcement'?'is-announcement':''}">${profileAvatar(n.author)}<div class="event-notice-copy"><div class="event-notice-author"><strong>${esc(n.author.name)}</strong>${profileTitle(n.author)}${n.kind==='announcement'?'<span class="notice-kind">공지</span>':''}</div><p>${esc(n.content)}</p></div>${manage?`<button type="button" class="icon-button notice-delete" data-action="admin-notice-delete" data-id="${Number(n.id)}" aria-label="${esc(n.content)} 알림 삭제">${icon('x')}</button>`:''}</article>`).join('')}</section>`;
 }
 function cartCount(){return Object.values(state.cart).reduce((s,v)=>s+v,0);}
 function cartTotal(){return state.products.reduce((s,p)=>s+p.price*(state.cart[p.id]||0),0);}
@@ -211,7 +210,7 @@ function openAchievement(id){
 function renderEvent() {
   const board=state.leaderboard;
   const rankings=board?`<section class="content-card"><h2>최고의 연금술사 TOP 3</h2><p class="form-hint">양일 누적 점수로 최종 1·2·3등을 선정합니다.</p><ol class="leaders">${board.leaders.map(p=>`<li class="${p.is_me?'me':''}"><span class="rank-number">${p.rank}위</span><strong class="profile-name">${profileAvatar(p)}<span class="profile-identity">${esc(p.name)}${p.is_me?' (나)':''}${profileTitle(p)}</span></strong><b>${money(p.score)}점</b></li>`).join('')}</ol><p class="form-hint">내 순위 ${board.me?.rank||'-'}위 · 총 ${board.total_participants}명 참여</p></section>`:'<section class="content-card"><h2>점수 순위</h2><p class="form-hint">순위를 불러오는 중입니다.</p></section>';
-  return `${renderEventNotices(state.eventNotices)}${eventHeading()}<div class="event-layout"><div class="event-personal">${renderRewardRequests()}${renderLevelCard()}${renderRewardHistory()}</div><div class="event-rankings">${rankings}${renderAchievements()}</div></div>`;
+  return `${renderEventNotices(state.eventNotices)}<div class="event-layout"><div class="event-personal">${renderRewardRequests()}${renderLevelCard()}${renderRewardHistory()}</div><div class="event-rankings">${rankings}${renderAchievements()}</div></div>`;
 }
 function render() {
   const previousTrackWidth=document.querySelector('.milestone-track-bar > span')?.style.width;

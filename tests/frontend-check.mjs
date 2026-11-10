@@ -1505,7 +1505,7 @@ test('event board hides at zero, shows one or two, and replaces the prototype no
   for(const count of [1,2]){
     f.run(`state.eventNotices=notices.slice(0,${count});renderPage()`);
     assert.equal((f.root.innerHTML.match(/<article class="event-notice /g)||[]).length,count);
-    assert.ok(f.root.innerHTML.indexOf('event-notice-board')<f.root.innerHTML.indexOf('<h1>이벤트 참여'));
+    assert.ok(f.root.innerHTML.indexOf('event-notice-board')<f.root.innerHTML.indexOf('<div class="event-layout"'));
     assert.match(f.root.innerHTML,/별빵/);assert.match(f.root.innerHTML,/profile-avatar/);assert.match(f.root.innerHTML,/title-magic/);
     assert.doesNotMatch(f.root.innerHTML,/가안 테스트/);
   }
