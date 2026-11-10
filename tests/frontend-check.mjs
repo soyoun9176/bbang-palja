@@ -1497,7 +1497,7 @@ const testNotices=[
   {id:3,kind:'achievement',content:'원소 수집가 도전과제를 달성했습니다!',author:{id:10,name:'별빵',equipped_title:{name:'원소 수집가',style:'magic'}}},
   {id:2,kind:'announcement',content:'오늘 이벤트는 오후 6시에 마감됩니다.',author:{name:'관리자'}},
 ];
-test('event board hides at zero, shows one or two, and replaces the prototype notice only on event page',async()=>{
+test('event board hides at zero, shows one or two, and prototype notes stay hidden on every route',async()=>{
   const f=fixture();await f.run('refresh()');
   f.run("state.route='ranking';window.KAMBO_CONFIG.prototype=true;renderPage()");
   assert.doesNotMatch(f.root.innerHTML,/event-notice-board|가안 테스트/);
@@ -1510,7 +1510,7 @@ test('event board hides at zero, shows one or two, and replaces the prototype no
     assert.doesNotMatch(f.root.innerHTML,/가안 테스트/);
   }
   f.run("state.route='shop';renderPage()");
-  assert.match(f.root.innerHTML,/가안 테스트/);assert.doesNotMatch(f.root.innerHTML,/event-notice-board/);
+  assert.doesNotMatch(f.root.innerHTML,/가안 테스트|event-notice-board/);
 });
 test('shared board escapes author, title and content and has no buyer management controls',()=>{
   const f=fixture();f.context.badNotices=[{id:1,kind:'announcement',content:'<script>alert(1)</script>',author:{name:'<img src=x>',equipped_title:{name:'<b>칭호</b>',style:'gold'}}}];

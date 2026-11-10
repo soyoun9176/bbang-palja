@@ -9,6 +9,7 @@ from .notices import publish as publish_notice
 KST=timezone(timedelta(hours=9))
 BREADS={p[0]:p[1] for p in PRODUCTS if p[0] in REWARD_PRODUCT_IDS}
 FINANCIERS=(101,102,103,104)
+FAST_ACHIEVEMENT_NAME='번개 연금술사'
 ACHIEVEMENT_BADGES=(
     ('ach_elements','원소 수집가','휘낭시에 4종을 모두 구매하면 이 배지를 얻을 수 있어요.','flask'),
     ('ach_vvip','캄딜 VVIP','빵 메뉴 11종을 모두 구매하면 이 배지를 얻을 수 있어요.','trophy'),
@@ -54,7 +55,7 @@ def award(tx,user_id,key,scope,stamp,badge_id,title_id,*,order_id=None,reservati
     award_badge(tx,user_id,badge_id,row['earned_at'],achievement_id=row['id'],reason=reason)
     award_title(tx,user_id,title_id,row['earned_at'],achievement_id=row['id'],reason=reason)
     if notify and existing is None:
-        names={'elements':'원소 수집가','all_breads':'캄딜 VVIP','preorder_fast':'준비된 번개','walkin_fast':'오늘의 번개'}
+        names={'elements':'원소 수집가','all_breads':'캄딜 VVIP','preorder_fast':FAST_ACHIEVEMENT_NAME,'walkin_fast':FAST_ACHIEVEMENT_NAME}
         name=f'{BREADS[int(scope)]} 몰입가' if key=='focus' else names[key]
         publish_notice(tx,'achievement',f'{name} 도전과제를 달성했습니다!',stamp,
                        user_id=user_id,achievement_id=row['id'])
@@ -108,6 +109,9 @@ def initialize(tx,stamp):
         award_milestone_title(tx,claim)
     # Historical backfills award ownership without broadcasting old achievements.
     reconcile(tx,stamp,notify=False)
+    tx.execute("UPDATE event_notices SET content=? WHERE kind='achievement' AND achievement_id IN "
+               "(SELECT id FROM user_achievements WHERE achievement_key IN ('preorder_fast','walkin_fast'))",
+               (f'{FAST_ACHIEVEMENT_NAME} 도전과제를 달성했습니다!',))
 
 
 def progress(counts,awards):
@@ -122,7 +126,8 @@ def progress(counts,awards):
         {'id':'all_breads','name':'캄딜 VVIP','description':'빵 메뉴 11종을 모두 구매해요.','current':len(counts),'target':len(BREADS),'unit':'종','completed':'all_breads' in owned,'badge_id':'ach_vvip','title':'캄딜 VVIP','style':'gold',
          'items':[{'name':name,'quantity':counts.get(pid,0)} for pid,name in BREADS.items()]},
         {'id':'focus','name':'한 가지 빵에 몰입!','description':'같은 빵을 누적 5개 이상 구매해요.','current':min(counts.get(main,0),5),'target':5,'unit':'개','completed':'focus' in owned,'badge_id':'ach_focus','title':f'{BREADS[main]} 몰입가','items':focus_rewards},
-        {'id':'preorder_fast','name':'준비된 번개','description':'신청 순서 기준 예판 선착순 10명 · 수령 승인 후 달성','current':int('preorder_fast' in owned),'target':1,'unit':'회','completed':'preorder_fast' in owned,'badge_id':'ach_fast','title':'⚡ 우사인볼트 연금술사','style':'lightning'},
-        {'id':'walkin_fast','name':'오늘의 번개','description':'날짜별 첫 현장 빵 주문 · 구매 승인 후 달성','current':int('walkin_fast' in owned),'target':1,'unit':'회','completed':'walkin_fast' in owned,'badge_id':'ach_fast','title':'⚡ 우사인볼트 연금술사','style':'lightning',
+        {'id':'fast','name':FAST_ACHIEVEMENT_NAME,'description':'예판 선착순 10명 또는 날짜별 첫 현장 빵 주문 · 승인 후 달성',
+         'current':int(bool(owned & {'preorder_fast','walkin_fast'})),'target':1,'unit':'회',
+         'completed':bool(owned & {'preorder_fast','walkin_fast'}),'badge_id':'ach_fast','title':'⚡ 우사인볼트 연금술사','style':'lightning',
          'dates':[row['scope'] for row in awards if row['achievement_key']=='walkin_fast']},
     ]

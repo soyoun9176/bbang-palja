@@ -503,6 +503,8 @@ CHECK로 두 원본 중 정확히 하나만 연결하고 각 원본의 UNIQUE로
 
 `UNIQUE(user_id,achievement_key,scope)`로 같은 달성을 반복 기록하지 않습니다. 승인된 예판·현판·수기 빵 판매만 합산하고 대기/취소·음료·무료 지급은 제외합니다. 주문 승인·취소와 같은 쓰기 잠금 안에서 달성과 배지·칭호를 함께 반영합니다. 현판은 같은 KST 날짜의 첫 유효 빵 주문만 인정하며, 앞 대기 주문이 있으면 지급을 기다립니다. 비회원 첫 주문도 선착순 자리를 차지합니다. 예판은 등록 순서의 전화번호가 다른 첫 10명이 수령 승인 시 인정됩니다.
 
+화면에는 예판·현판 선착순을 **번개 연금술사**(`fast`) 한 카드로 표시하며, 둘 중 하나를 달성하면 완료됩니다. DB의 `preorder_fast`·`walkin_fast` 기록과 현판 달성 날짜는 각각 보존합니다. 공통 알림에도 같은 도전과제 이름을 씁니다.
+
 ### 4.29 `user_titles` — 계정별 보유 칭호
 
 `id`(자동 증가 PK), `user_id`(users FK), `title_id`(titles FK), `source`, `milestone_id`(milestone_claims FK), `achievement_id`(user_achievements FK), `granted_by`(users FK), `reason`, `earned_at`를 저장합니다. `UNIQUE(user_id,title_id)`, source별 원본 하나만 허용하는 CHECK는 user_badges와 같습니다. 전체 보유 목록은 본인·담당자 전용이며 공개 순위에는 착용 칭호 ID·이름·스타일만 제공합니다.

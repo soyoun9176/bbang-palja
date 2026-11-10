@@ -40,8 +40,7 @@ function shell(content) {
 }
 function pageHeading(title,desc='') { return `<div class="page-heading"><div><h1>${title}</h1>${desc?`<p>${desc}</p>`:''}</div></div>`; }
 function subnav(items) { return `<nav class="subnav" aria-label="${['dice','ranking'].includes(state.route)?'이벤트 메뉴':'구매 메뉴'}">${items.map(([route,label])=>`<button class="${state.route===route?'active':''}" data-action="navigate" data-route="${route}" ${state.route===route?'aria-current="page"':''}>${label}</button>`).join('')}</nav>`; }
-function purchaseHeading() { return guestPurchase()?`${pageHeading('빵 구매','계정 없이 이름만 입력하고 주문하세요.')}${subnav([['guest','현장 구매'],['guest-orders','주문 내역']])}`:`${pageHeading('빵 구매','예약한 빵 수령 또는 현장 구매를 선택해 주세요.')}${subnav([['shop','현장 구매'],['pickup','예약한 빵 수령'],['orders','주문 내역']])}`; }
-function prototypeNotice() { return window.KAMBO_CONFIG?.prototype||state.config.demo?'<p class="prototype-note">가안 테스트 · 샘플 데이터입니다.</p>':''; }
+function purchaseHeading() { return guestPurchase()?`${pageHeading('빵 구매','계정 없이 이름만 입력하고 주문하세요.')}${subnav([['guest','현장 구매'],['guest-orders','주문 내역']])}`:`${pageHeading('빵 구매')}${subnav([['shop','현장 구매'],['pickup','예약한 빵 수령'],['orders','주문 내역']])}`; }
 function renderEventNotices(notices=[],{manage=false}={}) {
   if(!notices.length)return '';
   return `<section class="event-notice-board" aria-label="이벤트 알림판" aria-live="polite">${notices.slice(0,2).map(n=>`<article class="event-notice ${n.kind==='announcement'?'is-announcement':''}">${profileAvatar(n.author)}<div class="event-notice-copy"><div class="event-notice-author"><strong>${esc(n.author.name)}</strong>${profileTitle(n.author)}${n.kind==='announcement'?'<span class="notice-kind">공지</span>':''}</div><p>${esc(n.content)}</p></div>${manage?`<button type="button" class="icon-button notice-delete" data-action="admin-notice-delete" data-id="${Number(n.id)}" aria-label="${esc(n.content)} 알림 삭제">${icon('x')}</button>`:''}</article>`).join('')}</section>`;
@@ -201,7 +200,7 @@ function renderRewardHistory() {
 }
 function renderAchievements(){
   const achievements=state.user?.achievements||[];
-  return `<section class="content-card achievements"><div class="section-heading"><h2>도전과제</h2><span>${achievements.filter(a=>a.completed).length}/${achievements.length} 달성</span></div><p class="form-hint">구매를 모아 배지와 반짝이는 칭호를 얻어요.</p><div class="achievement-list">${achievements.map(a=>`<button type="button" class="achievement-card ${a.completed?'is-completed':''}" data-action="achievement-detail" data-achievement="${esc(a.id)}">${badgePicture({id:a.badge_id,name:a.name})}<span class="achievement-copy"><strong>${esc(a.name)}${a.completed?`<i>${icon('check')} 달성</i>`:''}</strong><small>${esc(a.description)}</small><span class="achievement-progress"><span style="width:${Math.min(100,Math.max(0,a.current/a.target*100))}%"></span></span><small class="achievement-count">${money(a.current)} / ${money(a.target)}${esc(a.unit)}</small></span>${icon('chevron')}</button>`).join('')}</div></section>`;
+  return `<section class="content-card achievements"><div class="section-heading"><h2>도전과제</h2><span>${achievements.filter(a=>a.completed).length}/${achievements.length} 달성</span></div><div class="achievement-list">${achievements.map(a=>`<button type="button" class="achievement-card ${a.completed?'is-completed':''}" data-action="achievement-detail" data-achievement="${esc(a.id)}">${badgePicture({id:a.badge_id,name:a.name})}<span class="achievement-copy"><strong>${esc(a.name)}${a.completed?`<i>${icon('check')} 달성</i>`:''}</strong><small>${esc(a.description)}</small><span class="achievement-progress"><span style="width:${Math.min(100,Math.max(0,a.current/a.target*100))}%"></span></span><small class="achievement-count">${money(a.current)} / ${money(a.target)}${esc(a.unit)}</small></span>${icon('chevron')}</button>`).join('')}</div></section>`;
 }
 function openAchievement(id){
   const a=state.user?.achievements?.find(a=>a.id===id);if(!a)return;
@@ -209,7 +208,7 @@ function openAchievement(id){
 }
 function renderEvent() {
   const board=state.leaderboard;
-  const rankings=board?`<section class="content-card"><h2>최고의 연금술사 TOP 3</h2><p class="form-hint">양일 누적 점수로 최종 1·2·3등을 선정합니다.</p><ol class="leaders">${board.leaders.map(p=>`<li class="${p.is_me?'me':''}"><span class="rank-number">${p.rank}위</span><strong class="profile-name">${profileAvatar(p)}<span class="profile-identity">${esc(p.name)}${p.is_me?' (나)':''}${profileTitle(p)}</span></strong><b>${money(p.score)}점</b></li>`).join('')}</ol><p class="form-hint">내 순위 ${board.me?.rank||'-'}위 · 총 ${board.total_participants}명 참여</p></section>`:'<section class="content-card"><h2>점수 순위</h2><p class="form-hint">순위를 불러오는 중입니다.</p></section>';
+  const rankings=board?`<section class="content-card"><h2>최고의 연금술사 TOP 3</h2><ol class="leaders">${board.leaders.map(p=>`<li class="${p.is_me?'me':''}"><span class="rank-number">${p.rank}위</span><strong class="profile-name">${profileAvatar(p)}<span class="profile-identity">${esc(p.name)}${p.is_me?' (나)':''}${profileTitle(p)}</span></strong><b>${money(p.score)}점</b></li>`).join('')}</ol><p class="form-hint">내 순위 ${board.me?.rank||'-'}위 · 총 ${board.total_participants}명 참여</p></section>`:'<section class="content-card"><h2>점수 순위</h2><p class="form-hint">순위를 불러오는 중입니다.</p></section>';
   return `${renderEventNotices(state.eventNotices)}<div class="event-layout"><div class="event-personal">${renderRewardRequests()}${renderLevelCard()}${renderRewardHistory()}</div><div class="event-rankings">${rankings}${renderAchievements()}</div></div>`;
 }
 function render() {
@@ -219,7 +218,7 @@ function render() {
   if(isAdmin)content=state.user?renderAdmin():renderStaffLogin();
   else content=state.user?({shop:renderShop,pickup:renderPickup,orders:renderOrders,ranking:renderEvent}[state.route]||renderShop)():guestPurchase()?(state.route==='guest-orders'?renderOrders():renderShop()):renderBuyerLogin();
   const expanded=[...document.querySelectorAll('#app details[open]')].map(node=>node.id).filter(Boolean);
-  document.querySelector('#app').innerHTML=shell((!isAdmin&&state.user&&state.route==='ranking'?'':prototypeNotice())+content);
+  document.querySelector('#app').innerHTML=shell(content);
   const trackFill=document.querySelector('.milestone-track-bar > span');
   if(previousTrackWidth&&trackFill?.animate&&previousTrackWidth!==trackFill.style.width&&!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches){
     trackFill.animate([{width:previousTrackWidth},{width:trackFill.style.width}],{duration:650,easing:'ease-out'});

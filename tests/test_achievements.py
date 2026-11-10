@@ -131,6 +131,9 @@ class AchievementTests(unittest.TestCase):
         self.call(f"/api/staff/preorders/{target['id']}/complete",{'name':target['name'],'phone':target['phone'],
                   'user_id':self.buyer['user']['id'],'request_id':uuid.uuid4().hex},self.staff)
         self.assertIn('fast',self.owned('titles'))
+        fast=[a for a in self.me()['achievements'] if a['id']=='fast']
+        self.assertEqual(len(fast),1)
+        self.assertEqual((fast[0]['name'],fast[0]['completed'],fast[0]['current']),('번개 연금술사',True,1))
 
     def test_first_order_waits_for_earlier_pending_and_cancel_releases_daily_award(self):
         first=self.order([(101,1)],stamp='2026-11-20T15:00:00Z')
@@ -158,6 +161,10 @@ class AchievementTests(unittest.TestCase):
     def test_korean_midnight_splits_days_and_repeat_win_preserves_history_without_duplicate_rewards(self):
         self.process(self.order([(101,1)],stamp='2026-11-20T14:59:59Z'))
         self.process(self.order([(101,1)],stamp='2026-11-20T15:00:00Z'))
+        fast=[a for a in self.me()['achievements'] if a['id']=='fast']
+        self.assertEqual(len(fast),1)
+        self.assertTrue(fast[0]['completed'])
+        self.assertEqual(fast[0]['dates'],['2026-11-20','2026-11-21'])
         with self.app.db.transaction() as tx:
             self.assertEqual([r['scope'] for r in tx.all("SELECT scope FROM user_achievements WHERE achievement_key='walkin_fast' ORDER BY scope")],['2026-11-20','2026-11-21'])
             self.assertEqual(tx.one("SELECT COUNT(*) AS n FROM user_titles WHERE title_id='fast'")['n'],1)
