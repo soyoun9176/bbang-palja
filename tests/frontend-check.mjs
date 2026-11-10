@@ -1626,3 +1626,54 @@ test('all staff and shared administrator announcements use the same fixed portra
   f.context.notices=[{id:1,kind:'announcement',content:'공지',author:{name:'관리자',profile_kind:'admin'}}];
   assert.match(f.run('renderEventNotices(notices)'),/src="\/assets\/admin-avatar-v1.svg"/);
 });
+
+function manualQuantityFixture(){
+  const f=adminFixture();f.state.route='sales';
+  const total={textContent:''},inputs=[],buttons=new Map();
+  const form={id:'admin-manual-sale',values:new Map([['user_id','10']]),
+    querySelectorAll:()=>inputs,querySelector:selector=>selector==='[data-sale-total]'?total:inputs.find(input=>selector===`[data-sale-product="${input.dataset.saleProduct}"]`)||null,
+    reset(){for(const input of inputs)input.value='0';}};
+  for(const p of f.state.staffData.products){
+    const input={name:`quantity_${p.id}`,dataset:{saleProduct:String(p.id),price:String(p.price)},value:'0',max:String(Math.min(p.stock,100)),disabled:p.stock<1};
+    const minus={dataset:{product:String(p.id),delta:'-1'},closest:()=>form},plus={dataset:{product:String(p.id),delta:'1'},closest:()=>form};
+    const controls={querySelector:selector=>selector==='[data-delta="-1"]'?minus:plus};
+    input.closest=selector=>selector==='.manual-quantity-controls'?controls:selector==='#admin-manual-sale'?form:null;
+    inputs.push(input);buttons.set(p.id,{minus,plus});
+  }
+  f.context.form=form;
+  return {...f,inputs,buttons,total,async step(id,delta){f.context.stepButton=buttons.get(id)[delta===1?'plus':'minus'];await f.run("handleAdminClick('admin-sale-quantity',stepButton)");},
+    type(id,value){const input=inputs.find(i=>Number(i.dataset.saleProduct)===id);input.value=value;f.listeners.input({target:input});}};
+}
+
+test('manual quantity buttons clamp to stock and zero and update the total without rerendering',async()=>{
+  const f=manualQuantityFixture();
+  await f.step(101,-1);assert.equal(f.inputs[0].value,'0');assert.equal(f.buttons.get(101).minus.disabled,true);
+  await f.step(101,1);assert.equal(f.inputs[0].value,'1');assert.equal(f.total.textContent,'2800');
+  await f.step(101,1);await f.step(101,1);
+  assert.equal(f.inputs[0].value,'2');assert.equal(f.total.textContent,'5600');assert.equal(f.buttons.get(101).plus.disabled,true);
+  await f.step(112,1);assert.equal(f.total.textContent,'6600');
+  assert.equal(f.requests.length,0);
+  await f.step(101,-1);assert.equal(f.total.textContent,'3800');assert.equal(f.buttons.get(101).plus.disabled,false);
+  const html=f.run('renderAdmin()');
+  assert.match(html,/id="admin-sale-qty-101"[^>]*value="1"/);assert.match(html,/data-sale-total>3800/);
+});
+
+test('direct quantity entry and recipient switches keep counts and totals until a successful sale',async()=>{
+  const f=manualQuantityFixture();f.type(101,'2');f.type(112,'1');
+  assert.equal(f.total.textContent,'6600');assert.equal(f.buttons.get(101).plus.disabled,true);
+  await f.run("handleAdminClick('admin-customer-mode',{dataset:{mode:'guest'}})");
+  let html=f.run('renderAdmin()');assert.match(html,/id="admin-sale-qty-101"[^>]*value="2"/);assert.match(html,/data-sale-total>6600/);
+  f.context.respond=async()=>({order:{id:9,user_id:10,dice_quantity:2}});
+  await f.run('handleAdminSubmit(form)');
+  assert.deepEqual(f.requests[0].body.items,[{product_id:101,quantity:2},{product_id:112,quantity:1}]);
+  html=f.run('renderAdmin()');assert.match(html,/id="admin-sale-qty-101"[^>]*value="0"/);assert.match(html,/data-sale-total>0/);
+});
+
+test('manual quantity controls respect the 100-unit limit and clear sold-out drafts on refresh',async()=>{
+  const f=manualQuantityFixture();f.state.staffData.products[0].stock=250;f.inputs[0].max='100';
+  f.type(101,'99');await f.step(101,1);await f.step(101,1);assert.equal(f.inputs[0].value,'100');assert.equal(f.buttons.get(101).plus.disabled,true);
+  f.state.staffData.products[0].stock=0;
+  let html=f.run('renderAdmin()');assert.match(html,/id="admin-sale-qty-101"[^>]*value="0"[^>]*disabled/);assert.match(html,/data-sale-total>0/);
+  f.inputs[0].disabled=true;await f.step(101,1);assert.equal(f.requests.length,0);
+  f.state.staffData.products[0].stock=2;html=f.run('renderAdmin()');assert.match(html,/id="admin-sale-qty-101"[^>]*value="0"/);
+});
