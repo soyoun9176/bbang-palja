@@ -880,13 +880,14 @@ test('stock on hold includes pending event requests but excludes unselected and 
   assert.match(f.run('renderAdmin()'),/<td>2<\/td><td>0<\/td><td>3<\/td><td><strong>5<\/strong>/);
 });
 
-test('beverage selection disables sold-out drinks and allows declining only when all are sold out',async()=>{
+test('beverage selection disables sold-out drinks and always separates cancellation from postponing',async()=>{
   const f=fixture();await f.run('refresh()');
   f.run("state.products=[{id:112,name:'우유',stock:0,beverage_reward_eligible:true},{id:113,name:'두유',stock:1,beverage_reward_eligible:true}]");
   let html=f.run('beverageOptions({id:9})');
   assert.match(html,/data-product="112" disabled/);
   assert.match(html,/data-product="113" >.*두유 선택/s);
-  assert.doesNotMatch(html,/decline-beverage/);
+  assert.match(html,/data-action="decline-beverage" data-request="9">취소하기/);
+  assert.match(html,/data-action="close-modal">나중에 선택하기/);
   f.run('state.products[1].stock=0');html=f.run('beverageOptions({id:9})');
   assert.match(html,/모두 품절/);
   assert.match(html,/data-action="decline-beverage"/);
@@ -1541,4 +1542,62 @@ test('admin announcement submits content and request id, and deletion calls staf
   f.context.deleteButton={dataset:{id:'3'},disabled:false};
   await f.run("handleAdminClick('admin-notice-delete',deleteButton)");
   assert.deepEqual(f.requests[1],{path:'/api/staff/event-notices/3/delete',method:'POST',body:{}});
+});
+
+test('declining a drink sends the cancellation request once and removes buyer waiting UI',async()=>{
+  const f=fixture();await f.run('refresh()');let release;
+  let row={id:9,status:'awaiting_choice',product_name:'우유·두유 선택',threshold:10};
+  f.run('closeModal=()=>{}');f.context.waiting=row;
+  f.run('state.rewardRequests=[waiting];state.rewards=[{id:2,threshold:10,kind:"milk",fulfillment:waiting}]');
+  f.context.fetchOverride=(path,options)=>{
+    if(path==='/api/reward-requests/9/decline')return new Promise(resolve=>release=()=>{row={...row,status:'cancelled'};resolve(f.response({request:row}));});
+    if(path==='/api/rewards')return f.response({rewards:[{id:2,threshold:10,kind:'milk',fulfillment:row}],requests:[row]});
+    return f.context.normalFetch(path,options);
+  };
+  const first=f.run("chooseBeverage({dataset:{request:'9'}},true)");
+  await f.run("chooseBeverage({dataset:{request:'9'}},true)");
+  const requests=f.requests.filter(r=>r.path.includes('/decline'));
+  assert.equal(requests.length,1);assert.deepEqual(Object.keys(JSON.parse(requests[0].body)),['request_id']);
+  release();await first;
+  assert.equal(f.run('state.rewardRequests[0].status'),'cancelled');
+  assert.equal(f.run('state.rewards[0].fulfillment.status'),'cancelled');
+  assert.equal(f.run('renderRewardRequests()'),'');
+  assert.match(f.run('renderRewardHistory()'),/지급 취소/);
+});
+
+test('successful cancellation updates the milestone record even when the following refresh fails',async()=>{
+  const f=fixture();await f.run('refresh()');
+  f.run('closeModal=()=>{};state.rewards=[{id:2,threshold:10,kind:"milk",fulfillment:{id:9,status:"awaiting_choice"}}]');
+  f.context.fetchOverride=(path,options)=>{
+    if(path==='/api/reward-requests/9/decline')return f.response({request:{id:9,status:'cancelled',product_name:'우유·두유 선택'}});
+    if(path==='/api/config')throw new Error('offline after cancellation');
+    return f.context.normalFetch(path,options);
+  };
+  await f.run("chooseBeverage({dataset:{request:'9'}},true)");
+  assert.equal(f.run('state.rewardRequests[0].status'),'cancelled');
+  assert.equal(f.run('state.rewards[0].fulfillment.status'),'cancelled');
+  assert.equal(f.run('renderRewardRequests()'),'');
+  assert.match(f.run('renderRewardHistory()'),/지급 취소/);
+  assert.equal(f.run('state.leveling'),false);
+});
+
+test('failed cancellation keeps its retry id and the request available instead of pretending success',async()=>{
+  const f=fixture();await f.run('refresh()');let prompt='',attempts=0;
+  let row={id:9,status:'awaiting_choice',product_name:'우유·두유 선택'};
+  f.context.capture=html=>prompt=html;f.run('modal=capture;closeModal=()=>{}');
+  f.context.fetchOverride=(path,options)=>{
+    if(path==='/api/reward-requests/9/decline'){
+      if(++attempts===1)return f.response({error:'일시적인 연결 오류'},503);
+      row={...row,status:'cancelled'};return f.response({request:row});
+    }
+    if(path==='/api/rewards')return f.response({rewards:[],requests:[row]});
+    return f.context.normalFetch(path,options);
+  };
+  await f.run("chooseBeverage({dataset:{request:'9'}},true)");
+  assert.equal(f.run('state.rewardRequests[0].status'),'awaiting_choice');
+  assert.match(prompt,/data-action="decline-beverage" data-request="9">취소하기/);
+  await f.run("chooseBeverage({dataset:{request:'9'}},true)");
+  const posts=f.requests.filter(r=>r.path.endsWith('/decline'));
+  assert.equal(JSON.parse(posts[0].body).request_id,JSON.parse(posts[1].body).request_id);
+  assert.equal(f.run('state.rewardRequests[0].status'),'cancelled');
 });

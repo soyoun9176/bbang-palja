@@ -167,7 +167,7 @@ function renderLevelCard() {
 const rewardStatus = status => ({awaiting_choice:'음료 선택 필요',pending:'담당자 지급 대기',approved:'수령 완료',cancelled:'지급 취소'}[status]||status);
 function beverageOptions(request){
   const drinks=state.products.filter(p=>p.beverage_reward_eligible),empty=!drinks.some(p=>p.stock>0);
-  return `<div class="beverage-options">${drinks.map(p=>`<button class="secondary-button full" data-action="choose-beverage" data-request="${request.id}" data-product="${p.id}" ${p.stock<=0?'disabled':''}>${icon('milk')}${esc(p.name)} ${p.stock<=0?'품절':'선택'}</button>`).join('')}</div>${empty?`<p class="form-hint">우유와 두유가 모두 품절이에요. 받지 않거나 나중에 다시 확인해 주세요.</p><button class="text-button" data-action="decline-beverage" data-request="${request.id}">이번 음료 보상 받지 않기</button>`:''}`;
+  return `<div class="beverage-options">${drinks.map(p=>`<button class="secondary-button full" data-action="choose-beverage" data-request="${request.id}" data-product="${p.id}" ${p.stock<=0?'disabled':''}>${icon('milk')}${esc(p.name)} ${p.stock<=0?'품절':'선택'}</button>`).join('')}</div>${empty?'<p class="form-hint">우유와 두유가 모두 품절이에요.</p>':''}<p class="form-hint">취소하면 이번 음료 보상은 받지 않는 것으로 처리돼요.</p><div class="button-row"><button class="secondary-button" data-action="decline-beverage" data-request="${request.id}">취소하기</button><button class="text-button" data-action="close-modal">나중에 선택하기</button></div>`;
 }
 function openBeverageChoice(request){
   if(!request)return;
@@ -185,7 +185,9 @@ async function chooseBeverage(button,decline=false){
   const op=operation(`beverage-${id}`,body);state.leveling=true;button.disabled=true;
   try{
     const result=await api(`/api/reward-requests/${id}/${decline?'decline':'choose'}`,{method:'POST',body:{...body,request_id:op.id}});
-    op.done();state.rewardRequests=state.rewardRequests.map(r=>r.id===id?{...r,...result.request}:r);
+    op.done();
+    state.rewardRequests=[result.request,...state.rewardRequests.filter(r=>r.id!==id)];
+    state.rewards=state.rewards.map(r=>r.fulfillment?.id===id?{...r,fulfillment:{...r.fulfillment,...result.request}}:r);
     await refreshAfterAction();state.leveling=false;closeModal();render();
     toast(decline?'이번 음료 보상은 받지 않는 것으로 처리했어요.':'음료를 확보하고 담당자에게 지급을 요청했어요.');
   }catch(error){

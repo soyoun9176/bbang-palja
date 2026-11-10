@@ -108,6 +108,26 @@ class RewardRequestTests(unittest.TestCase):
             self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM typed_dice_rolls')['n'],1)
             self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM inventory_logs')['n'],0)
 
+    def test_declining_unselected_drinks_moves_both_reward_sources_out_of_staff_choice_queue(self):
+        self.stock(112,0);self.stock(113,2)
+        rows=[self.milk_roll()['fulfillment'],self.claim_at(10)['reward']['fulfillment']]
+        before=self.call('GET','/api/staff/dashboard',token=self.staff)['reward_requests']
+        self.assertEqual(sum(r['status']=='awaiting_choice' for r in before),2)
+        for row in rows:
+            result=self.call('POST',f"/api/reward-requests/{row['id']}/decline",{'request_id':uuid.uuid4().hex},self.buyer['token'])
+            self.assertEqual(result['request']['status'],'cancelled')
+        dashboard=self.call('GET','/api/staff/dashboard',token=self.staff)['reward_requests']
+        self.assertFalse(any(r['status']=='awaiting_choice' for r in dashboard))
+        self.assertEqual({r['id'] for r in dashboard if r['status']=='cancelled'},{r['id'] for r in rows})
+        buyer=self.call('GET','/api/rewards',token=self.buyer['token'])
+        fulfilled=[r['fulfillment'] for r in buyer['rewards'] if r['fulfillment']]
+        self.assertEqual({r['id'] for r in fulfilled},{r['id'] for r in rows})
+        self.assertTrue(all(r['status']=='cancelled' for r in fulfilled))
+        self.assertEqual((self.available(112),self.available(113)),(0,2))
+        with self.app.db.transaction() as tx:
+            self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM inventory_logs')['n'],0)
+            self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM typed_dice_rolls')['n'],1)
+
     def test_ownership_staff_authorization_and_selection_before_approval(self):
         self.stock(112,1);row=self.milk_roll()['fulfillment'];other=self.register('다른 구매자')
         with self.assertRaises(APIError) as error:self.choose(row,112,other)
