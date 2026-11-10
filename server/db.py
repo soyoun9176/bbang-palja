@@ -269,7 +269,8 @@ CREATE TABLE IF NOT EXISTS schedule (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  name TEXT NOT NULL,
  time TEXT NOT NULL,
- role TEXT NOT NULL
+ role TEXT NOT NULL,
+ event_date TEXT
 );
 CREATE TABLE IF NOT EXISTS settings (
  key TEXT PRIMARY KEY,
@@ -385,6 +386,12 @@ class Database:
                 tx.execute('ALTER TABLE user_profiles ADD COLUMN badge_id TEXT REFERENCES badges(id)')
             if 'title_id' not in {row['name'] for row in columns}:
                 tx.execute('ALTER TABLE user_profiles ADD COLUMN title_id TEXT REFERENCES titles(id)')
+            if self.postgres:
+                schedule_columns=tx.all("SELECT column_name AS name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='schedule'")
+            else:
+                schedule_columns=tx.all('PRAGMA table_info(schedule)')
+            if 'event_date' not in {row['name'] for row in schedule_columns}:
+                tx.execute('ALTER TABLE schedule ADD COLUMN event_date TEXT')
             tx.execute("INSERT INTO settings(key,value) VALUES('schema_version','phone_accounts_v1') ON CONFLICT(key) DO NOTHING")
         self.allow_achievement_badges()
 

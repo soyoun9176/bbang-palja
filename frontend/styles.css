@@ -163,3 +163,5 @@
 @media(max-width:800px){.profile-button>.profile-identity{max-width:152px}.profile-button .profile-title{font-size:8px;max-width:145px}.achievement-card{gap:10px}.achievement-card>.badge-picture{width:50px;height:50px}.leaders .profile-title{font-size:9px}.achievements{padding:20px}.app-header{height:auto;min-height:80px;padding:15px 0}}
 @media(max-width:360px){.profile-button>.profile-identity{max-width:125px}.profile-button .profile-title{max-width:120px;font-size:8px}.achievement-card{padding:12px 10px;gap:8px}.achievement-card>.badge-picture{width:44px;height:44px}}
 @media(prefers-reduced-motion:reduce){.profile-title::after,.profile-title>i{animation:none}}
+
+.staff-schedule .schedule-table{min-width:520px;table-layout:fixed}.schedule-table th:first-child{width:145px}.schedule-table th,.schedule-table td{white-space:normal;vertical-align:top;line-height:1.7}.schedule-table tbody th{font-weight:500;background:#fafbf7;color:#252923}.schedule-assignees{font-weight:600}.schedule-table td small{display:block;margin-top:3px}.staff-schedule h3{font-size:14px;margin:20px 0 12px}

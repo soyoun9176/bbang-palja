@@ -1434,3 +1434,32 @@ test('staff custom title creation sends only the validated name hint and style',
  await f.submit({name:'캄딜 대마법사',description:'담당자 확인',style:'gold'},'admin-title-create');
  assert.deepEqual(f.requests[0],{path:'/api/staff/titles',method:'POST',body:{name:'캄딜 대마법사',description:'담당자 확인',style:'gold',request_id:'request-1'}});
 });
+
+test('staff schedule builds date columns and sorted time rows from server data only',()=>{
+ const f=adminFixture();f.state.route='notes';
+ f.state.staffData.schedule=[{id:1,event_date:'2099-01-02',time:'10:00-11:00',name:'담당 C',role:''},
+  {id:2,event_date:'2099-01-01',time:'10:00-11:00',name:'담당 A, 담당 B',role:'판매'},
+  {id:3,event_date:'2099-01-01',time:'오픈',name:'준비 담당',role:''}];
+ const html=f.run('renderAdmin()');
+ assert.match(html,/aria-label="날짜별 담당 시간표"/);
+ assert.ok(html.indexOf('title="2099-01-01"')<html.indexOf('title="2099-01-02"'));
+ assert.ok(html.indexOf('<th scope="row">오픈')<html.indexOf('<th scope="row">10:00-11:00'));
+ assert.match(html,/담당 A, 담당 B/);assert.match(html,/담당 C/);
+ assert.match(html,/<small class="muted">판매/);assert.match(html,/<span class="muted">—/);
+ assert.doesNotMatch(html,/오늘의 담당 시간표|담당 팀/);
+});
+test('staff schedule keeps legacy common rows and shows an empty state with no roster',()=>{
+ const f=adminFixture();f.state.route='notes';
+ assert.match(f.run('renderAdmin()'),/등록된 시간표가 없어요/);
+ f.state.staffData.schedule=[{id:1,name:'공통 담당',time:'오픈',role:'준비'}];
+ let html=f.run('renderAdmin()');assert.match(html,/aria-label="공통 담당 시간표"/);
+ assert.match(html,/공통 담당/);assert.doesNotMatch(html,/날짜별 담당 시간표/);
+ f.state.staffData.schedule.push({id:2,name:'날짜 담당',time:'오픈',role:'',event_date:'2099-01-01'});
+ html=f.run('renderAdmin()');assert.match(html,/날짜별 담당 시간표/);assert.match(html,/공통 시간표/);
+});
+test('schedule labels format Korean weekdays without embedding a particular event date',()=>{
+ const f=adminFixture();
+ assert.equal(f.run("scheduleDateLabel('2099-01-01')"),'1/1(목)');
+ assert.equal(f.run("scheduleDateLabel('invalid')"),'invalid');
+ assert.equal(f.run("scheduleDateLabel('2099-02-30')"),'2099-02-30');
+});
