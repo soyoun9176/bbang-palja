@@ -23,9 +23,20 @@ PRODUCTS = [
 ]
 PRODUCT_IDS = tuple(product[0] for product in PRODUCTS)
 PRODUCT_UNITS = {108: '세트'}
-# Add real menu photos here after placing files in frontend/assets/photos/.
-# Example: 101: '/assets/photos/plain-financier.webp'
-PRODUCT_PHOTOS = {}
+# Generated product illustrations; replace a path here when a real photo is ready.
+PRODUCT_PHOTOS = {
+    101: '/assets/products/plain-financier-v1.webp',
+    102: '/assets/products/chocolate-financier-v1.webp',
+    103: '/assets/products/caramel-financier-v1.webp',
+    104: '/assets/products/fig-financier-v1.webp',
+    105: '/assets/products/lotus-brownie-cheesecake-v1.webp',
+    106: '/assets/products/lemon-dacquoise-v1.webp',
+    107: '/assets/products/earl-grey-dacquoise-v1.webp',
+    108: '/assets/products/glazed-donut-set-v1.webp',
+    109: '/assets/products/chestnut-madeleine-v1.webp',
+    110: '/assets/products/egg-tart-v1.webp',
+    111: '/assets/products/cheese-tart-v1.webp',
+}
 REWARD_PRODUCT_IDS = tuple(product_id for product_id in PRODUCT_IDS if product_id not in DRINK_PRODUCT_IDS)
 
 

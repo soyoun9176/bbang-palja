@@ -793,6 +793,7 @@ test('milk dice outcomes show milk instead of a zero-point die or automatic mile
   assert.match(f.run("die('milk','pink')"),/우유 당첨/);
 });
 
+const adminProductPhoto=fixture().run('productPhoto');
 function adminFixture() {
   const requests=[],messages=[];
   const listeners={};
@@ -808,7 +809,7 @@ function adminFixture() {
   }};
   let identity=0;
   context.shared={state,esc:String,icon:()=>'',money:String,time:()=>'',normalizePhone:value=>value,requestId:()=>`request-${++identity}`,
-    api:async(path,options)=>{requests.push(JSON.parse(JSON.stringify({path,...options})));return context.respond?context.respond(path,options):{};},
+    productPhoto:adminProductPhoto,api:async(path,options)=>{requests.push(JSON.parse(JSON.stringify({path,...options})));return context.respond?context.respond(path,options):{};},
     submitButton(){},refresh:async()=>{},render(){renderCalls++;},toast:message=>messages.push(message),closeModal(){}};
   vm.createContext(context);
   vm.runInContext(profileSource+'\n'+adminSource+'\nshared.profileAvatar=profileAvatar;shared.badgePicture=badgePicture;shared.badgeIcons=badgeIcons;shared.profileTitle=profileTitle;shared.titleStyles=titleStyles;initAdmin(shared);',context);
@@ -1462,4 +1463,28 @@ test('schedule labels format Korean weekdays without embedding a particular even
  assert.equal(f.run("scheduleDateLabel('2099-01-01')"),'1/1(목)');
  assert.equal(f.run("scheduleDateLabel('invalid')"),'invalid');
  assert.equal(f.run("scheduleDateLabel('2099-02-30')"),'2099-02-30');
+});
+
+test('manual sale image cards retain product labels, prices, stock constraints and quantity hooks',()=>{
+ const f=adminFixture();f.state.route='sales';
+ f.state.staffData.products=[{id:101,name:'플레인 휘낭시에',price:2800,stock:3,photo:'/assets/products/plain-financier-v1.webp'},
+  {id:102,name:'초코 휘낭시에',price:3000,stock:0,photo:'/assets/products/chocolate-financier-v1.webp'}];
+ const html=f.run('renderAdmin()');
+ assert.match(html,/class="content-card manual-sale-panel"/);assert.match(html,/class="manual-product-grid" aria-label="수기판매 메뉴"/);
+ assert.match(html,/src="\/assets\/products\/plain-financier-v1.webp"/);assert.match(html,/src="\/assets\/products\/chocolate-financier-v1.webp"/);
+ assert.match(html,/id="admin-sale-qty-101"[^>]*max="3"[^>]*data-sale-product="101" data-price="2800"/);
+ assert.match(html,/id="admin-sale-qty-102"[^>]*max="0"[^>]*disabled/);
+ assert.match(html,/재고 3개/);assert.match(html,/품절/);
+ assert.equal((html.match(/data-sale-product=/g)||[]).length,2);
+ assert.match(html,/data-sale-total/);assert.match(html,/type="submit">판매 완료/);
+});
+test('buyer product illustrations keep sold out controls and omit inventory numbers',async()=>{
+ const f=fixture();await f.run('refresh()');
+ f.context.products=[{id:101,name:'플레인 휘낭시에',price:2800,stock:2,photo:'/assets/products/plain-financier-v1.webp'},
+  {id:102,name:'초코 휘낭시에',price:3000,stock:0,photo:'/assets/products/chocolate-financier-v1.webp'}];
+ f.run("state.products=products;state.route='shop';renderPage()");
+ assert.match(f.root.innerHTML,/src="\/assets\/products\/plain-financier-v1.webp" alt="플레인 휘낭시에"/);
+ assert.match(f.root.innerHTML,/product-row sold-out/);assert.match(f.root.innerHTML,/data-action="cart-plus" data-id="102" disabled/);
+ assert.doesNotMatch(f.root.innerHTML,/재고 2|남은 수량 2/);
+ assert.match(f.run("productPhoto({id:112,name:'우유'})"),/photo-placeholder/);
 });

@@ -46,7 +46,7 @@ function prototypeNotice() { return window.KAMBO_CONFIG?.prototype||state.config
 function cartCount(){return Object.values(state.cart).reduce((s,v)=>s+v,0);}
 function cartTotal(){return state.products.reduce((s,p)=>s+p.price*(state.cart[p.id]||0),0);}
 function productImage(product){const name=String(product.image||'salt-bread').replace(/[^a-z-]/g,'');return `/assets/${name}.svg`;}
-function productPhoto(product){return `<div class="product-photo"><span class="photo-placeholder" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M3 3h18v18H3V3Zm0 14 6-6 4 4 3-3 5 5M8 8h.01"/></svg></span>${product.photo?`<img src="${esc(product.photo)}" alt="${esc(product.name)} 사진" loading="lazy" width="72" height="72">`:''}</div>`;}
+function productPhoto(product){return `<div class="product-photo ${product.photo?'has-image':''}"><span class="photo-placeholder" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M3 3h18v18H3V3Zm0 14 6-6 4 4 3-3 5 5M8 8h.01"/></svg></span>${product.photo?`<img src="${esc(product.photo)}" alt="${esc(product.name)}" loading="lazy" width="96" height="96">`:''}</div>`;}
 
 function renderBasket() {
   const entries=state.products.filter(p=>state.cart[p.id]);
@@ -246,7 +246,7 @@ async function refresh(){
   }catch(error){if(token!==state.token||version!==refreshVersion)return;throw error;}
 }
 
-initAdmin({state,api,icon,esc,money,time,toast,modal,closeModal,render,refresh,requestId,submitButton,profileAvatar,profileTitle,titleStyles,badgePicture,badgeIcons,normalizePhone});
+initAdmin({state,api,icon,esc,money,time,toast,modal,closeModal,render,refresh,requestId,submitButton,profileAvatar,profileTitle,titleStyles,badgePicture,badgeIcons,productPhoto,normalizePhone});
 
 function normalizePhone(value){
   if(typeof value!=='string'||/[^0-9-]/.test(value)||!/^(?:010[0-9]{8}|010-[0-9]{4}-[0-9]{4})$/.test(value))throw new Error('전화번호는 01012345678 또는 010-1234-5678 형식으로 입력해 주세요. 숫자와 정해진 위치의 대시만 사용할 수 있어요.');
