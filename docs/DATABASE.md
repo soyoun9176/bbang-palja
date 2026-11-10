@@ -133,7 +133,7 @@ erDiagram
 
 현재 판매 목록은 카탈로그의 101~113번입니다. 우유는 112번, 두유는 113번이며 각각 1,000원입니다. 이전 메뉴 번호가 DB에 남아 있어도 현재 판매 목록에서 제외할 수 있고, 과거 주문·예약의 참조는 보존합니다.
 
-도넛 108번은 5개 한 세트가 재고 1단위입니다. 판매 단위 `unit`, 실물 사진 경로 `photo`, 주사위 지급 단위 `dice_per_unit`, 추첨 대상 여부 `reward_eligible`은 API에서 카탈로그를 기준으로 붙이는 값이며 DB 컬럼이 아닙니다. 실물 사진 파일은 `frontend/assets/photos/`, 매핑은 `PRODUCT_PHOTOS`에서 관리합니다.
+도넛 108번은 5개 한 세트가 재고 1단위입니다. 판매 단위 `unit`, 메뉴 이미지 경로 `photo`, 주사위 지급 단위 `dice_per_unit`, 추첨 대상 여부 `reward_eligible`은 API에서 카탈로그를 기준으로 붙이는 값이며 DB 컬럼이 아닙니다. 현재 빵 일러스트는 `frontend/assets/products/`에 있고 매핑은 `PRODUCT_PHOTOS`에서 관리합니다. 실물 사진을 받으면 `frontend/assets/photos/` 경로로 교체할 수 있습니다.
 
 ### 4.4 `reservations` — 예판 예약과 수령 연결
 
