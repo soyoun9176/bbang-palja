@@ -101,3 +101,10 @@ Product `photo` is a local static illustration/photo path. The eleven bread prod
 - Staff-only `POST /api/staff/event-notices` body `{content,request_id}` → `{notice}`. Trimmed content must be 1–160 characters. No custom author fields. Idempotent retries never recreate a deleted/evicted notice.
 - Staff-only `POST /api/staff/event-notices/:id/delete` body `{}` → `{ok:true}`. Repeated deletion succeeds; older notices never resurface.
 - New achievement awards publish once in the approval transaction. Creation prunes older rows in the same global write lock, retaining at most two rows across achievements and announcements combined. Startup backfills do not broadcast historical achievements. Clearing the board never erases achievement ownership.
+
+
+## Fixed administrator profile
+
+- Staff login and `/api/auth/me` return `profile_kind:"admin"`, `avatar:null`, no equipped badge/title and `profile_customized:false`. The client renders the fixed local `assets/admin-avatar-v1.svg`; previously saved staff appearance does not affect it. Buyer customization is unchanged.
+- `POST /api/profile` is buyer-only. Staff requests return 403 (`관리자는 공용 프로필을 사용합니다.`) without changing stored choices.
+- Shared announcement authors also use `profile_kind:"admin"`, with the generic name `관리자` instead of the staff operator's identity.

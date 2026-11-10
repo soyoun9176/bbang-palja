@@ -32,7 +32,7 @@ function shell(content) {
   const eventPage=!isAdmin&&['dice','ranking'].includes(state.route);
   return `<div class="shell ${isAdmin?'admin':eventPage?'event-space':'purchase-space'} ${state.user?'signed-in':''}">
     <header class="app-header"><a href="${isAdmin?'/admin/':'/'}" aria-label="캄보딜라이트 홈">${brand()}</a>
-    ${state.user?`<button class="profile-button" data-action="profile" aria-label="${esc(state.user.name)} 계정 관리">${profileAvatar(state.user)}<span class="profile-identity">${esc(state.user.name)}${isAdmin?' · 담당자':''}${profileTitle(state.user)}</span> ${icon('chevron')}</button>`:isAdmin?'<span class="muted">담당자 로그인</span>':guestPurchase()?'<button class="text-button" data-action="guest-exit">로그인</button>':''}</header>
+    ${state.user?(isAdmin?`<div class="staff-account">${profileAvatar({...state.user,role:'staff'})}<span class="staff-account-name" title="${esc(state.user.name)}">${esc(state.user.name)}<small>담당자</small></span><button type="button" class="icon-button" data-action="logout" aria-label="로그아웃" title="로그아웃">${icon('logout')}</button></div>`:`<button class="profile-button" data-action="profile" aria-label="${esc(state.user.name)} 계정 관리">${profileAvatar(state.user)}<span class="profile-identity">${esc(state.user.name)}${profileTitle(state.user)}</span> ${icon('chevron')}</button>`):isAdmin?'<span class="muted">담당자 로그인</span>':guestPurchase()?'<button class="text-button" data-action="guest-exit">로그인</button>':''}</header>
     ${state.user?`<nav class="primary-nav" aria-label="${isAdmin?'담당자 메뉴':'주요 메뉴'}">${(isAdmin?staffNav:buyerNav).map(x=>navButton(x)).join('')}</nav>`:''}
     <main class="main">${content}</main>
     ${!isAdmin&&(state.user&&state.route==='shop'||guestPurchase()&&state.route==='guest')&&cartCount()?`<button class="mobile-cart" data-action="open-cart">선택 수량 ${cartCount()} <strong>${money(cartTotal())}원 · 구매하기 ${icon('arrow')}</strong></button>`:''}
@@ -263,7 +263,7 @@ function guestEntry(){return `<div class="guest-entry"><button class="secondary-
 function renderBuyerLogin() { return `<section class="login-card content-card"><h1>전화번호와 비밀번호를 입력해 주세요.</h1><p class="form-hint">처음이라면 계정을 만들어 주세요.</p>${buyerAuthForm(state.authMode)}${guestEntry()}</section>`; }
 let profileSaving=false;
 function openProfile(onboarding=false,tab='face') {
-  if(!state.user||profileSaving)return;
+  if(!state.user||isAdmin||state.user.role==='staff'||profileSaving)return;
   if(state.rolling||state.leveling){toast('진행 중인 이벤트가 끝나면 꾸밀 수 있어요.');return;}
   modal(profileEditor(state.user,{onboarding}));
   if(tab!=='face')selectProfileTab(document.querySelector('.profile-editor'),tab);

@@ -1601,3 +1601,28 @@ test('failed cancellation keeps its retry id and the request available instead o
   assert.equal(JSON.parse(posts[0].body).request_id,JSON.parse(posts[1].body).request_id);
   assert.equal(f.run('state.rewardRequests[0].status'),'cancelled');
 });
+
+test('staff header uses one fixed portrait with direct logout and no profile editor entry',()=>{
+  const f=fixture({admin:true});
+  f.run("state.user={id:7,name:'담당',role:'staff',avatar:{face_shape:'pound'},equipped_title:{name:'이전 칭호',style:'gold'}};state.staffData={stats:{}};renderPage()");
+  assert.match(f.root.innerHTML,/src="\/assets\/admin-avatar-v1.svg"/);
+  assert.match(f.root.innerHTML,/data-action="logout"/);
+  assert.doesNotMatch(f.root.innerHTML,/data-action="profile"|계정 관리|이전 칭호/);
+  let opened=0;f.context.capture=()=>opened++;f.run('modal=capture;openProfile()');
+  assert.equal(opened,0);
+});
+
+test('all staff and shared administrator announcements use the same fixed portrait without accessories',()=>{
+  const f=fixture();
+  for(const user of [{id:7,role:'staff',avatar:chosenAvatar,equipped_badge:{id:'ach_fast'},equipped_title:{name:'칭호'}},
+                    {id:8,role:'staff',avatar:{face_shape:'pound'}},{name:'관리자',profile_kind:'admin'}]){
+    f.context.portrait=user;
+    const html=f.run('profileAvatar(portrait)');
+    assert.match(html,/src="\/assets\/admin-avatar-v1.svg"/);
+    assert.doesNotMatch(html,/<svg|profile-badged-avatar|cool-sunglasses/);
+    assert.equal(f.run('profileTitle(portrait)'),'');
+  }
+  assert.ok(readFileSync(new URL('../frontend/assets/admin-avatar-v1.svg',import.meta.url),'utf8').includes('<svg'));
+  f.context.notices=[{id:1,kind:'announcement',content:'공지',author:{name:'관리자',profile_kind:'admin'}}];
+  assert.match(f.run('renderEventNotices(notices)'),/src="\/assets\/admin-avatar-v1.svg"/);
+});

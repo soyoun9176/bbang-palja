@@ -51,6 +51,8 @@ class EventNoticeTests(unittest.TestCase):
         with self.app.db.transaction() as tx:
             self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM event_notices')['n'],2)
         self.assertEqual(third['author']['name'],'관리자')
+        self.assertEqual(third['author']['profile_kind'],'admin')
+        self.assertIsNone(third['author']['avatar'])
         self.assertNotIn('알림 담당',json.dumps(self.notices(),ensure_ascii=False))
         dashboard=self.call('/api/staff/dashboard',account=self.staff,method='GET')
         self.assertEqual(dashboard['event_notices'],self.notices())

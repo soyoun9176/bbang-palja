@@ -93,6 +93,8 @@ def has_sunglasses(user):
 
 
 def profile_info(row):
+    if row.get('role')=='staff':
+        return {'avatar':None,'profile_kind':'admin','profile_customized':False,'equipped_badge':None,'equipped_title':None}
     avatar = default_avatar(row["id"])
     stored = row.get("appearance")
     if stored:
@@ -120,7 +122,7 @@ def event_notices(tx):
             author={'id':user['id'],'name':user['name'],**profile_info(user)}
         else:
             # A shared administrator persona, independent of staff login profiles.
-            author={'name':'관리자','avatar':default_avatar(0),'equipped_badge':None,'equipped_title':None}
+            author={'name':'관리자','avatar':None,'profile_kind':'admin','equipped_badge':None,'equipped_title':None}
         result.append({key:row[key] for key in ('id','kind','content','created_at')} | {'author':author})
     return result
 
@@ -716,6 +718,7 @@ class Application:
                 result['pickup_defaults'] = {'name':user['name'],'phone':user['phone']}
             return result
         if method == "POST" and path == "/api/profile":
+            check(user['role']=='buyer', '관리자는 공용 프로필을 사용합니다.',403)
             check('avatar' in body and set(body)<={'avatar','badge_id','title_id'}, "저장할 캐릭터·배지·칭호 정보만 보내 주세요.")
             avatar = validate_avatar(body["avatar"])
             with self.db.transaction(write=True) as tx:

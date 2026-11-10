@@ -29,6 +29,7 @@ export function badgePicture(badge,{className='',decorative=true}={}){
 }
 export const titleStyles=[['magic','마법빛'],['gold','황금빛'],['lightning','번개']];
 export function profileTitle(user={}){
+  if(user.role==='staff'||user.profile_kind==='admin')return '';
   const title=user.equipped_title;
   if(!title)return '';
   const style=titleStyles.some(([key])=>key===title.style)?title.style:'magic';
@@ -46,6 +47,7 @@ export function normalizeAvatar(value, userId=0) {
 }
 
 export function profileAvatar(user={}, {className='',full=false,level=null,label,decorative=false,breadOnly=false,pinOnly=false}={}) {
+  if(user.role==='staff'||user.profile_kind==='admin')return `<img class="profile-avatar admin-avatar ${safe(className)}" src="/assets/admin-avatar-v1.svg" alt="${decorative?'':safe(label||'관리자 공용 프로필')}" width="40" height="40">`;
   const a=normalizeAvatar(user.avatar,user.id);
   const skin=avatarOptions.skin.find(([id])=>id===a.skin)[2];
   const crust={light:'#ce9149',warm:'#b87a3c',deep:'#965a31'}[a.skin];

@@ -119,8 +119,8 @@ class ProfileTests(unittest.TestCase):
                        (json.dumps({**expected,'hairpin':'bread_101'}),self.buyer['user']['id']))
         self.assertEqual(self.me(self.buyer)['avatar']['hairpin'],'none')
 
-    def test_defaults_exist_for_every_account_without_creating_profile_records(self):
-        for account in [self.buyer,self.other,self.staff]:
+    def test_defaults_exist_for_buyers_without_creating_profile_records(self):
+        for account in [self.buyer,self.other]:
             user=self.me(account)
             self.assertEqual(user['avatar'],default_avatar(user['id']))
             self.assertFalse(user['profile_customized'])
@@ -129,6 +129,26 @@ class ProfileTests(unittest.TestCase):
         self.app=Application()
         self.assertEqual(self.me(self.buyer)['avatar'],self.buyer['user']['avatar'])
         with self.app.db.transaction() as tx:self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM user_profiles')['n'],0)
+
+    def test_staff_use_shared_profile_ignore_old_choices_and_cannot_customize(self):
+        second=self.call('POST','/api/staff/login',{'name':'다른 담당','password':'profile-test-password'})
+        with self.app.db.transaction(write=True) as tx:
+            tx.execute('INSERT INTO user_profiles(user_id,appearance,updated_at) VALUES(?,?,?)',
+                       (self.staff['user']['id'],json.dumps(self.chosen),'2026-11-01'))
+        for account in [self.staff,second]:
+            user=self.me(account)
+            self.assertEqual(user['profile_kind'],'admin')
+            self.assertIsNone(user['avatar'])
+            self.assertIsNone(user['equipped_badge'])
+            self.assertIsNone(user['equipped_title'])
+            self.assertFalse(user['profile_customized'])
+            with self.assertRaises(APIError) as error:self.save(account=account)
+            self.assertEqual(error.exception.status,403)
+            self.assertEqual(error.exception.message,'관리자는 공용 프로필을 사용합니다.')
+        with self.app.db.transaction() as tx:
+            rows=tx.all('SELECT user_id,appearance FROM user_profiles')
+            self.assertEqual(len(rows),1)
+            self.assertEqual(json.loads(rows[0]['appearance']),self.chosen)
 
     def test_saved_choices_survive_login_restart_and_are_visible_in_ranking_and_staff(self):
         with self.app.db.transaction(write=True) as tx:
@@ -172,15 +192,16 @@ class ProfileTests(unittest.TestCase):
         self.save(second,self.other)
         self.assertEqual(self.me(self.buyer)['avatar'],self.chosen)
         self.assertEqual(self.me(self.other)['avatar'],second)
-        self.save(second,self.staff)
-        self.assertEqual(self.me(self.staff)['avatar'],second)
+        with self.assertRaises(APIError) as error:self.save(second,self.staff)
+        self.assertEqual(error.exception.status,403)
+        self.assertIsNone(self.me(self.staff)['avatar'])
         with self.assertRaises(APIError) as error:self.call('POST','/api/profile',{'avatar':self.chosen})
         self.assertEqual(error.exception.status,401)
         with self.assertRaises(APIError) as error:
             self.call('POST','/api/profile',{'avatar':second,'user_id':self.other['user']['id']},self.buyer['token'])
         self.assertEqual(error.exception.status,400)
         with self.app.db.transaction() as tx:
-            self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM user_profiles')['n'],3)
+            self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM user_profiles')['n'],2)
 
     def test_invalid_and_injected_choices_are_rejected_without_partial_changes(self):
         self.save()

@@ -199,3 +199,11 @@
 .notice-management h2{font-size:18px;margin:0 0 14px}
 .notice-preview .event-notice-board{margin-bottom:0}
 @media(max-width:800px){.notice-management{grid-template-columns:1fr}}
+
+.staff-account{display:flex;align-items:center;gap:9px;min-width:0}
+.staff-account>.admin-avatar{width:34px;height:34px;border:0;background:transparent}
+.staff-account-name{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;line-height:1.5}
+.staff-account-name>small{display:block;color:var(--muted);font-size:10px}
+.staff-account>.icon-button{background:transparent;flex-shrink:0}
+.profile-avatar.admin-avatar{object-fit:contain;border:0;background:transparent}
+@media(max-width:800px){.staff-account{gap:6px}.staff-account-name{max-width:80px;font-size:12px}.staff-account>.admin-avatar{width:30px;height:30px}}
