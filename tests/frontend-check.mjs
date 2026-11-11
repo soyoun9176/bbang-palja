@@ -1197,6 +1197,23 @@ test('milk uses the product inventory table and normal stock adjustment',()=>{
   assert.doesNotMatch(html,/inventory-milk|우유 재고 수정/);
 });
 
+test('inventory adjustment only offers walk-in stock and explains automatic preorder allocation',async()=>{
+  const f=adminFixture();let html='';
+  f.context.shared.modal=markup=>{html=markup;};
+  await f.run("handleAdminClick('admin-adjust',{dataset:{product:'112',bucket:'preorder_stock'}})");
+  assert.match(html,/현판·이벤트 재고 수정/);
+  assert.match(html,/예판 대기는 예약 등록·수령 처리에 따라 자동 반영됩니다/);
+  assert.match(html,/<option value="112" selected>우유<\/option>/);
+  assert.doesNotMatch(html,/name="bucket"|value="preorder_stock"/);
+});
+
+test('inventory submission always targets walk-in stock',async()=>{
+  const f=adminFixture();
+  await f.submit({product_id:'101',bucket:'preorder_stock',delta:'3',reason:'추가 입고'},'admin-inventory');
+  assert.deepEqual(f.requests[0],{path:'/api/staff/inventory',method:'POST',body:{
+    product_id:101,bucket:'stock',delta:3,reason:'추가 입고',request_id:'request-1'}});
+});
+
 test('inventory offers a collapsed preorder status table with plain menu text and live status',()=>{
   const f=adminFixture();f.state.route='inventory';
   f.state.staffData.reservations=[manualReservation(),manualReservation({id:8,name:'수령요청자',status:'pending'}),
