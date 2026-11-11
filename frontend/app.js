@@ -135,7 +135,7 @@ function diceAction() {
 function renderDiceControl() {
   const last=state.lastRoll,chosen=selectedDie(),visual=last?.dice?.kind===chosen?.kind?last:null,busy=state.rolling||state.leveling;
   const result=state.rolling?'주사위를 굴리고 있어요…':last?.result==='milk'?'음료 보상 당첨! 우유 또는 두유를 선택해 주세요.':last?`결과 ${last.value} · +${last.value}점`:chosen?'사용할 주사위를 고르고 굴려요.':'빵 구매 승인 후 주사위가 지급돼요.';
-  return `<div class="inline-dice ${state.rollStage==='animating'?'rolling':''}" aria-label="주사위 굴리기" aria-busy="${state.rolling}">
+  return `<div class="inline-dice ${state.rolling?'rolling':''}" aria-label="주사위 굴리기" aria-busy="${state.rolling}">
     <div class="dice-control-head"><div class="dice-visual" aria-hidden="true"><span class="dice-fallback">${die(visual?.result==='milk'?'milk':visual?.value||1,chosen?.color||'plain')}</span><canvas class="dice-canvas" aria-hidden="true"></canvas></div><div><p class="dice-balance">남은 주사위 <strong>${state.user.dice_balance}개</strong></p><p class="dice-feedback ${last&&!state.rolling?'has-result':''}" role="status">${esc(result)}</p></div></div>
     ${ownedDice().length?`<div class="dice-picker" role="group" aria-label="사용할 주사위">${ownedDice().map(d=>`<button class="dice-choice die-${esc(d.color)} ${d.kind===chosen?.kind?'selected':''}" data-action="select-dice" data-kind="${esc(d.kind)}" aria-pressed="${d.kind===chosen?.kind}" ${busy?'disabled':''}><span class="dice-color-mark" aria-hidden="true"></span><span><strong>${esc(d.name)}</strong><small>${d.kind.startsWith('preorder_')?`${dieColors[d.color]} · `:''}${d.quantity}개</small></span>${d.kind===chosen?.kind?icon('check'):''}</button>`).join('')}</div>`:''}
     ${diceAction()}
