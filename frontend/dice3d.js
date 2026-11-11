@@ -17,8 +17,7 @@ function loadThree() {
   if (!threePromise) threePromise = Promise.all([
     import('https://esm.sh/three@0.180.0'),
     import('https://esm.sh/three@0.180.0/examples/jsm/geometries/RoundedBoxGeometry.js'),
-    import('https://esm.sh/cannon-es@0.20.0'),
-  ]).then(([THREE, geometry, CANNON]) => ({ THREE, RoundedBoxGeometry: geometry.RoundedBoxGeometry, CANNON }));
+  ]).then(([THREE, geometry]) => ({ THREE, RoundedBoxGeometry: geometry.RoundedBoxGeometry }));
   return threePromise;
 }
 
@@ -99,7 +98,7 @@ function materials(THREE, color, kind, result) {
 }
 
 export async function mountDice(canvas, { color = 'plain', kind = 'preorder_plain', result = 1, rolling = false } = {}) {
-  const { THREE, RoundedBoxGeometry, CANNON } = await loadThree();
+  const { THREE, RoundedBoxGeometry } = await loadThree();
   if (!canvas.isConnected) return;
   const shouldRoll = rolling && !window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
   let renderer;
@@ -127,25 +126,8 @@ export async function mountDice(canvas, { color = 'plain', kind = 'preorder_plai
     camera.aspect = rect.width / rect.height; camera.updateProjectionMatrix();
   };
   const observer = new ResizeObserver(resize); observer.observe(canvas); resize();
-  let frame = 0, start = performance.now(), body = null, settleStart = null, sourceQuaternion = null;
-  const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) });
-  world.allowSleep = true; world.solver.iterations = 10;
-  const floorMaterial = new CANNON.Material('floor'), dieMaterial = new CANNON.Material('die');
-  world.addContactMaterial(new CANNON.ContactMaterial(floorMaterial, dieMaterial, { friction: 0.62, restitution: 0.22 }));
-  const floor = new CANNON.Body({ mass: 0, material: floorMaterial });
-  floor.addShape(new CANNON.Plane());
-  floor.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2); world.addBody(floor);
-  if (shouldRoll) {
-    body = new CANNON.Body({ mass: 1, material: dieMaterial, linearDamping: 0.18, angularDamping: 0.2 });
-    body.addShape(new CANNON.Box(new CANNON.Vec3(0.775, 0.775, 0.775)));
-    body.position.set((Math.random() - 0.5) * 0.18, 1.9, (Math.random() - 0.5) * 0.18);
-    body.quaternion.setFromEuler(Math.random() * 5, Math.random() * 5, Math.random() * 5);
-    body.velocity.set((Math.random() - 0.5) * 0.7, -0.4, (Math.random() - 0.5) * 0.7);
-    body.angularVelocity.set(5 + Math.random() * 3, 5 + Math.random() * 4, 4 + Math.random() * 4);
-    world.addBody(body);
-  }
-  const finalOrientation = new THREE.Quaternion();
-  let previous = start;
+  let frame = 0, start = performance.now();
+  const turns = [2 + Math.floor(Math.random() * 2), 2 + Math.floor(Math.random() * 2), 1 + Math.floor(Math.random() * 2)];
   let resolveAnimation;
   const finished = new Promise(resolve => { resolveAnimation = resolve; });
   let done = false;
@@ -159,26 +141,27 @@ export async function mountDice(canvas, { color = 'plain', kind = 'preorder_plai
   detachObserver.observe(document.body, { childList: true, subtree: true });
   function draw(now) {
     if (!canvas.isConnected) { cleanup(); return; }
-    const elapsed = (now - start) / 1000, dt = Math.min((now - previous) / 1000, 0.04); previous = now;
-    if (shouldRoll && body && elapsed < 0.82 && settleStart === null) {
-      world.step(1 / 60, dt, 3);
-      group.position.set(body.position.x, body.position.y, body.position.z);
-      group.quaternion.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w);
-      if (body.sleepState === CANNON.Body.SLEEPING || elapsed >= 0.82) {
-        settleStart = now; sourceQuaternion = group.quaternion.clone();
-      }
-    } else if (shouldRoll && settleStart !== null) {
-      const settle = Math.min(1, (now - settleStart) / 220);
-      group.quaternion.slerpQuaternions(sourceQuaternion, finalOrientation, 1 - Math.pow(1 - settle, 3));
-      group.position.y = 0.08 * Math.sin(Math.PI * settle) * (1 - settle);
-      if (settle >= 1) { group.quaternion.copy(finalOrientation); group.position.y = 0; }
+    const elapsed = Math.max(0, now - start);
+    const progress = shouldRoll ? Math.min(1, elapsed / 1250) : 1;
+    const eased = 1 - Math.pow(1 - progress, 3);
+    if (shouldRoll && progress < 1) {
+      // Keep the die centered in its frame: roll through full turns and add a
+      // small hop, without the free-fall translation that could clip it offscreen.
+      group.rotation.set(
+        Math.PI * 2 * turns[0] * eased,
+        Math.PI * 2 * turns[1] * eased,
+        Math.PI * 2 * turns[2] * eased,
+      );
+      group.position.set(0, 0.055 * Math.sin(progress * Math.PI * 6) * (1 - progress), 0);
     } else {
-      group.quaternion.copy(finalOrientation); group.position.y = 0;
+      group.rotation.set(0, 0, 0);
+      group.position.set(0, 0, 0);
     }
     renderer.render(scene, camera);
-    if (shouldRoll && (settleStart === null || (now - settleStart) < 225)) frame = requestAnimationFrame(draw);
+    if (shouldRoll && progress < 1) frame = requestAnimationFrame(draw);
     else resolveAnimation();
   }
-  frame = requestAnimationFrame(draw);
+  if (shouldRoll) frame = requestAnimationFrame(draw);
+  else draw(start);
   return shouldRoll ? finished : undefined;
 }
