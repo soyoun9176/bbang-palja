@@ -144,11 +144,21 @@ export async function mountDice(canvas, { color = 'plain', kind = 'preorder_plai
     body.angularVelocity.set(5 + Math.random() * 3, 5 + Math.random() * 4, 4 + Math.random() * 4);
     world.addBody(body);
   }
-  const base = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.42, Math.PI / 4, 0.025));
-  const finalOrientation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.34, Math.PI / 4, 0.02));
+  const finalOrientation = new THREE.Quaternion();
   let previous = start;
+  let resolveAnimation;
+  const finished = new Promise(resolve => { resolveAnimation = resolve; });
+  let done = false;
+  const cleanup = () => {
+    if (done) return;
+    done = true; cancelAnimationFrame(frame); observer.disconnect(); detachObserver.disconnect();
+    renderer.dispose(); mesh.geometry.dispose(); mesh.material.forEach(m => { m.map.dispose(); m.dispose(); });
+    resolveAnimation();
+  };
+  const detachObserver = new MutationObserver(() => { if (!canvas.isConnected) cleanup(); });
+  detachObserver.observe(document.body, { childList: true, subtree: true });
   function draw(now) {
-    if (!canvas.isConnected) { cancelAnimationFrame(frame); observer.disconnect(); renderer.dispose(); mesh.geometry.dispose(); mesh.material.forEach(m => { m.map.dispose(); m.dispose(); }); return; }
+    if (!canvas.isConnected) { cleanup(); return; }
     const elapsed = (now - start) / 1000, dt = Math.min((now - previous) / 1000, 0.04); previous = now;
     if (shouldRoll && body && elapsed < 0.82 && settleStart === null) {
       world.step(1 / 60, dt, 3);
@@ -163,11 +173,12 @@ export async function mountDice(canvas, { color = 'plain', kind = 'preorder_plai
       group.position.y = 0.08 * Math.sin(Math.PI * settle) * (1 - settle);
       if (settle >= 1) { group.quaternion.copy(finalOrientation); group.position.y = 0; }
     } else {
-      group.quaternion.copy(shouldRoll ? finalOrientation : base);
-      group.position.y = 0;
+      group.quaternion.copy(finalOrientation); group.position.y = 0;
     }
     renderer.render(scene, camera);
     if (shouldRoll && (settleStart === null || (now - settleStart) < 225)) frame = requestAnimationFrame(draw);
+    else resolveAnimation();
   }
   frame = requestAnimationFrame(draw);
+  return shouldRoll ? finished : undefined;
 }
