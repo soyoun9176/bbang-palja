@@ -667,7 +667,7 @@ test('rolling stays with the rankings, blocks repeated clicks, and shows the las
   release();await first;
   assert.equal(f.run('state.route'),'ranking');
   assert.deepEqual(f.routeChanges,[]);
-  assert.match(f.root.innerHTML,/결과 4 · \+4점/);
+  assert.match(f.root.innerHTML,/class="dice-feedback has-result" role="status">4점<\/p>/);
   assert.match(f.root.innerHTML,/현재 점수 <strong>5점/);
   assert.match(f.root.innerHTML,/남은 주사위 <strong>0개/);
   assert.match(f.root.innerHTML,/빵 구매하고 주사위 얻기/);
