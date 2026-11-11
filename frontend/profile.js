@@ -94,6 +94,7 @@ export function profileAvatar(user={}, {className='',full=false,level=null,label
   };
   const pin=pastryPin();
   const hat=tier===5?`<path d="m72 54 1-22 17 10 10-20 12 20 17-10-1 22Z" fill="#e6c373"/><path d="M72 55Q100 49 128 55L126 64Q100 59 74 64Z" fill="#f8e0a1"/>`:`<path d="m70 54 24-37 30 38Z" fill="${robe}"/><path d="M67 54Q100 48 132 55L128 64Q101 58 71 63Z" fill="#d4dcc2"/><path d="m94 31 3 7 7 1-6 4 1 7-6-4-6 4 2-7-6-4 8-1Z" fill="#ffe2a0" stroke="none"/>`;
+  const hatOffset=a.face_shape==='financier'?' transform="translate(0 12)"':'';
   const badge=!breadOnly&&!pinOnly?user.equipped_badge:null;
   const name=label||`${user.name||'연금술사'}의 프로필 캐릭터${badge?` · ${badge.name} 배지`:''}`;
   const emotion={
@@ -121,7 +122,7 @@ export function profileAvatar(user={}, {className='',full=false,level=null,label
       <circle cx="100" cy="136" r="5" fill="#edc36c"/>
       ${face}
       ${expression}
-      ${glasses}${hat}${pin}
+      ${glasses}<g${hatOffset}>${hat}</g>${pin}
       ${tier>=4?'<path d="m40 71 3 7 7 3-7 3-3 7-3-7-7-3 7-3Zm118 32 3 7 7 3-7 3-3 7-3-7-7-3 7-3Z" fill="#e7c473" stroke="none"/>':''}
       <path d="M142 150v-14h11v14q13 19-5 22-19-3-6-22Z" fill="#d4e4dc"/><path d="M139 158q10-4 18 0" fill="none" stroke="#93b591"/>
     </g></svg>`;
