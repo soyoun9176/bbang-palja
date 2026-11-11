@@ -52,7 +52,8 @@ export function profileAvatar(user={}, {className='',full=false,level=null,label
   const skin=avatarOptions.skin.find(([id])=>id===a.skin)[2];
   const crust={light:'#ce9149',warm:'#b87a3c',deep:'#965a31'}[a.skin];
   const crumb={light:'#fff4d5',warm:'#f4d69a',deep:'#e7be7d'}[a.skin];
-  const tier=Number.isInteger(level) ? Math.max(0,Math.min(5,level)) : 0;
+  const avatarLevel=Number.isInteger(level)?level:Number.isInteger(user.level)?user.level:0;
+  const tier=Math.max(0,Math.min(5,avatarLevel));
   const robe=['#7e9b79','#7e9b79','#719cad','#c9a75e','#9b80b3','#655880'][tier];
   const face={
     madeleine:`<path d="M61 87Q51 78 61 69Q60 56 74 58Q80 45 91 54Q100 43 109 54Q122 46 126 59Q140 57 139 71Q150 80 139 92L125 117Q113 130 100 134Q87 130 75 117Z" fill="${skin}"/>
@@ -110,7 +111,7 @@ export function profileAvatar(user={}, {className='',full=false,level=null,label
   const attributes=`xmlns="http://www.w3.org/2000/svg" class="profile-avatar ${safe(className)}" data-bread-face="${a.face_shape}" data-expression="${a.expression}" ${decorative?'aria-hidden="true" focusable="false"':`role="img" aria-label="${safe(name)}"`}`;
   if(pinOnly)return `<svg ${attributes} viewBox="113 67 37 31">${pin||'<circle cx="131" cy="82" r="11" fill="none" stroke="#bdb5a5" stroke-width="2"/><path d="m123 74 16 16" stroke="#bdb5a5" stroke-width="2"/>'}</svg>`;
   if(breadOnly)return `<svg ${attributes} viewBox="40 44 120 94"><g stroke="#55434c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">${face}${expression}</g></svg>`;
-  const drawing=`<svg ${attributes} viewBox="${full?'0 0 200 200':'35 25 130 130'}" ${level===null?'':`data-character-level="${tier}"`}>
+  const drawing=`<svg ${attributes} viewBox="${full?'0 0 200 200':'35 25 130 130'}" ${Number.isInteger(level)||Number.isInteger(user.level)?`data-character-level="${tier}"`:''}>
     <circle cx="100" cy="100" r="96" fill="#f4f0e5"/>
     <g stroke="#55434c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
       <ellipse cx="100" cy="183" rx="57" ry="7" fill="#665079" opacity=".09" stroke="none"/>
