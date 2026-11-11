@@ -166,12 +166,27 @@ class ProfileTests(unittest.TestCase):
         for rows in [board['leaders'],board['neighbors']]:
             entry=next(row for row in rows if row['id']==user['id'])
             self.assertEqual(entry['avatar'],self.chosen)
+            self.assertEqual(entry['level'],2)
             self.assertNotIn('password_hash',entry)
             self.assertNotIn('appearance',entry)
         dashboard=self.call('GET','/api/staff/dashboard',token=self.staff['token'])
         self.assertEqual(next(u for u in dashboard['users'] if u['id']==user['id'])['avatar'],self.chosen)
         self.assertEqual(next(p for p in dashboard['products'] if p['id']==101)['stock'],8)
         self.assertFalse(self.me(self.other)['profile_customized'])
+
+    def test_ranking_levels_follow_claimed_rewards_not_score_and_cap_at_five(self):
+        for claimed,expected in ((0,0),(4,4),(7,5)):
+            with self.subTest(claimed=claimed):
+                with self.app.db.transaction(write=True) as tx:
+                    tx.execute('UPDATE users SET score=59,rewards_claimed=? WHERE id=?',(claimed,self.buyer['user']['id']))
+                user=self.me(self.buyer)
+                self.assertEqual(user['level'],expected)
+                board=self.call('GET','/api/leaderboard',token=self.buyer['token'])
+                for entry in (board['leaders'][0],board['neighbors'][0],board['me']):
+                    self.assertEqual(entry['id'],user['id'])
+                    self.assertEqual(entry['level'],expected)
+                    for key in ('phone','password_hash','rewards_claimed','claimed_milestones'):
+                        self.assertNotIn(key,entry)
 
     def test_legacy_face_choices_map_to_bread_without_losing_other_customizations(self):
         for old,new in [('round','madeleine'),('oval','financier'),('square','pound'),('soboro','madeleine'),('salt','financier'),('toast','pound')]:
