@@ -21,7 +21,10 @@ const staffSearch = {inventory:'',pickup:'',queue:'',users:'',events:''};
 export function initAdmin(shared) {
   helpers = shared;
   if (!inputListenerAdded) {
+    const clearFormError = event => event.target.closest?.('form')?.querySelector('[data-form-error]')?.remove();
+    document.addEventListener('change', clearFormError);
     document.addEventListener('input', event => {
+      clearFormError(event);
       if(event.target.closest?.('#admin-manual-grant')){
         if(['user_id','name','product_id','quantity','points','reason','gift_name','badge_id','title_id'].includes(event.target.name))grantDraft[event.target.name]=event.target.value;
         if(event.target.name==='user_id'&&['badge','title'].includes(grantKind)){
@@ -267,7 +270,17 @@ function badgeManagement(){
   return `<details id="admin-badge-management" class="badge-management"><summary>배지 추가·보유 현황</summary><div class="badge-management-content"><section class="content-card narrow"><h2>새 배지 추가</h2><form id="admin-badge-create"><div class="field"><label for="badge-name">배지 이름</label><input id="badge-name" name="name" maxlength="40" required></div><div class="field"><label for="badge-description">획득 방법 안내</label><input id="badge-description" name="description" maxlength="240" placeholder="OO하면 이 배지를 얻을 수 있어요." required></div><div class="field"><label for="badge-icon">배지 그림</label><select id="badge-icon" name="icon" required>${(helpers.badgeIcons||[]).map(([key,label])=>`<option value="${key}">${escape(label)}</option>`).join('')}</select></div><p class="form-hint">추가한 배지는 획득 조건을 확인한 담당자가 지급합니다.</p><button type="submit" class="primary-button full">배지 추가</button></form></section><div class="table-wrap"><table><thead><tr><th>사용자</th><th>보유 배지·획득 시각</th><th>착용 배지</th></tr></thead><tbody>${list('users').map(user=>`<tr><td>${buyerIdentity(user.id,user.name)}<br><small class="muted">${escape(user.phone||'')}</small></td><td>${(user.badges||[]).filter(b=>b.owned).map(b=>`<span class="badge-mini" title="${stamp(b.earned_at)}">${picture(b)}${escape(b.name)} <small>${stamp(b.earned_at)}</small></span>`).join('')||'없음'}</td><td>${escape(user.equipped_badge?.name||'없음')}</td></tr>`).join('')}</tbody></table></div></div></details>`;
 }
 function titleManagement(){
-  return `<details id="admin-title-management" class="badge-management"><summary>칭호 추가·보유 현황</summary><div class="badge-management-content"><section class="content-card narrow"><h2>커스텀 칭호 추가</h2><form id="admin-title-create"><div class="field"><label for="title-name">칭호 이름</label><input id="title-name" name="name" maxlength="40" required></div><div class="field"><label for="title-description">칭호 획득 방법</label><input id="title-description" name="description" maxlength="240" placeholder="예: 30점 보상을 받고 담당자에게 요청" required></div><div class="field"><label for="title-style">칭호 스타일</label><select id="title-style" name="style" required>${(helpers.titleStyles||[]).map(([key,label])=>`<option value="${key}">${escape(label)}</option>`).join('')}</select></div><button type="submit" class="primary-button full">칭호 추가</button></form></section><div class="table-wrap"><table><thead><tr><th>사용자</th><th>보유 칭호·획득 시각</th><th>착용 칭호</th></tr></thead><tbody>${list('users').map(user=>`<tr><td>${buyerIdentity(user.id,user.name)}<br><small class="muted">${escape(user.phone||'')}</small></td><td>${(user.titles||[]).filter(t=>t.owned).map(t=>`<span class="badge-mini">${helpers.profileTitle?.({equipped_title:t})||escape(t.name)} <small>${stamp(t.earned_at)}</small></span>`).join('')||'없음'}</td><td>${escape(user.equipped_title?.name||'없음')}</td></tr>`).join('')}</tbody></table></div></div></details>`;
+  const customTitles=list('titles').filter(title=>title.rule==='manual');
+  return `<details id="admin-title-management" class="badge-management"><summary>칭호 추가·보유 현황</summary><div class="badge-management-content"><section class="content-card narrow"><h2>커스텀 칭호 추가</h2><form id="admin-title-create"><div class="field"><label for="title-name">칭호 이름</label><input id="title-name" name="name" maxlength="40" required></div><div class="field"><label for="title-description">칭호 획득 방법</label><input id="title-description" name="description" maxlength="240" placeholder="예: 30점 보상을 받고 담당자에게 요청" required></div><div class="field"><label for="title-style">칭호 스타일</label><select id="title-style" name="style" required>${(helpers.titleStyles||[]).map(([key,label])=>`<option value="${key}">${escape(label)}</option>`).join('')}</select></div><p class="form-hint">칭호를 만든 뒤 사용자에게 지급해야 착용할 수 있어요.</p><button type="submit" class="primary-button full">칭호 만들기</button></form></section>${customTitles.length?`<section class="content-card"><h3>등록한 커스텀 칭호</h3><div class="custom-title-list">${customTitles.map(title=>`<div class="custom-title-row">${helpers.profileTitle?.({equipped_title:title})||escape(title.name)}<button type="button" class="secondary-button" data-action="admin-title-grant" data-title="${escape(title.id)}" aria-label="${escape(title.name)} 사용자에게 지급">지급하기</button></div>`).join('')}</div></section>`:''}<div class="table-wrap"><table><thead><tr><th>사용자</th><th>보유 칭호·획득 시각</th><th>착용 칭호</th></tr></thead><tbody>${list('users').map(user=>`<tr><td>${buyerIdentity(user.id,user.name)}<br><small class="muted">${escape(user.phone||'')}</small></td><td>${(user.titles||[]).filter(t=>t.owned).map(t=>`<span class="badge-mini">${helpers.profileTitle?.({equipped_title:t})||escape(t.name)} <small>${stamp(t.earned_at)}</small></span>`).join('')||'없음'}</td><td>${escape(user.equipped_title?.name||'없음')}</td></tr>`).join('')}</tbody></table></div></div></details>`;
+}
+function selectTitleForGrant(titleId){
+  if(!list('titles').some(title=>title.id===titleId))return false;
+  eventTab='manual';grantRecipientMode='account';grantKind='title';grantDraft={title_id:titleId};
+  return true;
+}
+function focusTitleRecipient(){
+  const recipient=document.querySelector('#grant-user');
+  recipient?.focus();recipient?.scrollIntoView({block:'center'});
 }
 function manualGrantPanel(){
   const guest=grantRecipientMode==='guest',supplies=data().event_supplies||[];
@@ -350,8 +363,19 @@ export function openStaffLogin() {
   helpers.modal(loginForm());
 }
 
+function inventoryDeltaField(id) {
+  return `<div class="field" data-inventory-delta><label for="${id}">수정할 수량</label><input type="hidden" name="direction" value="add"><div class="inventory-direction" role="group" aria-label="재고 변경 방식"><button type="button" class="tab-chip active" data-action="admin-inventory-direction" data-direction="add" aria-pressed="true">추가 (+)</button><button type="button" class="tab-chip" data-action="admin-inventory-direction" data-direction="subtract" aria-pressed="false">차감 (−)</button></div><input id="${id}" name="delta" type="number" inputmode="numeric" min="1" max="10000" step="1" placeholder="수량 입력" required></div>`;
+}
+
+function inventoryDelta(values) {
+  const quantity=Number(values.get('delta')),direction=values.get('direction')||'add';
+  if(!Number.isInteger(quantity)||quantity<1||quantity>10000)throw new Error('수정할 수량은 1~10,000 사이의 정수로 입력해 주세요.');
+  if(!['add','subtract'].includes(direction))throw new Error('추가 또는 차감을 선택해 주세요.');
+  return direction==='subtract'?-quantity:quantity;
+}
+
 function adjustmentModal(productId) {
-  helpers.modal(`<div class="auth-logo">${i('box')} INVENTORY NOTE</div><h2>현판·이벤트 재고 수정</h2><p class="modal-description">추가 입고는 +, 차감은 −로 적어주세요.<br>예판 대기는 예약 등록·수령 처리에 따라 자동 반영됩니다.</p><form id="admin-inventory"><div class="field"><label for="admin-adjust-product">품목</label><select id="admin-adjust-product" name="product_id">${productList().map(product => `<option value="${product.id}"${String(product.id) === String(productId) ? ' selected' : ''}>${escape(product.name)}</option>`).join('')}</select></div><div class="field"><label for="admin-adjust-delta">수정할 수량</label><input id="admin-adjust-delta" name="delta" type="number" min="-10000" max="10000" step="1" placeholder="예: 10 또는 -2" required></div><div class="field"><label for="admin-adjust-reason">수정 사유</label><input id="admin-adjust-reason" name="reason" maxlength="200" placeholder="예: 플레인 휘낭시에 추가 입고" required></div><button class="primary-button full" type="submit">${i('check')}재고에 반영하기</button></form>`);
+  helpers.modal(`<div class="auth-logo">${i('box')} INVENTORY NOTE</div><h2>현판·이벤트 재고 수정</h2><p class="modal-description">추가 또는 차감을 선택하고 수량을 입력해 주세요.<br>예판 대기는 예약 등록·수령 처리에 따라 자동 반영됩니다.</p><form id="admin-inventory"><div class="field"><label for="admin-adjust-product">품목</label><select id="admin-adjust-product" name="product_id">${productList().map(product => `<option value="${product.id}"${String(product.id) === String(productId) ? ' selected' : ''}>${escape(product.name)}</option>`).join('')}</select></div>${inventoryDeltaField('admin-adjust-delta')}<div class="field"><label for="admin-adjust-reason">수정 사유</label><input id="admin-adjust-reason" name="reason" maxlength="200" placeholder="예: 플레인 휘낭시에 추가 입고" required></div><button class="primary-button full" type="submit">${i('check')}재고에 반영하기</button></form>`);
 }
 
 function importModal() {
@@ -363,10 +387,20 @@ function memoModal() {
 }
 
 export async function handleAdminClick(action, element) {
-  if(action==='admin-supply-adjust'){helpers.modal(`<h2>오트밀 미니바이트 재고 수정</h2><form id="admin-event-supply"><div class="field"><label for="supply-delta">수정할 수량</label><input id="supply-delta" name="delta" type="number" min="-10000" max="10000" required></div><div class="field"><label for="supply-reason">수정 사유</label><input id="supply-reason" name="reason" maxlength="200" required></div><button type="submit" class="primary-button full">재고에 반영하기</button></form>`);return true;}
+  if(action==='admin-supply-adjust'){helpers.modal(`<h2>오트밀 미니바이트 재고 수정</h2><form id="admin-event-supply">${inventoryDeltaField('supply-delta')}<div class="field"><label for="supply-reason">수정 사유</label><input id="supply-reason" name="reason" maxlength="200" required></div><button type="submit" class="primary-button full">재고에 반영하기</button></form>`);return true;}
   if (!action?.startsWith('admin-')) return false;
   const { state, api, refresh, render, closeModal, toast } = helpers;
   if (action === 'admin-route') { state.route = element.dataset.route; location.hash = state.route; render(); }
+  else if(action==='admin-inventory-direction'){
+    if(!['add','subtract'].includes(element.dataset.direction))return true;
+    const control=element.closest('[data-inventory-delta]');if(!control)return true;
+    control.querySelector('[name="direction"]').value=element.dataset.direction;
+    control.querySelectorAll('[data-action="admin-inventory-direction"]').forEach(button=>{
+      const selected=button.dataset.direction===element.dataset.direction;
+      button.classList.toggle('active',selected);button.setAttribute('aria-pressed',String(selected));
+    });
+    element.closest('form')?.querySelector('[data-form-error]')?.remove();
+  }
   else if(action==='admin-sale-quantity'){
     const form=element.closest('#admin-manual-sale'),id=Number(element.dataset.product),delta=Number(element.dataset.delta);
     const input=form?.querySelector(`[data-sale-product="${id}"]`),product=productList().find(p=>p.id===id);
@@ -375,6 +409,9 @@ export async function handleAdminClick(action, element) {
     input.max=String(maximum);
     input.value=String(Math.max(0,Math.min(maximum,Math.trunc(Number(input.value)||0)+delta)));
     updateManualSale(form);
+  }
+  else if(action==='admin-title-grant'){
+    if(selectTitleForGrant(element.dataset.title)){render();focusTitleRecipient();}
   }
   else if(action==='admin-event-tab'){eventTab=element.dataset.tab;render();}
   else if(action==='admin-notice-delete'){
@@ -488,8 +525,10 @@ export async function handleAdminSubmit(form) {
       await createAction('event-notice-create','/api/staff/event-notices',{content:values.get('content')});
       message='구매자 알림판에 공지를 올렸어요.';
     } else if(form.id==='admin-title-create'){
-      await createAction('title-create','/api/staff/titles',{name:values.get('name'),description:values.get('description'),style:values.get('style')});
-      message='칭호와 획득 안내를 추가했어요.';
+      const {title}=await createAction('title-create','/api/staff/titles',{name:values.get('name'),description:values.get('description'),style:values.get('style')});
+      data().titles=[...list('titles').filter(item=>item.id!==title.id),title];
+      selectTitleForGrant(title.id);
+      message='칭호를 만들었어요. 지급할 사용자를 선택해 주세요.';
     } else if(form.id==='admin-badge-create'){
       await createAction('badge-create','/api/staff/badges',{name:values.get('name'),description:values.get('description'),icon:values.get('icon')});
       message='배지와 획득 안내를 추가했어요.';
@@ -508,12 +547,12 @@ export async function handleAdminSubmit(form) {
       const {grant}=grantKind==='badge'?await createAction('badge-grant','/api/staff/badge-grants',
         {user_id:body.user_id,badge_id:body.badge_id,reason:body.reason}):grantKind==='title'?await createAction('title-grant','/api/staff/title-grants',{user_id:body.user_id,title_id:body.title_id,reason:body.reason}):await createAction('manual-event-grant','/api/staff/manual-event-grants',body);
       grantDraft={};
-      message=grantKind==='badge'?`배지 지급 #${grant.id} 기록을 남겼어요.`:grantKind==='title'?`칭호 지급 #${grant.id} 기록을 남겼어요.`:`임의 지급 #${grant.id} 기록을 남겼어요.`;
+      message=grantKind==='badge'?`배지 지급 #${grant.id} 기록을 남겼어요.`:grantKind==='title'?`칭호 지급 #${grant.id} 완료! 계정 관리 → 칭호에서 착용할 수 있어요.`:`임의 지급 #${grant.id} 기록을 남겼어요.`;
     } else if(form.id==='admin-event-supply'){
-      await createAction('event-supply','/api/staff/event-supplies',{key:'oatmeal',delta:Number(values.get('delta')),reason:values.get('reason')});
+      await createAction('event-supply','/api/staff/event-supplies',{key:'oatmeal',delta:inventoryDelta(values),reason:values.get('reason')});
       message='이벤트 물품 재고를 반영했어요.';
     } else if (form.id === 'admin-inventory') {
-      await createAction('inventory', '/api/staff/inventory', { product_id: Number(values.get('product_id')), bucket: 'stock', delta: Number(values.get('delta')), reason: values.get('reason') });
+      await createAction('inventory', '/api/staff/inventory', { product_id: Number(values.get('product_id')), bucket: 'stock', delta: inventoryDelta(values), reason: values.get('reason') });
       message = '재고와 수정 기록을 반영했어요.';
     } else if (form.id === 'admin-manual-sale') {
       const items = [...form.querySelectorAll('[data-sale-product]')].map(input => ({ product_id: Number(input.dataset.saleProduct), quantity: Number(input.value) })).filter(item => item.quantity > 0);
@@ -561,6 +600,7 @@ export async function handleAdminSubmit(form) {
       return true;
     }
     render();
+    if(form.id==='admin-title-create')focusTitleRecipient();
     toast(message);
   } catch (error) {
     formError(form, error);

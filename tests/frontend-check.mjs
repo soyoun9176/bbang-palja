@@ -16,6 +16,7 @@ function fixture({guest = false, storage = new Map(), admin=false} = {}) {
   const root = {innerHTML: ''};
   let renderCount = 0;
   const requests = [];
+  const listeners = {};
   const routeChanges = [];
   const response = (body, status = 200) => ({ok: status < 400, status, json: async () => body});
   const context = {
@@ -25,7 +26,7 @@ function fixture({guest = false, storage = new Map(), admin=false} = {}) {
     localStorage: {getItem: () => guest ? null : 'token-A', removeItem() {}, setItem() {}},
     sessionStorage: {getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key)},
     window: {KAMBO_CONFIG: {apiBase: ''}, addEventListener() {}},
-    document: {hidden: false, activeElement: {tagName: 'BODY'}, addEventListener() {}, querySelectorAll: () => [], getElementById: () => null, querySelector: selector => selector === '#app' ? root : selector === '.modal' && remote.modal ? {} : null},
+    document: {hidden: false, activeElement: {tagName: 'BODY'}, addEventListener(type,listener) {listeners[type]=listener;}, querySelectorAll: () => [], getElementById: () => null, querySelector: selector => selector === '#app' ? root : selector === '.modal' && remote.modal ? {} : null},
     initAdmin() {}, renderAdmin() {}, renderStaffLogin() {}, handleAdminClick() {}, handleAdminSubmit() {},
     setInterval: fn => {context.poll = fn;}, setTimeout: fn => queueMicrotask(fn),
     recordRender: () => renderCount++,
@@ -53,7 +54,7 @@ function fixture({guest = false, storage = new Map(), admin=false} = {}) {
   vm.createContext(context);
   vm.runInContext(source + '\nconst renderPage = render; render = recordRender; toast = () => {}; modal = () => {};', context);
   return {
-    context, remote, storage, requests, response, root, routeChanges,
+    context, remote, storage, requests, response, root, routeChanges, listeners,
     run: script => vm.runInContext(script, context),
     get renders() {return renderCount;},
   };
@@ -77,6 +78,66 @@ test('phone formatting accepts only exact 010 digits or canonical dashes',()=>{
   for(const phone of ['010 1234 5678','010-12345678','0101234567','01112345678','01012345678 ','01012345678\n','010-1234-567a','０１０１２３４５６７８']){
     f.context.badPhone=phone;assert.throws(()=>f.run('normalizePhone(badPhone)'),/전화번호/);
   }
+});
+
+function signupFixture(){
+  const f=fixture({guest:true}),button={dataset:{},innerHTML:'계정 만들기',disabled:false};
+  const fields={name:{value:'새 가입자'},pin:{value:'1234'}};
+  const form={id:'buyer-auth',dataset:{mode:'register'},isConnected:true,fields,error:null,
+    querySelector:selector=>selector==='[type=submit]'?button:selector==='.error-message'?form.error:null,
+    prepend(node){this.error=node;}};
+  fields.phone={id:'auth-phone',name:'phone',value:'01012345678',selectionStart:11,validity:'',
+    closest:selector=>selector==='#buyer-auth'||selector==='form'?form:null,
+    matches:selector=>selector==='[data-phone-input]',setCustomValidity(message){this.validity=message;},
+    setSelectionRange(start,end){this.selectionStart=start;this.selectionEnd=end;}};
+  f.context.document.activeElement=fields.phone;
+  f.context.document.createElement=()=>({setAttribute(){},remove(){form.error=null;}});
+  f.context.FormData=class{constructor(form){this.entries=Object.entries(form.fields).map(([key,input])=>[key,input.value]);}[Symbol.iterator](){return this.entries[Symbol.iterator]();}};
+  f.remote.profileCustomized=true;f.run('closeModal=()=>{}');
+  return {...f,form,fields,phone:fields.phone,
+    input(value,caret=value.length){fields.phone.value=value;fields.phone.selectionStart=caret;f.listeners.input({target:fields.phone});},
+    submit:()=>f.listeners.submit({target:form,preventDefault(){}})};
+}
+
+test('phone editing formats partial values and repairs dashes without moving a middle caret to the end',()=>{
+  const f=signupFixture();
+  for(const [raw,expected] of [['010','010'],['0105','010-5'],['01055556','010-5555-6'],['010-55556666','010-5555-6666']]){
+    f.input(raw);assert.equal(f.phone.value,expected);
+  }
+  const raw='010-12534-567',caret=7,digitsBefore=raw.slice(0,caret).replaceAll('-','').length;
+  f.input(raw,caret);assert.equal(f.phone.value,'010-1253-4567');
+  assert.equal(f.phone.value.slice(0,f.phone.selectionStart).replaceAll('-','').length,digitsBefore);
+  assert.ok(f.phone.selectionStart<f.phone.value.length);
+  f.input('010-123-5678',7);assert.equal(f.phone.value,'010-1235-678');
+  f.input('');assert.equal(f.phone.value,'');
+});
+
+test('phone formatting preserves invalid characters and excess digits for validation instead of silently fixing them',()=>{
+  const f=signupFixture();
+  for(const raw of ['010 1234 5678','0101234567a','０１０１２３４５６７８','010123456789']){
+    f.input(raw);assert.equal(f.phone.value,raw);
+    f.listeners.focusout({target:f.phone});assert.match(f.phone.validity,/전화번호/);
+  }
+  f.phone.value='010-12345678';f.listeners.focusout({target:f.phone});
+  assert.equal(f.phone.value,'010-1234-5678');assert.equal(f.phone.validity,'');
+});
+
+test('after a duplicate signup error editing the phone clears the error and formats the retry',async()=>{
+  const f=signupFixture();f.input('01012345678');
+  f.context.fetchOverride=(path,options)=>path==='/api/auth/register'?f.response({error:'이미 있는 번호입니다'},409):f.context.normalFetch(path,options);
+  await f.submit();assert.equal(f.form.error.textContent,'이미 있는 번호입니다');
+  f.input('010-55556666');assert.equal(f.phone.value,'010-5555-6666');assert.equal(f.form.error,null);
+  f.context.fetchOverride=(path,options)=>path==='/api/auth/register'?f.response({token:'token-A',user:{id:1,name:'새 가입자'}}):f.context.normalFetch(path,options);
+  await f.submit();
+  assert.equal(f.form.error,null);
+  assert.equal(JSON.parse(f.requests.filter(request=>request.path==='/api/auth/register').at(-1).body).phone,'010-5555-6666');
+});
+
+test('a delayed duplicate error for the previous phone is ignored after the input changes',async()=>{
+  const f=signupFixture();f.input('01012345678');let finish;
+  f.context.fetchOverride=(path,options)=>path==='/api/auth/register'?new Promise(resolve=>{finish=()=>resolve(f.response({error:'이미 있는 번호입니다'},409));}):f.context.normalFetch(path,options);
+  const pending=f.submit();f.input('01055556666');finish();await pending;
+  assert.equal(f.form.error,null);assert.equal(f.phone.value,'010-5555-6666');
 });
 
 test('login sends normalized phone and password without nickname',async()=>{
@@ -1230,6 +1291,72 @@ test('inventory submission always targets walk-in stock',async()=>{
     product_id:101,bucket:'stock',delta:3,reason:'추가 입고',request_id:'request-1'}});
 });
 
+function inventoryFormFixture(id='admin-inventory'){
+  const f=adminFixture();
+  const form={id,isConnected:true,values:new Map([['product_id','101'],['delta','0'],['reason','재고 확인']]),error:null,
+    querySelector(selector){return selector==='[data-form-error]'?this.error:null;},
+    prepend(node){this.error=node;},reset(){}};
+  f.context.document.createElement=()=>({dataset:{},setAttribute(){},scrollIntoView(){},remove(){form.error=null;}});
+  f.context.inventoryForm=form;
+  return {...f,form,input:{name:'delta',value:'0',dataset:{},closest:selector=>selector==='form'?form:null},
+    submit:()=>f.run('handleAdminSubmit(inventoryForm)')};
+}
+
+test('editing stock values clears the previous server error and a corrected retry succeeds',async()=>{
+  for(const event of ['input','change']){
+    const f=inventoryFormFixture();
+    f.form.values.set('delta','2');
+    f.context.respond=(_path,options)=>{
+      if(options.body.delta===2)throw Object.assign(new Error('재고를 다시 확인해 주세요.'),{status:409});
+      return {};
+    };
+    await f.submit();assert.match(f.form.error.textContent,/재고를 다시 확인/);
+    f.form.values.set('delta','3');f.input.value='3';f.listeners[event]({target:f.input});
+    assert.equal(f.form.error,null);
+    await f.submit();assert.equal(f.form.error,null);
+    assert.equal(f.requests.at(-1).body.delta,3);
+  }
+});
+
+test('stock and oatmeal adjustments offer add and subtract with an unsigned mobile quantity field',async()=>{
+  for(const action of ['admin-adjust','admin-supply-adjust']){
+    const f=adminFixture();let html='';f.context.shared.modal=markup=>{html=markup;};
+    await f.run(`handleAdminClick('${action}',{dataset:{product:'101'}})`);
+    assert.match(html,/data-direction="add" aria-pressed="true">추가 \(\+\)/);
+    assert.match(html,/data-direction="subtract" aria-pressed="false">차감 \(−\)/);
+    assert.match(html,/name="delta" type="number" inputmode="numeric" min="1"/);
+    assert.doesNotMatch(html,/min="-10000"/);
+  }
+});
+
+test('direction buttons send signed stock and oatmeal quantities without typing a minus',async()=>{
+  for(const id of ['admin-inventory','admin-event-supply']){
+    const f=inventoryFormFixture(id),hidden={};f.form.values.set('delta','3');
+    Object.defineProperty(hidden,'value',{get:()=>f.form.values.get('direction'),set:value=>f.form.values.set('direction',value)});
+    const control={querySelector:()=>hidden,querySelectorAll:()=>buttons};
+    const buttons=['add','subtract'].map(direction=>({dataset:{direction},classList:{toggle(){}},
+      setAttribute(name,value){this[name]=value;},closest:selector=>selector==='form'?f.form:control}));
+    for(const [direction,expected] of [['subtract',-3],['add',3]]){
+      f.context.directionButton=buttons.find(button=>button.dataset.direction===direction);
+      await f.run("handleAdminClick('admin-inventory-direction',directionButton)");
+      assert.equal(f.context.directionButton['aria-pressed'],'true');
+      assert.equal(buttons.find(button=>button.dataset.direction!==direction)['aria-pressed'],'false');
+      await f.submit();
+      assert.equal(f.requests.at(-1).body.delta,expected);
+      assert.equal(f.requests.at(-1).path,id==='admin-inventory'?'/api/staff/inventory':'/api/staff/event-supplies');
+    }
+  }
+});
+
+test('invalid unsigned adjustment quantities are rejected before sending a stock request',async()=>{
+  for(const value of ['','0','-1','1.5','10001','NaN']){
+    const f=inventoryFormFixture();f.form.values.set('delta',value);
+    await f.submit();
+    assert.match(f.form.error.textContent,/1~10,000 사이의 정수/);
+    assert.equal(f.requests.length,0);
+  }
+});
+
 test('inventory offers a collapsed preorder status table with plain menu text and live status',()=>{
   const f=adminFixture();f.state.route='inventory';
   f.state.staffData.reservations=[manualReservation(),manualReservation({id:8,name:'수령요청자',status:'pending'}),
@@ -1470,6 +1597,49 @@ test('staff custom title creation sends only the validated name hint and style',
  const f=adminFixture();f.context.respond=async()=>({title:{id:'custom_1'}});
  await f.submit({name:'캄딜 대마법사',description:'담당자 확인',style:'gold'},'admin-title-create');
  assert.deepEqual(f.requests[0],{path:'/api/staff/titles',method:'POST',body:{name:'캄딜 대마법사',description:'담당자 확인',style:'gold',request_id:'request-1'}});
+});
+
+test('creating a custom title prepares an explicit recipient grant without awarding it automatically',async()=>{
+ const f=adminFixture(),title={id:'custom_new',name:'새 칭호',description:'담당자 확인',style:'gold',rule:'manual'};
+ let focused=0;f.nodes.set('#grant-user',{focus(){focused++;},scrollIntoView(){}});
+ f.context.respond=async()=>({title});
+ f.run("grantRecipientMode='guest';grantDraft={user_id:'10',name:'이전 사람'}");
+ await f.submit({name:title.name,description:title.description,style:title.style},'admin-title-create');
+ assert.equal(f.requests.length,1);assert.equal(f.requests[0].path,'/api/staff/titles');
+ assert.equal(f.run('grantRecipientMode'),'account');assert.equal(f.run('grantKind'),'title');
+ assert.equal(f.run('grantDraft.title_id'),title.id);assert.equal(f.run('grantDraft.user_id'),undefined);
+ assert.match(f.run('renderAdmin()'),/<option value="custom_new" selected/);
+ assert.match(f.messages[0],/지급할 사용자를 선택/);assert.equal(focused,1);
+});
+
+test('existing custom title definitions offer a direct grant action and keep ownership separate',async()=>{
+ const f=adminFixture();f.state.staffData.titles=[{id:'custom_existing',name:'등록된 칭호',style:'magic',rule:'manual'}];
+ f.run("eventTab='manual';grantKind='title';grantDraft={user_id:'10'}");
+ assert.match(f.run('renderAdmin()'),/data-action="admin-title-grant" data-title="custom_existing"/);
+ f.run("grantRecipientMode='guest'");
+ await f.run("handleAdminClick('admin-title-grant',{dataset:{title:'custom_existing'}})");
+ const html=f.run('renderAdmin()');
+ assert.match(html,/name="user_id"/);assert.match(html,/<option value="custom_existing" selected/);
+ assert.equal(f.run('grantDraft.user_id'),undefined);assert.equal(f.requests.length,0);
+});
+
+test('unowned custom title instructions explain staff granting and owned custom titles can be saved',async()=>{
+ const f=fixture(),title={id:'custom_gold',name:'나만의 연금술사',description:'담당자 확인',style:'gold',rule:'manual',owned:false};
+ f.remote.titles=[title];await f.run('refresh()');
+ const panel={hidden:true,innerHTML:'',scrollIntoView(){}},original=f.context.document.querySelector;
+ f.context.document.querySelector=selector=>selector==='[data-title-info]'?panel:original(selector);
+ f.run("showTitleInfo('custom_gold')");assert.match(panel.innerHTML,/담당자에게 칭호를 지급받으면 착용/);
+ assert.doesNotMatch(f.run('profileTitles(state.user)'),/name="title_id" value="custom_gold"/);
+ f.remote.titles=[{...title,owned:true}];await f.run('refresh()');
+ assert.match(f.run('profileTitles(state.user)'),/name="title_id" value="custom_gold"/);
+ profileForm(f);
+ f.context.fetchOverride=async(path,options)=>{
+  if(path==='/api/profile'){f.remote.equippedTitle=f.remote.titles.find(t=>t.id===JSON.parse(options.body).title_id);return f.response(await(await f.context.normalFetch('/api/auth/me')).json());}
+  return f.context.normalFetch(path,options);
+ };
+ await f.run("saveProfile(profileForm,{...chosenAvatar,glasses:'none',title_id:'custom_gold'})");
+ assert.equal(JSON.parse(f.requests.find(r=>r.path==='/api/profile').body).title_id,title.id);
+ f.run('renderPage()');assert.match(f.root.innerHTML,/나만의 연금술사/);
 });
 
 test('staff schedule builds date columns and sorted time rows from server data only',()=>{
