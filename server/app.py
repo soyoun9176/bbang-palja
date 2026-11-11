@@ -20,6 +20,7 @@ from .game import DICE, MILESTONES, public_dice, preorder_kind
 from .badges import BADGE_ICONS, catalog as badge_catalog, award as award_badge, award_milestone as award_milestone_badges, initialize as initialize_badges, profile_catalog as user_badge_catalog, equipped as equipped_badge
 from .titles import TITLE_STYLES, catalog as title_catalog, award as award_title, award_milestone as award_milestone_titles, profile_catalog as user_title_catalog, equipped as equipped_title
 from .achievements import initialize as initialize_achievements, reconcile as reconcile_achievements, purchase_totals, progress as achievement_progress
+from .notices import publish as publish_notice
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_CHARACTER_LEVEL = 5
@@ -92,6 +93,8 @@ def has_sunglasses(user):
 
 
 def profile_info(row):
+    if row.get('role')=='staff':
+        return {'avatar':None,'profile_kind':'admin','profile_customized':False,'equipped_badge':None,'equipped_title':None}
     avatar = default_avatar(row["id"])
     stored = row.get("appearance")
     if stored:
@@ -109,6 +112,19 @@ def profile_info(row):
     if avatar['glasses'] == 'sunglasses' and not has_sunglasses(row):
         avatar['glasses'] = 'none'
     return {"avatar": avatar, "profile_customized": bool(stored), 'equipped_badge':equipped_badge(row), 'equipped_title':equipped_title(row)}
+
+
+def event_notices(tx):
+    result=[]
+    for row in tx.all('SELECT id,kind,user_id,content,created_at FROM event_notices ORDER BY id DESC LIMIT 2'):
+        if row['kind']=='achievement':
+            user=user_by_id(tx,row['user_id'])
+            author={'id':user['id'],'name':user['name'],**profile_info(user)}
+        else:
+            # A shared administrator persona, independent of staff login profiles.
+            author={'name':'관리자','avatar':None,'profile_kind':'admin','equipped_badge':None,'equipped_title':None}
+        result.append({key:row[key] for key in ('id','kind','content','created_at')} | {'author':author})
+    return result
 
 
 def validate_avatar(value):
@@ -645,6 +661,9 @@ class Application:
         if method == "GET" and path == "/api/products":
             with self.db.transaction() as tx:
                 return {"products": products(tx)}
+        if method == 'GET' and path == '/api/event-notices':
+            with self.db.transaction() as tx:
+                return {'notices':event_notices(tx)}
         if method == 'POST' and path == '/api/guest/orders':
             name = person_name(body.get('name'))
             receipt = body.get('request_id')
@@ -699,6 +718,7 @@ class Application:
                 result['pickup_defaults'] = {'name':user['name'],'phone':user['phone']}
             return result
         if method == "POST" and path == "/api/profile":
+            check(user['role']=='buyer', '관리자는 공용 프로필을 사용합니다.',403)
             check('avatar' in body and set(body)<={'avatar','badge_id','title_id'}, "저장할 캐릭터·배지·칭호 정보만 보내 주세요.")
             avatar = validate_avatar(body["avatar"])
             with self.db.transaction(write=True) as tx:
@@ -862,6 +882,7 @@ class Application:
                 stats["milk_stock"] = milk_stock(tx)
                 stats['pending_rewards'] = tx.one("SELECT COUNT(*) AS n FROM reward_requests WHERE status='pending'")['n']
                 return {"orders": all_orders(tx, include_inventory=True), "products": products(tx), "stats": stats,
+                        'event_notices':event_notices(tx),
                         "event_supplies": tx.all('SELECT * FROM event_supplies ORDER BY key'),
                         'reward_requests': reward_requests(tx),
                         'manual_grants': tx.all('SELECT * FROM manual_event_grants ORDER BY id DESC LIMIT 300'),
@@ -880,6 +901,20 @@ class Application:
                         "memos": tx.all("SELECT * FROM memos ORDER BY id DESC LIMIT 100"),
                         "schedule": tx.all("SELECT * FROM schedule ORDER BY id"),
                         "rewards": reward_history(tx)}
+        if method == 'POST' and path == '/api/staff/event-notices':
+            with self.db.transaction(write=True) as tx:
+                def create_notice():
+                    check(set(body)<={'content','request_id'}, '공지 내용만 입력해 주세요.')
+                    content=string(body.get('content'),'공지 내용',maximum=160)
+                    notice_id=publish_notice(tx,'announcement',content,now(),staff_id=user['id'])
+                    return {'notice':next(row for row in event_notices(tx) if row['id']==notice_id)}
+                return idempotent(tx,user,'event-notice-create',body,create_notice)
+        notice_delete=re.fullmatch(r'/api/staff/event-notices/(\d+)/delete',path)
+        if method=='POST' and notice_delete:
+            check(not body, '삭제할 알림 번호만 지정해 주세요.')
+            with self.db.transaction(write=True) as tx:
+                tx.execute('DELETE FROM event_notices WHERE id=?',(int(notice_delete[1]),))
+                return {'ok':True}
         if method == 'POST' and path == '/api/staff/badges':
             with self.db.transaction(write=True) as tx:
                 def create_badge():
