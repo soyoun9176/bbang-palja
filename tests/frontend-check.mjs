@@ -1214,6 +1214,32 @@ test('inventory submission always targets walk-in stock',async()=>{
     product_id:101,bucket:'stock',delta:3,reason:'추가 입고',request_id:'request-1'}});
 });
 
+function inventoryFormFixture(id='admin-inventory'){
+  const f=adminFixture();
+  const form={id,isConnected:true,values:new Map([['product_id','101'],['delta','0'],['reason','재고 확인']]),error:null,
+    querySelector(selector){return selector==='[data-form-error]'?this.error:null;},
+    prepend(node){this.error=node;},reset(){}};
+  f.context.document.createElement=()=>({dataset:{},setAttribute(){},scrollIntoView(){},remove(){form.error=null;}});
+  f.context.inventoryForm=form;
+  return {...f,form,input:{name:'delta',value:'0',dataset:{},closest:selector=>selector==='form'?form:null},
+    submit:()=>f.run('handleAdminSubmit(inventoryForm)')};
+}
+
+test('editing stock values clears the previous server error and a corrected retry succeeds',async()=>{
+  for(const event of ['input','change']){
+    const f=inventoryFormFixture();
+    f.context.respond=(_path,options)=>{
+      if(options.body.delta===0)throw Object.assign(new Error('재고 수정량은 0이 될 수 없습니다.'),{status:400});
+      return {};
+    };
+    await f.submit();assert.match(f.form.error.textContent,/0이 될 수 없습니다/);
+    f.form.values.set('delta','3');f.input.value='3';f.listeners[event]({target:f.input});
+    assert.equal(f.form.error,null);
+    await f.submit();assert.equal(f.form.error,null);
+    assert.equal(f.requests.at(-1).body.delta,3);
+  }
+});
+
 test('inventory offers a collapsed preorder status table with plain menu text and live status',()=>{
   const f=adminFixture();f.state.route='inventory';
   f.state.staffData.reservations=[manualReservation(),manualReservation({id:8,name:'수령요청자',status:'pending'}),

@@ -21,7 +21,10 @@ const staffSearch = {inventory:'',pickup:'',queue:'',users:'',events:''};
 export function initAdmin(shared) {
   helpers = shared;
   if (!inputListenerAdded) {
+    const clearFormError = event => event.target.closest?.('form')?.querySelector('[data-form-error]')?.remove();
+    document.addEventListener('change', clearFormError);
     document.addEventListener('input', event => {
+      clearFormError(event);
       if(event.target.closest?.('#admin-manual-grant')){
         if(['user_id','name','product_id','quantity','points','reason','gift_name','badge_id','title_id'].includes(event.target.name))grantDraft[event.target.name]=event.target.value;
         if(event.target.name==='user_id'&&['badge','title'].includes(grantKind)){
