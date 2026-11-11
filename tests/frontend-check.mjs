@@ -1228,15 +1228,55 @@ function inventoryFormFixture(id='admin-inventory'){
 test('editing stock values clears the previous server error and a corrected retry succeeds',async()=>{
   for(const event of ['input','change']){
     const f=inventoryFormFixture();
+    f.form.values.set('delta','2');
     f.context.respond=(_path,options)=>{
-      if(options.body.delta===0)throw Object.assign(new Error('재고 수정량은 0이 될 수 없습니다.'),{status:400});
+      if(options.body.delta===2)throw Object.assign(new Error('재고를 다시 확인해 주세요.'),{status:409});
       return {};
     };
-    await f.submit();assert.match(f.form.error.textContent,/0이 될 수 없습니다/);
+    await f.submit();assert.match(f.form.error.textContent,/재고를 다시 확인/);
     f.form.values.set('delta','3');f.input.value='3';f.listeners[event]({target:f.input});
     assert.equal(f.form.error,null);
     await f.submit();assert.equal(f.form.error,null);
     assert.equal(f.requests.at(-1).body.delta,3);
+  }
+});
+
+test('stock and oatmeal adjustments offer add and subtract with an unsigned mobile quantity field',async()=>{
+  for(const action of ['admin-adjust','admin-supply-adjust']){
+    const f=adminFixture();let html='';f.context.shared.modal=markup=>{html=markup;};
+    await f.run(`handleAdminClick('${action}',{dataset:{product:'101'}})`);
+    assert.match(html,/data-direction="add" aria-pressed="true">추가 \(\+\)/);
+    assert.match(html,/data-direction="subtract" aria-pressed="false">차감 \(−\)/);
+    assert.match(html,/name="delta" type="number" inputmode="numeric" min="1"/);
+    assert.doesNotMatch(html,/min="-10000"/);
+  }
+});
+
+test('direction buttons send signed stock and oatmeal quantities without typing a minus',async()=>{
+  for(const id of ['admin-inventory','admin-event-supply']){
+    const f=inventoryFormFixture(id),hidden={};f.form.values.set('delta','3');
+    Object.defineProperty(hidden,'value',{get:()=>f.form.values.get('direction'),set:value=>f.form.values.set('direction',value)});
+    const control={querySelector:()=>hidden,querySelectorAll:()=>buttons};
+    const buttons=['add','subtract'].map(direction=>({dataset:{direction},classList:{toggle(){}},
+      setAttribute(name,value){this[name]=value;},closest:selector=>selector==='form'?f.form:control}));
+    for(const [direction,expected] of [['subtract',-3],['add',3]]){
+      f.context.directionButton=buttons.find(button=>button.dataset.direction===direction);
+      await f.run("handleAdminClick('admin-inventory-direction',directionButton)");
+      assert.equal(f.context.directionButton['aria-pressed'],'true');
+      assert.equal(buttons.find(button=>button.dataset.direction!==direction)['aria-pressed'],'false');
+      await f.submit();
+      assert.equal(f.requests.at(-1).body.delta,expected);
+      assert.equal(f.requests.at(-1).path,id==='admin-inventory'?'/api/staff/inventory':'/api/staff/event-supplies');
+    }
+  }
+});
+
+test('invalid unsigned adjustment quantities are rejected before sending a stock request',async()=>{
+  for(const value of ['','0','-1','1.5','10001','NaN']){
+    const f=inventoryFormFixture();f.form.values.set('delta',value);
+    await f.submit();
+    assert.match(f.form.error.textContent,/1~10,000 사이의 정수/);
+    assert.equal(f.requests.length,0);
   }
 });
 

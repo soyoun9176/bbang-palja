@@ -353,8 +353,19 @@ export function openStaffLogin() {
   helpers.modal(loginForm());
 }
 
+function inventoryDeltaField(id) {
+  return `<div class="field" data-inventory-delta><label for="${id}">수정할 수량</label><input type="hidden" name="direction" value="add"><div class="inventory-direction" role="group" aria-label="재고 변경 방식"><button type="button" class="tab-chip active" data-action="admin-inventory-direction" data-direction="add" aria-pressed="true">추가 (+)</button><button type="button" class="tab-chip" data-action="admin-inventory-direction" data-direction="subtract" aria-pressed="false">차감 (−)</button></div><input id="${id}" name="delta" type="number" inputmode="numeric" min="1" max="10000" step="1" placeholder="수량 입력" required></div>`;
+}
+
+function inventoryDelta(values) {
+  const quantity=Number(values.get('delta')),direction=values.get('direction')||'add';
+  if(!Number.isInteger(quantity)||quantity<1||quantity>10000)throw new Error('수정할 수량은 1~10,000 사이의 정수로 입력해 주세요.');
+  if(!['add','subtract'].includes(direction))throw new Error('추가 또는 차감을 선택해 주세요.');
+  return direction==='subtract'?-quantity:quantity;
+}
+
 function adjustmentModal(productId) {
-  helpers.modal(`<div class="auth-logo">${i('box')} INVENTORY NOTE</div><h2>현판·이벤트 재고 수정</h2><p class="modal-description">추가 입고는 +, 차감은 −로 적어주세요.<br>예판 대기는 예약 등록·수령 처리에 따라 자동 반영됩니다.</p><form id="admin-inventory"><div class="field"><label for="admin-adjust-product">품목</label><select id="admin-adjust-product" name="product_id">${productList().map(product => `<option value="${product.id}"${String(product.id) === String(productId) ? ' selected' : ''}>${escape(product.name)}</option>`).join('')}</select></div><div class="field"><label for="admin-adjust-delta">수정할 수량</label><input id="admin-adjust-delta" name="delta" type="number" min="-10000" max="10000" step="1" placeholder="예: 10 또는 -2" required></div><div class="field"><label for="admin-adjust-reason">수정 사유</label><input id="admin-adjust-reason" name="reason" maxlength="200" placeholder="예: 플레인 휘낭시에 추가 입고" required></div><button class="primary-button full" type="submit">${i('check')}재고에 반영하기</button></form>`);
+  helpers.modal(`<div class="auth-logo">${i('box')} INVENTORY NOTE</div><h2>현판·이벤트 재고 수정</h2><p class="modal-description">추가 또는 차감을 선택하고 수량을 입력해 주세요.<br>예판 대기는 예약 등록·수령 처리에 따라 자동 반영됩니다.</p><form id="admin-inventory"><div class="field"><label for="admin-adjust-product">품목</label><select id="admin-adjust-product" name="product_id">${productList().map(product => `<option value="${product.id}"${String(product.id) === String(productId) ? ' selected' : ''}>${escape(product.name)}</option>`).join('')}</select></div>${inventoryDeltaField('admin-adjust-delta')}<div class="field"><label for="admin-adjust-reason">수정 사유</label><input id="admin-adjust-reason" name="reason" maxlength="200" placeholder="예: 플레인 휘낭시에 추가 입고" required></div><button class="primary-button full" type="submit">${i('check')}재고에 반영하기</button></form>`);
 }
 
 function importModal() {
@@ -366,10 +377,20 @@ function memoModal() {
 }
 
 export async function handleAdminClick(action, element) {
-  if(action==='admin-supply-adjust'){helpers.modal(`<h2>오트밀 미니바이트 재고 수정</h2><form id="admin-event-supply"><div class="field"><label for="supply-delta">수정할 수량</label><input id="supply-delta" name="delta" type="number" min="-10000" max="10000" required></div><div class="field"><label for="supply-reason">수정 사유</label><input id="supply-reason" name="reason" maxlength="200" required></div><button type="submit" class="primary-button full">재고에 반영하기</button></form>`);return true;}
+  if(action==='admin-supply-adjust'){helpers.modal(`<h2>오트밀 미니바이트 재고 수정</h2><form id="admin-event-supply">${inventoryDeltaField('supply-delta')}<div class="field"><label for="supply-reason">수정 사유</label><input id="supply-reason" name="reason" maxlength="200" required></div><button type="submit" class="primary-button full">재고에 반영하기</button></form>`);return true;}
   if (!action?.startsWith('admin-')) return false;
   const { state, api, refresh, render, closeModal, toast } = helpers;
   if (action === 'admin-route') { state.route = element.dataset.route; location.hash = state.route; render(); }
+  else if(action==='admin-inventory-direction'){
+    if(!['add','subtract'].includes(element.dataset.direction))return true;
+    const control=element.closest('[data-inventory-delta]');if(!control)return true;
+    control.querySelector('[name="direction"]').value=element.dataset.direction;
+    control.querySelectorAll('[data-action="admin-inventory-direction"]').forEach(button=>{
+      const selected=button.dataset.direction===element.dataset.direction;
+      button.classList.toggle('active',selected);button.setAttribute('aria-pressed',String(selected));
+    });
+    element.closest('form')?.querySelector('[data-form-error]')?.remove();
+  }
   else if(action==='admin-sale-quantity'){
     const form=element.closest('#admin-manual-sale'),id=Number(element.dataset.product),delta=Number(element.dataset.delta);
     const input=form?.querySelector(`[data-sale-product="${id}"]`),product=productList().find(p=>p.id===id);
@@ -513,10 +534,10 @@ export async function handleAdminSubmit(form) {
       grantDraft={};
       message=grantKind==='badge'?`배지 지급 #${grant.id} 기록을 남겼어요.`:grantKind==='title'?`칭호 지급 #${grant.id} 기록을 남겼어요.`:`임의 지급 #${grant.id} 기록을 남겼어요.`;
     } else if(form.id==='admin-event-supply'){
-      await createAction('event-supply','/api/staff/event-supplies',{key:'oatmeal',delta:Number(values.get('delta')),reason:values.get('reason')});
+      await createAction('event-supply','/api/staff/event-supplies',{key:'oatmeal',delta:inventoryDelta(values),reason:values.get('reason')});
       message='이벤트 물품 재고를 반영했어요.';
     } else if (form.id === 'admin-inventory') {
-      await createAction('inventory', '/api/staff/inventory', { product_id: Number(values.get('product_id')), bucket: 'stock', delta: Number(values.get('delta')), reason: values.get('reason') });
+      await createAction('inventory', '/api/staff/inventory', { product_id: Number(values.get('product_id')), bucket: 'stock', delta: inventoryDelta(values), reason: values.get('reason') });
       message = '재고와 수정 기록을 반영했어요.';
     } else if (form.id === 'admin-manual-sale') {
       const items = [...form.querySelectorAll('[data-sale-product]')].map(input => ({ product_id: Number(input.dataset.saleProduct), quantity: Number(input.value) })).filter(item => item.quantity > 0);
