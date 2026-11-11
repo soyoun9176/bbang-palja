@@ -35,8 +35,16 @@ def build(output, commit=None):
         (output / name).unlink()
         return '/build/' + target
 
-    admin, profile, dice3d = asset('admin.js'), asset('profile.js'), asset('dice3d.js')
-    app_source = (source / 'app.js').read_text().replace("'./admin.js'", repr(admin)).replace("'./profile.js'", repr(profile)).replace("'./dice3d.js'", repr(dice3d))
+    admin, profile, dice3d, dice_icons = (
+        asset('admin.js'), asset('profile.js'), asset('dice3d.js'), asset('dice-icons.js')
+    )
+    app_source = (
+        (source / 'app.js').read_text()
+        .replace("'./admin.js'", repr(admin))
+        .replace("'./profile.js'", repr(profile))
+        .replace("'./dice3d.js'", repr(dice3d))
+        .replace("'./dice-icons.js'", repr(dice_icons))
+    )
     app = asset('app.js', app_source.encode())
     config, css = asset('config.js'), asset('styles.css')
     index = (source / 'index.html').read_text()
