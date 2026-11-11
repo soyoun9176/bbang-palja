@@ -1,6 +1,7 @@
 import {initAdmin, renderAdmin, renderStaffLogin, handleAdminClick, handleAdminSubmit} from './admin.js';
 import {profileAvatar, profileEditor, profileHairpins, profileBadges, profileTitles, profileTitle, titleStyles, badgePicture, badgeIcons, normalizeAvatar} from './profile.js';
 import {mountDice} from './dice3d.js';
+import {diceChoiceArt} from './dice-icons.js';
 
 const isAdmin = /^\/admin(?:\/|$)/.test(location.pathname);
 const tokenKey = `kambo.${isAdmin ? 'staff' : 'buyer'}.token`;
@@ -127,6 +128,7 @@ function characterPortrait(level,className='',earnedLevel=eventProgress().level)
 function ownedDice(){return state.user.dice|| (state.user.dice_balance?[{kind:'walkin',name:'현장 구매 주사위',color:'plain',quantity:state.user.dice_balance}]:[]);}
 function selectedDie(){const dice=ownedDice();return dice.find(d=>d.kind===state.selectedDice)||dice[0];}
 const dieColors={plain:'일반',rainbow:'무지개',silver:'은색',gold:'금색',pink:'인스타'};
+function dicePickerArt(kind,color){return typeof diceChoiceArt==='function'?diceChoiceArt(kind,color):'<span class="dice-choice-art-fallback" aria-hidden="true"></span>';}
 function diceAction() {
   const busy=state.rolling||state.leveling,chosen=selectedDie();
   if(!chosen)return `<button class="primary-button purchase-cta full" data-action="navigate" data-route="shop" ${busy?'disabled':''}>${icon('bag')}빵 구매하고 주사위 얻기</button>`;
@@ -137,7 +139,7 @@ function renderDiceControl() {
   const result=state.rolling?'주사위를 굴리고 있어요…':last?.result==='milk'?'음료 보상 당첨! 우유 또는 두유를 선택해 주세요.':last?`결과 ${last.value} · +${last.value}점`:chosen?'사용할 주사위를 고르고 굴려요.':'빵 구매 승인 후 주사위가 지급돼요.';
   return `<div class="inline-dice ${state.rolling?'rolling':''}" aria-label="주사위 굴리기" aria-busy="${state.rolling}">
     <div class="dice-control-head"><div class="dice-visual" aria-hidden="true"><span class="dice-fallback">${die(visual?.result==='milk'?'milk':visual?.value||1,chosen?.color||'plain')}</span><canvas class="dice-canvas" aria-hidden="true"></canvas></div><div><p class="dice-balance">남은 주사위 <strong>${state.user.dice_balance}개</strong></p><p class="dice-feedback ${last&&!state.rolling?'has-result':''}" role="status">${esc(result)}</p></div></div>
-    ${ownedDice().length?`<div class="dice-picker" role="group" aria-label="사용할 주사위">${ownedDice().map(d=>`<button class="dice-choice die-${esc(d.color)} ${d.kind===chosen?.kind?'selected':''}" data-action="select-dice" data-kind="${esc(d.kind)}" aria-pressed="${d.kind===chosen?.kind}" ${busy?'disabled':''}><span class="dice-color-mark" aria-hidden="true"></span><span><strong>${esc(d.name)}</strong><small>${d.kind.startsWith('preorder_')?`${dieColors[d.color]} · `:''}${d.quantity}개</small></span>${d.kind===chosen?.kind?icon('check'):''}</button>`).join('')}</div>`:''}
+    ${ownedDice().length?`<div class="dice-picker" role="group" aria-label="사용할 주사위">${ownedDice().map(d=>`<button class="dice-choice die-${esc(d.color)} ${d.kind===chosen?.kind?'selected':''}" data-action="select-dice" data-kind="${esc(d.kind)}" aria-pressed="${d.kind===chosen?.kind}" ${busy?'disabled':''}>${dicePickerArt(d.kind,d.color)}<span><strong>${esc(d.name)}</strong><small>${d.kind.startsWith('preorder_')?`${dieColors[d.color]} · `:''}${d.quantity}개</small></span>${d.kind===chosen?.kind?icon('check'):''}</button>`).join('')}</div>`:''}
     ${diceAction()}
   </div>`;
 }
