@@ -96,6 +96,29 @@ class EventNoticeTests(unittest.TestCase):
             self.assertNotIn(key,author)
         self.assertNotIn('010-',json.dumps(notice,ensure_ascii=False))
 
+    def test_existing_achievement_notice_level_updates_after_each_reward_claim(self):
+        self.approve(self.order([(pid,1) for pid in range(101,105)]))
+        notice_ids=[notice['id'] for notice in self.notices()]
+        uid=self.buyer['user']['id']
+        with self.app.db.transaction(write=True) as tx:
+            tx.execute('UPDATE users SET score=30 WHERE id=?',(uid,))
+            tx.execute("UPDATE event_supplies SET stock=1 WHERE key='oatmeal'")
+        for level,threshold in enumerate((None,5,10,15,20,30)):
+            with self.subTest(level=level):
+                if threshold is not None:
+                    self.call('/api/rewards/claim',{'threshold':threshold,'request_id':uuid.uuid4().hex},self.buyer)
+                own=self.call('/api/auth/me',account=self.buyer,method='GET')['user']
+                board=self.call('/api/leaderboard',account=self.other,method='GET')
+                ranked=next(entry for entry in board['leaders'] if entry['id']==uid)
+                notices=self.notices(self.other)
+                self.assertEqual([notice['id'] for notice in notices],notice_ids)
+                self.assertEqual((own['level'],ranked['level']),(level,level))
+                for notice in notices:
+                    author=notice['author']
+                    self.assertEqual((author['id'],author['level']),(uid,level))
+                    for key in ('phone','password_hash','rewards_claimed','claimed_milestones','badges','titles','achievements'):
+                        self.assertNotIn(key,author)
+
     def test_startup_backfill_awards_without_broadcasting_historical_achievements(self):
         order=self.order([(101,5)])
         with self.app.db.transaction(write=True) as tx:

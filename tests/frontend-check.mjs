@@ -453,6 +453,22 @@ test('profile editor locks sunglasses until the fifteen-point reward',()=>{
   assert.match(f.run('profileAvatar(portrait)'),/cool-sunglasses/);
 });
 
+test('event, header, ranking, notice and profile preview use the same level outfit',async()=>{
+  const f=fixture();await f.run('refresh()');
+  const colors=['#7e9b79','#7e9b79','#719cad','#c9a75e','#9b80b3','#655880'];
+  for(let level=0;level<=5;level++){
+    f.context.person={id:1,name:'동일한연금술사',role:'buyer',score:59,level,avatar:chosenAvatar};
+    f.run("state.user=person;state.route='ranking';state.leaderboard={leaders:[{...person,rank:1,is_me:true}],neighbors:[],me:{rank:1},total_participants:1};state.eventNotices=[{id:1,kind:'achievement',content:'도전과제를 달성했습니다!',author:person}];renderPage()");
+    const portraits=[...f.root.innerHTML.matchAll(/<svg\b[^>]*class="profile-avatar[^"]*"[^>]*>[\s\S]*?<\/svg>/g)].map(match=>match[0]);
+    assert.equal(portraits.length,level===0?3:4);
+    portraits.push(f.run('profileEditor(person)').match(/data-profile-preview>(.*?)<\/div>/s)[1]);
+    for(const svg of portraits){
+      assert.match(svg,new RegExp(`data-character-level="${level}"`));
+      assert.equal(svg.match(/<path d="M79 118[^>]*fill="([^"]+)"/)[1],colors[level]);
+    }
+  }
+});
+
 test('purchase approval refreshes pins in an open editor without discarding the expression draft',async()=>{
   const f=fixture();await f.run('refresh()');
   const {form}=profileForm(f);form.values=new Map(Object.entries(chosenAvatar));

@@ -93,8 +93,9 @@ def has_sunglasses(user):
 
 
 def profile_info(row):
+    level = min(MAX_CHARACTER_LEVEL, row["rewards_claimed"])
     if row.get('role')=='staff':
-        return {'avatar':None,'profile_kind':'admin','profile_customized':False,'equipped_badge':None,'equipped_title':None}
+        return {'level':level,'avatar':None,'profile_kind':'admin','profile_customized':False,'equipped_badge':None,'equipped_title':None}
     avatar = default_avatar(row["id"])
     stored = row.get("appearance")
     if stored:
@@ -111,7 +112,7 @@ def profile_info(row):
         avatar["hairpin"] = "none"
     if avatar['glasses'] == 'sunglasses' and not has_sunglasses(row):
         avatar['glasses'] = 'none'
-    return {"avatar": avatar, "profile_customized": bool(stored), 'equipped_badge':equipped_badge(row), 'equipped_title':equipped_title(row)}
+    return {"level": level, "avatar": avatar, "profile_customized": bool(stored), 'equipped_badge':equipped_badge(row), 'equipped_title':equipped_title(row)}
 
 
 def event_notices(tx):
@@ -207,7 +208,6 @@ def verify_pin(pin, encoded):
 
 def public_user(row):
     user = {key: row[key] for key in PUBLIC_USER_FIELDS}
-    user["level"] = min(MAX_CHARACTER_LEVEL, row["rewards_claimed"])
     user.update(profile_info(row))
     user["unlocked_hairpins"] = row.get("unlocked_hairpins", ["none"])
     user['dice'] = row.get('dice', [])
@@ -804,7 +804,7 @@ class Application:
                 return idempotent(tx, user, "roll", body, roll)
         if method == "GET" and path == "/api/leaderboard":
             with self.db.transaction() as tx:
-                rows = profile_rows(tx, tx.all("SELECT u.id,u.name,u.score,p.appearance,p.badge_id,p.title_id FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.role = 'buyer' ORDER BY u.score DESC,u.id ASC"))
+                rows = profile_rows(tx, tx.all("SELECT u.id,u.name,u.score,u.rewards_claimed,p.appearance,p.badge_id,p.title_id FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.role = 'buyer' ORDER BY u.score DESC,u.id ASC"))
                 entries = [{"rank": index + 1, "id": row["id"], "name": row["name"], "score": row["score"],
                             **profile_info(row), "is_me": row["id"] == user["id"]} for index, row in enumerate(rows)]
                 position = next(index for index, row in enumerate(entries) if row["is_me"])
