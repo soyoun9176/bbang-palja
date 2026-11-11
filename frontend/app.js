@@ -266,6 +266,22 @@ function normalizePhone(value){
   if(typeof value!=='string'||/[^0-9-]/.test(value)||!/^(?:010[0-9]{8}|010-[0-9]{4}-[0-9]{4})$/.test(value))throw new Error('전화번호는 01012345678 또는 010-1234-5678 형식으로 입력해 주세요. 숫자와 정해진 위치의 대시만 사용할 수 있어요.');
   const digits=value.replaceAll('-','');return `${digits.slice(0,3)}-${digits.slice(3,7)}-${digits.slice(7)}`;
 }
+function formatPhoneInput(input){
+  input.setCustomValidity('');
+  const value=input.value,caret=input.selectionStart;
+  if(/[^0-9-]/.test(value))return;
+  const digits=value.replaceAll('-','');if(digits.length>11)return;
+  const formatted=digits.length>7?`${digits.slice(0,3)}-${digits.slice(3,7)}-${digits.slice(7)}`:digits.length>3?`${digits.slice(0,3)}-${digits.slice(3)}`:digits;
+  if(formatted===value)return;
+  input.value=formatted;
+  if(document.activeElement===input&&typeof caret==='number'&&input.setSelectionRange){
+    const digitsBefore=value.slice(0,caret).replaceAll('-','').length;
+    let position=0,count=0;
+    while(position<formatted.length&&count<digitsBefore){if(formatted[position]!=='-')count++;position++;}
+    if(value[caret-1]==='-'&&formatted[position]==='-')position++;
+    input.setSelectionRange(position,position);
+  }
+}
 function buyerAuthForm(mode='login') {
   return `<div class="auth-switch"><button class="${mode==='login'?'active':''}" data-action="auth-mode" data-mode="login">로그인</button><button class="${mode==='register'?'active':''}" data-action="auth-mode" data-mode="register">계정 만들기</button></div><form id="buyer-auth" data-mode="${mode}">${mode==='register'?'<div class="field"><label for="auth-name">이름(닉네임)</label><input id="auth-name" name="name" autocomplete="nickname" maxlength="30" required></div>':''}<div class="field"><label for="auth-phone">전화번호</label><input id="auth-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="010-1234-5678" minlength="11" maxlength="13" pattern="010(?:[0-9]{8}|-[0-9]{4}-[0-9]{4})" title="01012345678 또는 010-1234-5678" data-phone-input required></div><div class="field"><label for="auth-pin">숫자 4자리 비밀번호</label><input id="auth-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="${mode==='register'?'new-password':'current-password'}" required></div>${mode==='register'?'<p class="form-hint">전화번호당 계정 하나를 만들 수 있어요. 화면에는 닉네임만 보여요.</p>':''}<button type="submit" class="primary-button full">${mode==='register'?'계정 만들기':'로그인'}</button></form>`;
 }
@@ -441,8 +457,14 @@ async function claimReward(button) {
     if(error.status>=400&&error.status<500)op.done();state.leveling=false;button.disabled=false;toast(error.message,'error');
   }
 }
-document.addEventListener('input',event=>{if(event.target.closest?.('#preorder-lookup'))editPickupField(event.target.name,event.target.value);if(event.target.matches?.('[data-phone-input]'))event.target.setCustomValidity('');if(event.target.id==='guest-name'){state.guestName=event.target.value;sessionStorage.setItem('kambo.guest.name',state.guestName);}});
-document.addEventListener('focusout',event=>{const input=event.target;if(!input.matches?.('[data-phone-input]')||!input.value)return;try{input.value=normalizePhone(input.value);if(input.closest?.('#preorder-lookup'))state.pickupDraft={...pickupValues(),phone:input.value};input.setCustomValidity('');}catch(error){input.setCustomValidity(error.message);}});
+document.addEventListener('input',event=>{
+  const input=event.target;
+  input.closest?.('#buyer-auth')?.querySelector('.error-message')?.remove();
+  if(input.matches?.('[data-phone-input]')&&!event.isComposing)formatPhoneInput(input);
+  if(input.closest?.('#preorder-lookup'))editPickupField(input.name,input.value);
+  if(input.id==='guest-name'){state.guestName=input.value;sessionStorage.setItem('kambo.guest.name',state.guestName);}
+});
+document.addEventListener('focusout',event=>{const input=event.target;if(!input.matches?.('[data-phone-input]'))return;formatPhoneInput(input);if(!input.value)return;try{input.value=normalizePhone(input.value);if(input.closest?.('#preorder-lookup'))state.pickupDraft={...pickupValues(),phone:input.value};input.setCustomValidity('');}catch(error){input.setCustomValidity(error.message);}});
 document.addEventListener('error',event=>{if(event.target.matches?.('.product-photo img'))event.target.remove();},true);
 document.addEventListener('change',event=>{const form=event.target.closest?.('#profile-editor');if(form)updateProfilePreview(form);});
 document.addEventListener('click',async event=>{const el=event.target.closest('[data-action]');if(!el)return;const action=el.dataset.action;try{
@@ -475,7 +497,7 @@ else if(action==='decline-beverage')await chooseBeverage(el,true);
 else if(action==='retry')location.reload();
 else await handleAdminClick(action,el,event);
 }catch(error){toast(error.message||'잠시 후 다시 시도해 주세요.','error');}});
-document.addEventListener('submit',async event=>{const form=event.target;event.preventDefault();const data=Object.fromEntries(new FormData(form));submitButton(form,true);try{if(form.id==='buyer-auth'){await signInBuyer(form,data);}else if(form.id==='profile-editor'){await saveProfile(form,data);}else if(form.id==='preorder-lookup'){await lookupPreorder(data);}else await handleAdminSubmit(form,event);}catch(error){if(form.id==='buyer-auth'){const errorNode=document.createElement('p');errorNode.className='error-message';errorNode.setAttribute('role','alert');errorNode.textContent=error.message;form.querySelector('.error-message')?.remove();form.prepend(errorNode);}else toast(error.message,'error');}finally{submitButton(form,false);}});
+document.addEventListener('submit',async event=>{const form=event.target;event.preventDefault();const data=Object.fromEntries(new FormData(form));submitButton(form,true);try{if(form.id==='buyer-auth'){await signInBuyer(form,data);}else if(form.id==='profile-editor'){await saveProfile(form,data);}else if(form.id==='preorder-lookup'){await lookupPreorder(data);}else await handleAdminSubmit(form,event);}catch(error){if(form.id==='buyer-auth'){const current=Object.fromEntries(new FormData(form));if(form.isConnected===false||Object.keys(data).some(key=>data[key]!==current[key]))return;const errorNode=document.createElement('p');errorNode.className='error-message';errorNode.setAttribute('role','alert');errorNode.textContent=error.message;form.querySelector('.error-message')?.remove();form.prepend(errorNode);}else toast(error.message,'error');}finally{submitButton(form,false);}});
 document.addEventListener('keydown',event=>{if(!document.querySelector('.modal'))return;if(event.key==='Escape'&&!profileSaving)closeModal();if(event.key==='Tab'){const focusables=[...document.querySelectorAll('.modal button:not(:disabled),.modal a[href],.modal input:not([disabled]),.modal select,.modal textarea')].filter(n=>n.offsetParent!==null);const first=focusables[0],last=focusables.at(-1);if(event.shiftKey&&document.activeElement===first){last?.focus();event.preventDefault();}else if(!event.shiftKey&&document.activeElement===last){first?.focus();event.preventDefault();}}});
 window.addEventListener('hashchange',()=>{state.route=location.hash.slice(1)||(isAdmin?'queue':'shop');render();});
 let polling=false,pendingRender=false;

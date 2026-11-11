@@ -16,6 +16,7 @@ function fixture({guest = false, storage = new Map(), admin=false} = {}) {
   const root = {innerHTML: ''};
   let renderCount = 0;
   const requests = [];
+  const listeners = {};
   const routeChanges = [];
   const response = (body, status = 200) => ({ok: status < 400, status, json: async () => body});
   const context = {
@@ -25,7 +26,7 @@ function fixture({guest = false, storage = new Map(), admin=false} = {}) {
     localStorage: {getItem: () => guest ? null : 'token-A', removeItem() {}, setItem() {}},
     sessionStorage: {getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key)},
     window: {KAMBO_CONFIG: {apiBase: ''}, addEventListener() {}},
-    document: {hidden: false, activeElement: {tagName: 'BODY'}, addEventListener() {}, querySelectorAll: () => [], getElementById: () => null, querySelector: selector => selector === '#app' ? root : selector === '.modal' && remote.modal ? {} : null},
+    document: {hidden: false, activeElement: {tagName: 'BODY'}, addEventListener(type,listener) {listeners[type]=listener;}, querySelectorAll: () => [], getElementById: () => null, querySelector: selector => selector === '#app' ? root : selector === '.modal' && remote.modal ? {} : null},
     initAdmin() {}, renderAdmin() {}, renderStaffLogin() {}, handleAdminClick() {}, handleAdminSubmit() {},
     setInterval: fn => {context.poll = fn;}, setTimeout: fn => queueMicrotask(fn),
     recordRender: () => renderCount++,
@@ -53,7 +54,7 @@ function fixture({guest = false, storage = new Map(), admin=false} = {}) {
   vm.createContext(context);
   vm.runInContext(source + '\nconst renderPage = render; render = recordRender; toast = () => {}; modal = () => {};', context);
   return {
-    context, remote, storage, requests, response, root, routeChanges,
+    context, remote, storage, requests, response, root, routeChanges, listeners,
     run: script => vm.runInContext(script, context),
     get renders() {return renderCount;},
   };
@@ -77,6 +78,66 @@ test('phone formatting accepts only exact 010 digits or canonical dashes',()=>{
   for(const phone of ['010 1234 5678','010-12345678','0101234567','01112345678','01012345678 ','01012345678\n','010-1234-567a','０１０１２３４５６７８']){
     f.context.badPhone=phone;assert.throws(()=>f.run('normalizePhone(badPhone)'),/전화번호/);
   }
+});
+
+function signupFixture(){
+  const f=fixture({guest:true}),button={dataset:{},innerHTML:'계정 만들기',disabled:false};
+  const fields={name:{value:'새 가입자'},pin:{value:'1234'}};
+  const form={id:'buyer-auth',dataset:{mode:'register'},isConnected:true,fields,error:null,
+    querySelector:selector=>selector==='[type=submit]'?button:selector==='.error-message'?form.error:null,
+    prepend(node){this.error=node;}};
+  fields.phone={id:'auth-phone',name:'phone',value:'01012345678',selectionStart:11,validity:'',
+    closest:selector=>selector==='#buyer-auth'||selector==='form'?form:null,
+    matches:selector=>selector==='[data-phone-input]',setCustomValidity(message){this.validity=message;},
+    setSelectionRange(start,end){this.selectionStart=start;this.selectionEnd=end;}};
+  f.context.document.activeElement=fields.phone;
+  f.context.document.createElement=()=>({setAttribute(){},remove(){form.error=null;}});
+  f.context.FormData=class{constructor(form){this.entries=Object.entries(form.fields).map(([key,input])=>[key,input.value]);}[Symbol.iterator](){return this.entries[Symbol.iterator]();}};
+  f.remote.profileCustomized=true;f.run('closeModal=()=>{}');
+  return {...f,form,fields,phone:fields.phone,
+    input(value,caret=value.length){fields.phone.value=value;fields.phone.selectionStart=caret;f.listeners.input({target:fields.phone});},
+    submit:()=>f.listeners.submit({target:form,preventDefault(){}})};
+}
+
+test('phone editing formats partial values and repairs dashes without moving a middle caret to the end',()=>{
+  const f=signupFixture();
+  for(const [raw,expected] of [['010','010'],['0105','010-5'],['01055556','010-5555-6'],['010-55556666','010-5555-6666']]){
+    f.input(raw);assert.equal(f.phone.value,expected);
+  }
+  const raw='010-12534-567',caret=7,digitsBefore=raw.slice(0,caret).replaceAll('-','').length;
+  f.input(raw,caret);assert.equal(f.phone.value,'010-1253-4567');
+  assert.equal(f.phone.value.slice(0,f.phone.selectionStart).replaceAll('-','').length,digitsBefore);
+  assert.ok(f.phone.selectionStart<f.phone.value.length);
+  f.input('010-123-5678',7);assert.equal(f.phone.value,'010-1235-678');
+  f.input('');assert.equal(f.phone.value,'');
+});
+
+test('phone formatting preserves invalid characters and excess digits for validation instead of silently fixing them',()=>{
+  const f=signupFixture();
+  for(const raw of ['010 1234 5678','0101234567a','０１０１２３４５６７８','010123456789']){
+    f.input(raw);assert.equal(f.phone.value,raw);
+    f.listeners.focusout({target:f.phone});assert.match(f.phone.validity,/전화번호/);
+  }
+  f.phone.value='010-12345678';f.listeners.focusout({target:f.phone});
+  assert.equal(f.phone.value,'010-1234-5678');assert.equal(f.phone.validity,'');
+});
+
+test('after a duplicate signup error editing the phone clears the error and formats the retry',async()=>{
+  const f=signupFixture();f.input('01012345678');
+  f.context.fetchOverride=(path,options)=>path==='/api/auth/register'?f.response({error:'이미 있는 번호입니다'},409):f.context.normalFetch(path,options);
+  await f.submit();assert.equal(f.form.error.textContent,'이미 있는 번호입니다');
+  f.input('010-55556666');assert.equal(f.phone.value,'010-5555-6666');assert.equal(f.form.error,null);
+  f.context.fetchOverride=(path,options)=>path==='/api/auth/register'?f.response({token:'token-A',user:{id:1,name:'새 가입자'}}):f.context.normalFetch(path,options);
+  await f.submit();
+  assert.equal(f.form.error,null);
+  assert.equal(JSON.parse(f.requests.filter(request=>request.path==='/api/auth/register').at(-1).body).phone,'010-5555-6666');
+});
+
+test('a delayed duplicate error for the previous phone is ignored after the input changes',async()=>{
+  const f=signupFixture();f.input('01012345678');let finish;
+  f.context.fetchOverride=(path,options)=>path==='/api/auth/register'?new Promise(resolve=>{finish=()=>resolve(f.response({error:'이미 있는 번호입니다'},409));}):f.context.normalFetch(path,options);
+  const pending=f.submit();f.input('01055556666');finish();await pending;
+  assert.equal(f.form.error,null);assert.equal(f.phone.value,'010-5555-6666');
 });
 
 test('login sends normalized phone and password without nickname',async()=>{
