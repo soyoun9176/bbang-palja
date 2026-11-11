@@ -186,6 +186,7 @@
 .manual-product-info{min-width:0;align-self:center}.manual-product-info>label{display:block;font-size:14px;font-weight:700;line-height:1.5;cursor:pointer}.manual-product-info>strong{display:block;font-size:14px;margin-top:7px}.manual-product-info>small{display:block;font-size:12px;color:var(--muted);margin-top:5px}
 .manual-product-quantity{grid-column:1/-1;border-top:1px solid #ebe6dc;padding-top:12px}
 .inventory-direction{display:flex;gap:8px;margin-bottom:8px}.inventory-direction>.tab-chip{flex:1;min-height:44px}
+.custom-title-list{display:grid;gap:10px}.custom-title-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.custom-title-row>.profile-title{max-width:100%;min-width:0}
 .manual-quantity-controls{display:grid;grid-template-columns:40px minmax(0,1fr) 40px;align-items:center;gap:6px;width:100%;min-width:0}
 .manual-quantity-controls>input{width:100%;min-width:0;height:46px;padding:0 6px;border:1px solid #d8cfbd;border-radius:8px;background:#fff;text-align:center;font-size:18px;font-weight:650;appearance:textfield;-moz-appearance:textfield}
 .manual-quantity-controls>input::-webkit-inner-spin-button,.manual-quantity-controls>input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}

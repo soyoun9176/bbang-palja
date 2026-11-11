@@ -345,7 +345,7 @@ function showTitleInfo(id){
   if(profileSaving)return;
   const title=state.user?.titles?.find(t=>t.id===id),target=document.querySelector('[data-title-info]');
   if(!title||!target)return;
-  target.innerHTML=`<strong>${esc(title.name)}</strong><p>${esc(title.description)}</p>`;
+  target.innerHTML=`<strong>${esc(title.name)}</strong><p>${esc(title.description)}</p>${title.rule==='manual'?'<p>담당자에게 칭호를 지급받으면 착용할 수 있어요.</p>':''}`;
   target.hidden=false;target.scrollIntoView?.({block:'nearest'});
 }
 async function signInBuyer(form,data) {

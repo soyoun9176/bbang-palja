@@ -1522,6 +1522,49 @@ test('staff custom title creation sends only the validated name hint and style',
  assert.deepEqual(f.requests[0],{path:'/api/staff/titles',method:'POST',body:{name:'캄딜 대마법사',description:'담당자 확인',style:'gold',request_id:'request-1'}});
 });
 
+test('creating a custom title prepares an explicit recipient grant without awarding it automatically',async()=>{
+ const f=adminFixture(),title={id:'custom_new',name:'새 칭호',description:'담당자 확인',style:'gold',rule:'manual'};
+ let focused=0;f.nodes.set('#grant-user',{focus(){focused++;},scrollIntoView(){}});
+ f.context.respond=async()=>({title});
+ f.run("grantRecipientMode='guest';grantDraft={user_id:'10',name:'이전 사람'}");
+ await f.submit({name:title.name,description:title.description,style:title.style},'admin-title-create');
+ assert.equal(f.requests.length,1);assert.equal(f.requests[0].path,'/api/staff/titles');
+ assert.equal(f.run('grantRecipientMode'),'account');assert.equal(f.run('grantKind'),'title');
+ assert.equal(f.run('grantDraft.title_id'),title.id);assert.equal(f.run('grantDraft.user_id'),undefined);
+ assert.match(f.run('renderAdmin()'),/<option value="custom_new" selected/);
+ assert.match(f.messages[0],/지급할 사용자를 선택/);assert.equal(focused,1);
+});
+
+test('existing custom title definitions offer a direct grant action and keep ownership separate',async()=>{
+ const f=adminFixture();f.state.staffData.titles=[{id:'custom_existing',name:'등록된 칭호',style:'magic',rule:'manual'}];
+ f.run("eventTab='manual';grantKind='title';grantDraft={user_id:'10'}");
+ assert.match(f.run('renderAdmin()'),/data-action="admin-title-grant" data-title="custom_existing"/);
+ f.run("grantRecipientMode='guest'");
+ await f.run("handleAdminClick('admin-title-grant',{dataset:{title:'custom_existing'}})");
+ const html=f.run('renderAdmin()');
+ assert.match(html,/name="user_id"/);assert.match(html,/<option value="custom_existing" selected/);
+ assert.equal(f.run('grantDraft.user_id'),undefined);assert.equal(f.requests.length,0);
+});
+
+test('unowned custom title instructions explain staff granting and owned custom titles can be saved',async()=>{
+ const f=fixture(),title={id:'custom_gold',name:'나만의 연금술사',description:'담당자 확인',style:'gold',rule:'manual',owned:false};
+ f.remote.titles=[title];await f.run('refresh()');
+ const panel={hidden:true,innerHTML:'',scrollIntoView(){}},original=f.context.document.querySelector;
+ f.context.document.querySelector=selector=>selector==='[data-title-info]'?panel:original(selector);
+ f.run("showTitleInfo('custom_gold')");assert.match(panel.innerHTML,/담당자에게 칭호를 지급받으면 착용/);
+ assert.doesNotMatch(f.run('profileTitles(state.user)'),/name="title_id" value="custom_gold"/);
+ f.remote.titles=[{...title,owned:true}];await f.run('refresh()');
+ assert.match(f.run('profileTitles(state.user)'),/name="title_id" value="custom_gold"/);
+ profileForm(f);
+ f.context.fetchOverride=async(path,options)=>{
+  if(path==='/api/profile'){f.remote.equippedTitle=f.remote.titles.find(t=>t.id===JSON.parse(options.body).title_id);return f.response(await(await f.context.normalFetch('/api/auth/me')).json());}
+  return f.context.normalFetch(path,options);
+ };
+ await f.run("saveProfile(profileForm,{...chosenAvatar,glasses:'none',title_id:'custom_gold'})");
+ assert.equal(JSON.parse(f.requests.find(r=>r.path==='/api/profile').body).title_id,title.id);
+ f.run('renderPage()');assert.match(f.root.innerHTML,/나만의 연금술사/);
+});
+
 test('staff schedule builds date columns and sorted time rows from server data only',()=>{
  const f=adminFixture();f.state.route='notes';
  f.state.staffData.schedule=[{id:1,event_date:'2099-01-02',time:'10:00-11:00',name:'담당 C',role:''},
