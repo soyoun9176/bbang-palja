@@ -38,7 +38,7 @@ function faceMark(value, face) {
 }
 
 export function diceChoiceArt(kind = 'walkin', color = 'plain') {
-  const palette = palettes[color] || palettes.plain;
+  const palette = kind === 'walkin' ? palettes.walkin : kind === 'instagram' ? palettes.pink : palettes[color] || palettes.plain;
   const values = faceSets[kind] || faceSets.walkin;
   const faces = [
     { value: values[0], fill: palette.top, color: palette.pip, path: 'M24 2.5 45 13 24 23.5 3 13', point: (u, v) => [3 + 21 * u + 21 * v, 13 - 10.5 * u + 10.5 * v] },
