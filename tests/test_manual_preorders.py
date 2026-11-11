@@ -231,6 +231,33 @@ class ManualPreorderTests(unittest.TestCase):
         item=self.request('GET','/api/staff/dashboard',token=self.staff)['orders'][0]['items'][0]
         self.assertEqual(item['remaining_stock'],3)
 
+    def test_staff_cannot_manually_add_or_remove_preorder_inventory(self):
+        def snapshot():
+            with self.app.db.transaction() as tx:
+                return (
+                    tx.all('SELECT id,stock,preorder_stock FROM products ORDER BY id'),
+                    tx.all('SELECT id,status FROM reservations ORDER BY id'),
+                    tx.all('SELECT reservation_id,product_id,quantity FROM reservation_items ORDER BY id'),
+                    tx.one('SELECT COUNT(*) AS count FROM inventory_logs'),
+                )
+
+        for registered in (False,True):
+            if registered:
+                self.reserve('수정차단예약',[{'product_id':101,'quantity':2}])
+            before=snapshot()
+            for product_id in (101,112):
+                for delta in (-1,1):
+                    for retry_safe in (False,True):
+                        with self.subTest(registered=registered,product_id=product_id,delta=delta,retry_safe=retry_safe):
+                            body={'product_id':product_id,'bucket':'preorder_stock','delta':delta,'reason':'직접 수정 시도'}
+                            if retry_safe:
+                                body['request_id']=uuid.uuid4().hex
+                            with self.assertRaises(APIError) as error:
+                                self.request('POST','/api/staff/inventory',body,self.staff)
+                            self.assertEqual(error.exception.status,400)
+                            self.assertIn('예판 대기 수량은 직접 수정할 수 없습니다',str(error.exception))
+                            self.assertEqual(snapshot(),before)
+
     def test_dashboard_order_stock_preserves_donut_set_units(self):
         buyer=self.buyer()
         with self.app.db.transaction(write=True) as tx:tx.execute('UPDATE products SET stock=1 WHERE id=108')

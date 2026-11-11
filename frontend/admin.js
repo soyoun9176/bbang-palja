@@ -350,9 +350,8 @@ export function openStaffLogin() {
   helpers.modal(loginForm());
 }
 
-function adjustmentModal(productId, bucket = 'stock') {
-  const chosenBucket = ['stock','preorder_stock'].includes(bucket) ? bucket : 'stock';
-  helpers.modal(`<div class="auth-logo">${i('box')} INVENTORY NOTE</div><h2>재고 수량 수정</h2><p class="modal-description">추가 입고는 +, 차감은 −로 적어주세요.<br>이유와 담당자 이름이 함께 기록됩니다.</p><form id="admin-inventory"><div class="field"><label for="admin-adjust-product">품목</label><select id="admin-adjust-product" name="product_id">${productList().map(product => `<option value="${product.id}"${String(product.id) === String(productId) ? ' selected' : ''}>${escape(product.name)}</option>`).join('')}</select></div><div class="form-grid"><div class="field"><label for="admin-adjust-bucket">재고 구분</label><select id="admin-adjust-bucket" name="bucket">${[['stock','현판·이벤트'],['preorder_stock','예판']].map(([key,label]) => `<option value="${key}"${key === chosenBucket ? ' selected' : ''}>${label}</option>`).join('')}</select></div><div class="field"><label for="admin-adjust-delta">수정할 수량</label><input id="admin-adjust-delta" name="delta" type="number" min="-10000" max="10000" step="1" placeholder="예: 10 또는 -2" required></div></div><div class="field"><label for="admin-adjust-reason">수정 사유</label><input id="admin-adjust-reason" name="reason" maxlength="200" placeholder="예: 플레인 휘낭시에 추가 입고" required></div><button class="primary-button full" type="submit">${i('check')}재고에 반영하기</button></form>`);
+function adjustmentModal(productId) {
+  helpers.modal(`<div class="auth-logo">${i('box')} INVENTORY NOTE</div><h2>현판·이벤트 재고 수정</h2><p class="modal-description">추가 입고는 +, 차감은 −로 적어주세요.<br>예판 대기는 예약 등록·수령 처리에 따라 자동 반영됩니다.</p><form id="admin-inventory"><div class="field"><label for="admin-adjust-product">품목</label><select id="admin-adjust-product" name="product_id">${productList().map(product => `<option value="${product.id}"${String(product.id) === String(productId) ? ' selected' : ''}>${escape(product.name)}</option>`).join('')}</select></div><div class="field"><label for="admin-adjust-delta">수정할 수량</label><input id="admin-adjust-delta" name="delta" type="number" min="-10000" max="10000" step="1" placeholder="예: 10 또는 -2" required></div><div class="field"><label for="admin-adjust-reason">수정 사유</label><input id="admin-adjust-reason" name="reason" maxlength="200" placeholder="예: 플레인 휘낭시에 추가 입고" required></div><button class="primary-button full" type="submit">${i('check')}재고에 반영하기</button></form>`);
 }
 
 function importModal() {
@@ -418,7 +417,7 @@ export async function handleAdminClick(action, element) {
     catch(error) { toast(error.message||'예약을 확인하지 못했어요.','error'); }
     finally { element.disabled=false; }
   }
-  else if (action === 'admin-adjust') adjustmentModal(element.dataset.product, element.dataset.bucket);
+  else if (action === 'admin-adjust') adjustmentModal(element.dataset.product);
   else if (action === 'admin-import') importModal();
   else if (action === 'admin-memo') memoModal();
   else if (action === 'admin-cancel') {
@@ -514,7 +513,7 @@ export async function handleAdminSubmit(form) {
       await createAction('event-supply','/api/staff/event-supplies',{key:'oatmeal',delta:Number(values.get('delta')),reason:values.get('reason')});
       message='이벤트 물품 재고를 반영했어요.';
     } else if (form.id === 'admin-inventory') {
-      await createAction('inventory', '/api/staff/inventory', { product_id: Number(values.get('product_id')), bucket: values.get('bucket'), delta: Number(values.get('delta')), reason: values.get('reason') });
+      await createAction('inventory', '/api/staff/inventory', { product_id: Number(values.get('product_id')), bucket: 'stock', delta: Number(values.get('delta')), reason: values.get('reason') });
       message = '재고와 수정 기록을 반영했어요.';
     } else if (form.id === 'admin-manual-sale') {
       const items = [...form.querySelectorAll('[data-sale-product]')].map(input => ({ product_id: Number(input.dataset.saleProduct), quantity: Number(input.value) })).filter(item => item.quantity > 0);

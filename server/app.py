@@ -1003,18 +1003,14 @@ class Application:
                 return {"order": order_data(tx, order["id"])}
         if method == "POST" and path == "/api/staff/inventory":
             with self.db.transaction(write=True) as tx:
+                bucket = body.get("bucket")
+                check(bucket != "preorder_stock", "예판 대기 수량은 직접 수정할 수 없습니다. 예판 등록·수령 처리를 이용해 주세요.")
+                check(bucket in ("stock", "milk"), "재고 구분이 올바르지 않습니다. 이벤트는 현판 재고를 사용합니다.")
                 def adjust_inventory():
-                    bucket = body.get("bucket")
-                    check(bucket in ("stock", "preorder_stock", "milk"), "재고 구분이 올바르지 않습니다. 이벤트는 현판 재고를 사용합니다.")
                     delta = integer(body.get("delta"), "재고 수정량", minimum=-10_000, maximum=10_000)
                     check(delta != 0, "재고 수정량은 0이 될 수 없습니다.")
                     reason = string(body.get("reason"), "수정 사유", maximum=200)
                     product_id = None if bucket == "milk" else integer(body.get("product_id"), "빵 번호", maximum=1_000_000)
-                    if bucket == "preorder_stock" and delta < 0:
-                        required = tx.one("SELECT COALESCE(SUM(ri.quantity),0) AS quantity FROM reservation_items ri JOIN reservations r ON r.id = ri.reservation_id WHERE ri.product_id = ? AND r.status = 'reserved'", (product_id,))["quantity"]
-                        product = tx.one("SELECT preorder_stock FROM products WHERE id = ?", (product_id,))
-                        check(product is not None, "빵을 찾을 수 없습니다.", 404)
-                        check(product["preorder_stock"] + delta >= required, "수령 전 예약에 필요한 예판 재고는 줄일 수 없습니다.", 409)
                     change_inventory(tx, product_id, bucket, delta, reason, user["name"])
                     return {"products": products(tx), "milk_stock": milk_stock(tx)}
                 if "request_id" in body:
