@@ -109,7 +109,7 @@ const characterTiers = [
 ];
 const milestonePreview=[
   {threshold:5,kind:'oatmeal',name:'오트밀 미니바이트',extra:'프로필 배지 · 마법의 씨앗'},
-  {threshold:10,kind:'milk',name:'우유 또는 두유',extra:'프로필 배지 · 빛나는 연금술'},
+  {threshold:10,kind:'milk',name:'우유 또는 두유 (선착순)',extra:'프로필 배지 · 빛나는 연금술'},
   {threshold:15,kind:'sunglasses',name:'멋진 선글라스',extra:'칭호 「멋쟁이 마법사」'},
   {threshold:20,kind:'bread',name:'랜덤 빵 1개',extra:''},
   {threshold:30,kind:'bread',name:'랜덤 빵 1개',extra:'칭호 「대현자 연금술사」 · 담당자에게 커스텀 칭호 요청 가능'},
@@ -146,7 +146,7 @@ function renderDiceControl() {
 function milestoneImage(milestone){return `/assets/${({oatmeal:'oatmeal',milk:'milk',sunglasses:'sunglasses',bread:'reward-bread'})[milestone.kind]||'reward-bread'}.svg`;}
 function renderMilestoneTrack(){
   const {milestones,claimed}=eventProgress(),maximum=Math.max(...milestones.map(m=>Number(m.threshold))),score=Math.min(maximum,Math.max(0,state.user.score));
-  return `<section class="magic-level-track" aria-label="마법 레벨업"><div class="level-track-heading"><h3>마법 레벨업</h3><span>${score} / ${maximum}점</span></div><div class="milestone-track"><div class="milestone-track-bar" role="progressbar" aria-label="마법 레벨업 점수" aria-valuemin="0" aria-valuemax="${maximum}" aria-valuenow="${score}"><span style="width:${score/maximum*100}%"></span></div><span class="milestone-zero" aria-hidden="true">0</span><ol class="milestone-stops" aria-label="점수별 보상">${milestones.map(m=>{const received=claimed.includes(m.threshold),achieved=received||state.user.score>=m.threshold;return `<li style="left:${Number(m.threshold)/maximum*100}%"><button class="milestone-trigger ${achieved?'is-achieved':'is-locked'} ${received?'is-claimed':''}" data-action="open-milestone" data-threshold="${m.threshold}" aria-label="${m.threshold}점 보상: ${esc(m.name)} · ${received?'받기 완료':achieved?'달성':'미달성'}"><span class="milestone-bubble"><img src="${milestoneImage(m)}" alt="" width="32" height="32">${received?`<span class="milestone-received" aria-hidden="true">${icon('check')}</span>`:''}</span><span class="milestone-dot" aria-hidden="true"></span><span class="milestone-point">${m.threshold}점</span></button></li>`;}).join('')}</ol></div><p class="milestone-track-hint">말풍선을 눌러 보상을 확인해요.</p></section>`;
+  return `<section class="magic-level-track" aria-label="마법 레벨업"><div class="level-track-heading"><h3>마법 레벨업</h3><span>${score} / ${maximum}점</span></div><div class="milestone-track"><div class="milestone-track-bar" role="progressbar" aria-label="마법 레벨업 점수" aria-valuemin="0" aria-valuemax="${maximum}" aria-valuenow="${score}"><span style="width:${score/maximum*100}%"></span></div><span class="milestone-zero" aria-hidden="true">0</span><ol class="milestone-stops" aria-label="점수별 보상">${milestones.map(m=>{const received=claimed.includes(m.threshold),achieved=received||state.user.score>=m.threshold;return `<li style="left:${Number(m.threshold)/maximum*100}%"><button class="milestone-trigger ${achieved?'is-achieved':'is-locked'} ${received?'is-claimed':''}" data-action="open-milestone" data-threshold="${m.threshold}" aria-label="${m.threshold}점 보상: ${esc(m.name)} · ${received?'받기 완료':achieved?'달성':'미달성'}"><span class="milestone-bubble"><img src="${milestoneImage(m)}" alt="" width="32" height="32">${received?`<span class="milestone-received" aria-hidden="true">${icon('check')}</span>`:''}</span><span class="milestone-dot" aria-hidden="true"></span><span class="milestone-point">${m.threshold}점${m.kind==='milk'?'<small class="milestone-limited">(선착순)</small>':''}</span></button></li>`;}).join('')}</ol></div><p class="milestone-track-hint">말풍선을 눌러 보상을 확인해요.</p></section>`;
 }
 function openMilestone(threshold){
   if(state.rolling||state.leveling)return;
@@ -167,8 +167,14 @@ function renderLevelCard() {
 }
 const rewardStatus = status => ({awaiting_choice:'음료 선택 필요',pending:'담당자 지급 대기',approved:'수령 완료',cancelled:'지급 취소'}[status]||status);
 function beverageOptions(request){
-  const drinks=state.products.filter(p=>p.beverage_reward_eligible),empty=!drinks.some(p=>p.stock>0);
-  return `<div class="beverage-options">${drinks.map(p=>`<button class="secondary-button full" data-action="choose-beverage" data-request="${request.id}" data-product="${p.id}" ${p.stock<=0?'disabled':''}>${icon('milk')}${esc(p.name)} ${p.stock<=0?'품절':'선택'}</button>`).join('')}</div>${empty?'<p class="form-hint">우유와 두유가 모두 품절이에요.</p>':''}<p class="form-hint">취소하면 이번 음료 보상은 받지 않는 것으로 처리돼요.</p><div class="button-row"><button class="secondary-button" data-action="decline-beverage" data-request="${request.id}">취소하기</button><button class="text-button" data-action="close-modal">나중에 선택하기</button></div>`;
+  const drinks=state.products.filter(p=>p.beverage_reward_eligible);
+  const options=drinks.map(product=>{
+    const limitReached=product.event_reward_remaining===0;
+    const soldOut=product.stock<=0;
+    const label=limitReached?'이벤트 소진':soldOut?'품절':'선택';
+    return `<div><button class="secondary-button full" data-action="choose-beverage" data-request="${request.id}" data-product="${product.id}" ${limitReached||soldOut?'disabled':''}>${icon('milk')}${esc(product.name)} ${label}</button>${limitReached?`<p class="form-hint">선착순 이벤트 ${esc(product.name)}가 바닥났어요.</p>`:''}</div>`;
+  }).join('');
+  return `<div class="beverage-options">${options}</div>${drinks.length&&drinks.every(p=>p.stock<=0)?'<p class="form-hint">우유와 두유가 모두 품절이에요.</p>':''}<p class="form-hint">취소하면 이번 음료 보상은 받지 않는 것으로 처리돼요.</p><div class="button-row"><button class="secondary-button" data-action="decline-beverage" data-request="${request.id}">취소하기</button><button class="text-button" data-action="close-modal">나중에 선택하기</button></div>`;
 }
 function openBeverageChoice(request){
   if(!request)return;

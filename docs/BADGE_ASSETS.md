@@ -7,7 +7,7 @@
 | 원소 수집가 | [elements-v1.webp](../frontend/assets/badges/elements-v1.webp) |
 | 캄딜 VVIP | [vvip-v1.webp](../frontend/assets/badges/vvip-v1.webp) |
 | 빵 몰입가 | [focus-v1.webp](../frontend/assets/badges/focus-v1.webp) |
-| 번개 연금술사 | [fast-v1.webp](../frontend/assets/badges/fast-v1.webp) |
+| 우사인볼트 연금술사 | [fast-v1.webp](../frontend/assets/badges/fast-v1.webp) |
 
 ## 최종 생성 프롬프트
 

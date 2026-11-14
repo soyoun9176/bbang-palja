@@ -25,6 +25,7 @@ class ManualEventGrantTests(unittest.TestCase):
         with self.app.db.transaction(write=True) as tx:
             tx.execute('UPDATE products SET stock=5 WHERE id IN (101,112,113)')
             tx.execute("UPDATE event_supplies SET stock=5 WHERE key='oatmeal'")
+            tx.execute("INSERT INTO settings(key,value) VALUES('event_beverage_limit_112','100'),('event_beverage_limit_113','100')")
 
     def call(self,path,body=None,token=None,method='POST'):
         return self.app.handle(method,path,{},body or {},'Bearer '+token if token else None)

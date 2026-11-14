@@ -26,12 +26,21 @@ class RewardRequestTests(unittest.TestCase):
         self.app=Application()
         self.staff=self.call('POST','/api/staff/login',{'name':'지급 담당','password':'request-test-password'})['token']
         self.buyer=self.register('구매자')
+        for product_id in (112,113):
+            self.set_limit(product_id,100)
 
     def call(self,method,path,body=None,token=None):
         return self.app.handle(method,path,{},account_payload(path,body) or {},'Bearer '+token if token else None)
 
     def register(self,name):
         return self.call('POST','/api/auth/register',{'name':name,'pin':'1234'})
+
+    def set_limit(self,product_id,limit):
+        return self.call('POST','/api/staff/event-beverage-limits',
+                         {'product_id':product_id,'limit':limit,'request_id':uuid.uuid4().hex},self.staff)['beverage']
+
+    def dashboard(self):
+        return self.call('GET','/api/staff/dashboard',token=self.staff)
 
     def stock(self,pid,count):
         with self.app.db.transaction(write=True) as tx:tx.execute('UPDATE products SET stock=? WHERE id=?',(count,pid))
@@ -89,6 +98,132 @@ class RewardRequestTests(unittest.TestCase):
         self.assertEqual((self.available(112),self.available(113)),(2,1))
         record=self.call('GET','/api/rewards',token=self.buyer['token'])['rewards'][0]
         self.assertEqual((record['product_name'],record['fulfillment']['status']),('두유','cancelled'))
+
+    def test_rolled_and_milestone_drinks_compete_for_the_last_event_serving(self):
+        self.stock(112,5);self.stock(113,5)
+        self.set_limit(112,1);self.set_limit(113,1)
+        milestone=self.claim_at(10)['reward']['fulfillment']
+        other=self.register('음료 당첨자')
+        dice=self.milk_roll(other)['fulfillment']
+        barrier=threading.Barrier(2)
+
+        def compete(entry):
+            request,buyer=entry
+            barrier.wait(timeout=5)
+            try:
+                return self.choose(request,112,buyer),buyer
+            except APIError as error:
+                self.assertEqual((error.status,error.message),(409,'선착순 이벤트 우유가 바닥났어요.'))
+                return request,buyer
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            results=list(pool.map(compete,[(milestone,self.buyer),(dice,other)]))
+        self.assertCountEqual([request['status'] for request,_ in results],['pending','awaiting_choice'])
+        self.assertEqual((self.available(112),self.available(113)),(4,5))
+        held,winner=next(entry for entry in results if entry[0]['status']=='pending')
+        waiting,loser=next(entry for entry in results if entry[0]['status']=='awaiting_choice')
+        self.assertEqual(self.choose(held,112,winner)['id'],held['id'])
+        self.transition(held,'cancel')
+        self.assertEqual(self.available(112),5)
+        self.transition(self.choose(waiting,112,loser),'approve')
+        self.assertEqual(self.available(112),4)
+        drinks={row['product_id']:row for row in self.dashboard()['event_beverage_limits']}
+        self.assertEqual((drinks[112]['held'],drinks[112]['delivered'],drinks[112]['remaining']),(0,1,0))
+        self.assertEqual(drinks[113]['remaining'],1)
+        with self.assertRaises(APIError) as error:self.set_limit(112,0)
+        self.assertEqual(error.exception.status,409)
+        self.call('POST','/api/staff/manual-sale',{'user_id':loser['user']['id'],
+                  'items':[{'product_id':112,'quantity':1}],'request_id':uuid.uuid4().hex},self.staff)
+        self.assertEqual(self.available(112),3)
+
+    def test_manual_beverage_grants_share_the_limit_and_failed_grant_leaves_stock_intact(self):
+        self.stock(113,5);self.set_limit(113,1)
+        body={'guest':True,'name':'비회원','kind':'gift','gift':'soymilk','quantity':2,
+              'reason':'현장 지급','request_id':uuid.uuid4().hex}
+        with self.assertRaises(APIError) as error:self.call('POST','/api/staff/manual-event-grants',body,self.staff)
+        self.assertEqual((error.exception.status,error.exception.message),(409,'선착순 이벤트 두유가 바닥났어요.'))
+        self.assertEqual(self.available(113),5)
+        self.assertEqual(self.dashboard()['manual_grants'],[])
+        body['quantity']=1
+        first=self.call('POST','/api/staff/manual-event-grants',body,self.staff)
+        self.assertEqual(self.call('POST','/api/staff/manual-event-grants',body,self.staff),first)
+        self.assertEqual(self.available(113),4)
+        pending=self.milk_roll()['fulfillment']
+        with self.assertRaises(APIError) as error:self.choose(pending,113)
+        self.assertEqual(error.exception.message,'선착순 이벤트 두유가 바닥났어요.')
+        self.app=Application()
+        drink=next(row for row in self.dashboard()['event_beverage_limits'] if row['product_id']==113)
+        self.assertEqual((drink['limit'],drink['delivered'],drink['remaining']),(1,1,0))
+
+    def test_inventory_summary_separates_sales_stock_and_event_deliveries(self):
+        self.stock(101,12);self.stock(112,2);self.stock(113,3)
+        self.call('POST','/api/staff/preorders/import',{'reservations':[{
+            'name':'예판 구매자','phone':phone_for('예판 구매자'),'items':[{'product_id':101,'quantity':2}],
+        }]},self.staff)
+        order=self.call('POST','/api/orders',{'items':[
+            {'product_id':101,'quantity':2},{'product_id':112,'quantity':1},{'product_id':113,'quantity':2},
+        ],'request_id':uuid.uuid4().hex},self.buyer['token'])['order']
+        first=self.claim_at(20)['reward']['fulfillment']
+        metrics=('bread_sold','bread_stock_total','bread_revenue','bread_event_given','milk_sold','soymilk_sold')
+        stats=self.dashboard()['stats']
+        self.assertEqual(tuple(stats[key] for key in metrics),(0,12,0,0,0,0))
+
+        # The purchase price is fixed on the order line when it is placed.
+        with self.app.db.transaction(write=True) as tx:
+            tx.execute('UPDATE products SET price=8000 WHERE id=101')
+        self.call('POST',f"/api/staff/orders/{order['id']}/approve",{},self.staff)
+        self.transition(first,'approve');self.transition(first,'approve')
+        second=self.claim_at(30)['reward']['fulfillment'];self.transition(second,'cancel')
+        self.call('POST','/api/staff/manual-event-grants',{'guest':True,'name':'이벤트 참여자','kind':'bread',
+                  'product_id':101,'quantity':3,'reason':'현장 지급','request_id':uuid.uuid4().hex},self.staff)
+        stats=self.dashboard()['stats']
+        self.assertEqual(tuple(stats[key] for key in metrics),(2,6,5600,4,1,2))
+
+    def test_stock_shortage_does_not_use_quota_and_a_pending_hold_blocks_lowering_the_limit(self):
+        self.set_limit(112,2)
+        self.stock(112,0)
+        row=self.milk_roll()['fulfillment']
+        with self.assertRaises(APIError) as error:
+            self.choose(row,112)
+        self.assertEqual((error.exception.status,error.exception.message),(409,'우유 재고가 부족합니다.'))
+        drink=self.dashboard()['event_beverage_limits'][0]
+        self.assertEqual((drink['held'],drink['remaining']),(0,2))
+
+        self.stock(112,2)
+        held=self.choose(row,112)
+        with self.assertRaises(APIError) as error:
+            self.set_limit(112,0)
+        self.assertEqual(error.exception.status,409)
+        self.transition(held,'cancel')
+        self.transition(held,'cancel')
+        self.assertEqual(self.set_limit(112,0)['remaining'],0)
+        self.assertEqual(self.available(112),2)
+
+    def test_oatmeal_summary_keeps_physical_stock_separate_and_counts_each_delivery_once(self):
+        with self.app.db.transaction(write=True) as tx:
+            tx.execute("UPDATE event_supplies SET stock=6 WHERE key='oatmeal'")
+        uid=self.buyer['user']['id']
+        other=self.register('오트밀 당첨자')
+        with self.app.db.transaction(write=True) as tx:
+            tx.execute('UPDATE users SET score=5 WHERE id IN (?,?)',(uid,other['user']['id']))
+
+        def claim(buyer):
+            return self.call('POST','/api/rewards/claim',{'threshold':5,'request_id':uuid.uuid4().hex},
+                             buyer['token'])['reward']['fulfillment']
+
+        first,second=claim(self.buyer),claim(other)
+        self.assertEqual(self.dashboard()['event_supplies'][0]['held'],2)
+        self.transition(first,'approve')
+        self.transition(first,'approve')
+        self.transition(second,'cancel')
+        self.transition(second,'cancel')
+        self.call('POST','/api/staff/manual-event-grants',{'guest':True,'name':'오트밀 지급 대상',
+                  'kind':'gift','gift':'oatmeal','quantity':2,'reason':'현장 지급','request_id':uuid.uuid4().hex},self.staff)
+        summary=self.dashboard()
+        oatmeal=summary['event_supplies'][0]
+        self.assertEqual((oatmeal['stock'],oatmeal['held'],oatmeal['delivered']),(3,0,3))
+        self.assertEqual([(drink['held'],drink['delivered']) for drink in summary['event_beverage_limits']],[(0,0),(0,0)])
+        self.assertEqual(summary['stats']['bread_event_given'],0)
 
     def test_sold_out_options_are_rejected_and_buyer_can_decline_without_reroll(self):
         self.stock(112,0);self.stock(113,0)

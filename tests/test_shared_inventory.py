@@ -58,6 +58,10 @@ class SharedInventoryTests(unittest.TestCase):
 
     def test_five_milestones_persist_once_and_stop_at_thirty(self):
         self.stock({101:2,112:1})
+        staff = self.request('POST', '/api/staff/login',
+                             {'name':'담당검증','password':'test-staff-password'})['token']
+        self.request('POST','/api/staff/event-beverage-limits',
+                     {'product_id':112,'limit':1,'request_id':uuid.uuid4().hex},staff)
         with self.app.db.transaction(write=True) as tx:
             tx.execute("UPDATE event_supplies SET stock=1 WHERE key='oatmeal'")
         token=self.buyer(bread_stage=False)
