@@ -133,7 +133,7 @@ class AchievementTests(unittest.TestCase):
         self.assertIn('fast',self.owned('titles'))
         fast=[a for a in self.me()['achievements'] if a['id']=='fast']
         self.assertEqual(len(fast),1)
-        self.assertEqual((fast[0]['name'],fast[0]['completed'],fast[0]['current']),('번개 연금술사',True,1))
+        self.assertEqual((fast[0]['name'],fast[0]['completed'],fast[0]['current']),('우사인볼트 연금술사',True,1))
 
     def test_first_order_waits_for_earlier_pending_and_cancel_releases_daily_award(self):
         first=self.order([(101,1)],stamp='2026-11-20T15:00:00Z')

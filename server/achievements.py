@@ -9,19 +9,20 @@ from .notices import publish as publish_notice
 KST=timezone(timedelta(hours=9))
 BREADS={p[0]:p[1] for p in PRODUCTS if p[0] in REWARD_PRODUCT_IDS}
 FINANCIERS=(101,102,103,104)
-FAST_ACHIEVEMENT_NAME='번개 연금술사'
+FAST_ACHIEVEMENT_NAME='우사인볼트 연금술사'
+FAST_TITLE_NAME=f'⚡ {FAST_ACHIEVEMENT_NAME}'
 ACHIEVEMENT_BADGES=(
     ('ach_elements','원소 수집가','휘낭시에 4종을 모두 구매하면 이 배지를 얻을 수 있어요.','flask'),
     ('ach_vvip','캄딜 VVIP','빵 메뉴 11종을 모두 구매하면 이 배지를 얻을 수 있어요.','trophy'),
     ('ach_focus','빵 몰입가','한 가지 빵을 누적 5개 이상 구매하면 이 배지를 얻을 수 있어요.','bread'),
-    ('ach_fast','번개 연금술사','예판 선착순 10명 또는 날짜별 현판 첫 구매자가 되면 이 배지를 얻을 수 있어요.','spark'),
+    ('ach_fast',FAST_ACHIEVEMENT_NAME,'예판 선착순 10명 또는 날짜별 현판 첫 구매자가 되면 이 배지를 얻을 수 있어요.','spark'),
 )
 TITLES=(
     ('score_15','멋쟁이 마법사','15점 보상을 받으면 얻을 수 있어요.','magic','milestone',15),
     ('score_30','대현자 연금술사','30점 보상을 받으면 얻을 수 있어요.','gold','milestone',30),
     ('elements','원소 수집가','휘낭시에 4종 모두 구매','magic','achievement',None),
     ('vvip','캄딜 VVIP','빵 메뉴 11종 모두 구매','gold','achievement',None),
-    ('fast','⚡ 우사인볼트 연금술사','예판 선착순 10명 또는 날짜별 현판 첫 구매자','lightning','achievement',None),
+    ('fast',FAST_TITLE_NAME,'예판 선착순 10명 또는 날짜별 현판 첫 구매자','lightning','achievement',None),
 )+tuple((f'focus_{pid}',f'{name} 몰입가',f'{name} 누적 5개 이상 구매','magic','achievement',None) for pid,name in BREADS.items())
 
 
@@ -102,6 +103,8 @@ def initialize(tx,stamp):
     for badge_id,name,description,icon in ACHIEVEMENT_BADGES:
         tx.execute("INSERT INTO badges(id,name,description,icon,rule,created_at) VALUES(?,?,?,?,'achievement',?) ON CONFLICT(id) DO NOTHING",
                    (badge_id,name,description,icon,stamp))
+    tx.execute("UPDATE badges SET name=? WHERE id='ach_fast' AND name<>?",
+               (FAST_ACHIEVEMENT_NAME,FAST_ACHIEVEMENT_NAME))
     for title_id,name,description,style,rule,threshold in TITLES:
         tx.execute('INSERT INTO titles(id,name,description,style,rule,threshold,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
                    (title_id,name,description,style,rule,threshold,stamp))
@@ -128,6 +131,6 @@ def progress(counts,awards):
         {'id':'focus','name':'한 가지 빵에 몰입!','description':'같은 빵을 누적 5개 이상 구매해요.','current':min(counts.get(main,0),5),'target':5,'unit':'개','completed':'focus' in owned,'badge_id':'ach_focus','title':f'{BREADS[main]} 몰입가','items':focus_rewards},
         {'id':'fast','name':FAST_ACHIEVEMENT_NAME,'description':'예판 선착순 10명 또는 날짜별 첫 현장 빵 주문 · 승인 후 달성',
          'current':int(bool(owned & {'preorder_fast','walkin_fast'})),'target':1,'unit':'회',
-         'completed':bool(owned & {'preorder_fast','walkin_fast'}),'badge_id':'ach_fast','title':'⚡ 우사인볼트 연금술사','style':'lightning',
+         'completed':bool(owned & {'preorder_fast','walkin_fast'}),'badge_id':'ach_fast','title':FAST_TITLE_NAME,'style':'lightning',
          'dates':[row['scope'] for row in awards if row['achievement_key']=='walkin_fast']},
     ]

@@ -70,7 +70,7 @@ class EventNoticeTests(unittest.TestCase):
         self.assertEqual(self.notices(),[])
         self.approve(order)
         notices=self.notices();self.assertEqual(len(notices),2)
-        self.assertTrue(any(n['content']=='번개 연금술사 도전과제를 달성했습니다!' for n in notices))
+        self.assertTrue(any(n['content']=='우사인볼트 연금술사 도전과제를 달성했습니다!' for n in notices))
         self.assertTrue(any('플레인 휘낭시에 몰입가 도전과제를 달성했습니다!'==n['content'] for n in notices))
         self.assertTrue(all(n['kind']=='achievement' and n['author']['name']=='별빵' and n['author']['equipped_title'] for n in notices))
         self.approve(order);self.assertEqual(self.notices(),notices)
