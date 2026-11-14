@@ -326,13 +326,72 @@ def user_by_id(tx, user_id, buyer=False):
     return profile_rows(tx, [user], user_id)[0]
 
 
-def products(tx):
+def event_beverage_limits(tx):
+    """Count held and delivered drinks against each cumulative event limit."""
+    rows = tx.all("""
+        WITH allocations AS (
+            SELECT product_id,
+                   CASE WHEN status='pending' THEN 1 ELSE 0 END AS held,
+                   CASE WHEN status='approved' THEN 1 ELSE 0 END AS delivered
+            FROM reward_requests WHERE kind='milk' AND status IN ('pending','approved')
+            UNION ALL
+            SELECT product_id, 0, quantity FROM manual_event_grants WHERE gift_key IN ('milk','soymilk')
+            UNION ALL
+            SELECT m.product_id, 0, 1 FROM milestone_claims m WHERE m.kind='milk'
+                AND NOT EXISTS (SELECT 1 FROM reward_requests r WHERE r.milestone_id=m.id)
+            UNION ALL
+            SELECT ?, 0, 1 FROM typed_dice_rolls d WHERE d.result='milk'
+                AND NOT EXISTS (SELECT 1 FROM reward_requests r WHERE r.roll_id=d.id)
+            UNION ALL
+            SELECT ?, 0, milk_quantity FROM events WHERE milk_quantity>0
+        )
+        SELECT p.id AS product_id, p.name, COALESCE(s.value,'0') AS limit_value,
+               COALESCE(SUM(a.held),0) AS held, COALESCE(SUM(a.delivered),0) AS delivered
+        FROM products p
+        LEFT JOIN settings s ON s.key='event_beverage_limit_' || CAST(p.id AS TEXT)
+        LEFT JOIN allocations a ON a.product_id=p.id
+        WHERE p.id IN (?,?) GROUP BY p.id,p.name,s.value ORDER BY p.id
+    """, (MILK_PRODUCT_ID, MILK_PRODUCT_ID, *DRINK_PRODUCT_IDS))
+    limits = {}
+    for row in rows:
+        limit = int(row.pop('limit_value'))
+        limits[row['product_id']] = {**row, 'limit': limit,
+                                     'remaining': max(0, limit - row['held'] - row['delivered'])}
+    return limits
+
+
+def check_event_beverage_limit(tx, product_id, quantity):
+    beverage = event_beverage_limits(tx)[product_id]
+    check(beverage['remaining'] >= quantity, f"선착순 이벤트 {beverage['name']}가 바닥났어요.", 409)
+
+
+def event_bread_given(tx):
+    return tx.one("""
+        SELECT COALESCE(SUM(quantity),0) AS count FROM (
+            SELECT 1 AS quantity FROM reward_requests WHERE kind='bread' AND status='approved'
+            UNION ALL
+            SELECT quantity FROM manual_event_grants WHERE kind='bread'
+            UNION ALL
+            SELECT 1 FROM rewards WHERE product_id NOT IN (?,?)
+            UNION ALL
+            SELECT 1 FROM milestone_claims m WHERE m.kind='bread' AND m.product_id IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM reward_requests r WHERE r.milestone_id=m.id)
+        ) AS event_bread
+    """, DRINK_PRODUCT_IDS)['count']
+
+
+def products(tx, drink_limits=None):
     placeholders = ','.join('?' for _ in PRODUCT_IDS)
     rows = tx.all(f"SELECT * FROM products WHERE id IN ({placeholders}) ORDER BY id", PRODUCT_IDS)
-    return [{**row, "unit": PRODUCT_UNITS.get(row["id"], "개"), "photo": PRODUCT_PHOTOS.get(row["id"], ""),
-             "dice_per_unit": 0 if row["id"] in DRINK_PRODUCT_IDS else 1,
-             "beverage_reward_eligible": row['id'] in DRINK_PRODUCT_IDS,
-             "reward_eligible": row["id"] in REWARD_PRODUCT_IDS} for row in rows]
+    result = [{**row, "unit": PRODUCT_UNITS.get(row["id"], "개"), "photo": PRODUCT_PHOTOS.get(row["id"], ""),
+               "dice_per_unit": 0 if row["id"] in DRINK_PRODUCT_IDS else 1,
+               "beverage_reward_eligible": row['id'] in DRINK_PRODUCT_IDS,
+               "reward_eligible": row["id"] in REWARD_PRODUCT_IDS} for row in rows]
+    if drink_limits is not None:
+        for product in result:
+            if product['id'] in drink_limits:
+                product['event_reward_remaining'] = drink_limits[product['id']]['remaining']
+    return result
 
 
 def milk_stock(tx):
@@ -456,6 +515,7 @@ def manual_event_grant(tx, body, staff):
         check(gift_key in ('oatmeal','milk','soymilk','sunglasses','custom'), '지급할 상품을 선택해 주세요.')
         if gift_key in ('milk','soymilk'):
             product_id = MILK_PRODUCT_ID if gift_key == 'milk' else SOYMILK_PRODUCT_ID
+            check_event_beverage_limit(tx, product_id, quantity)
         elif gift_key == 'oatmeal':
             supply_key = 'oatmeal'
             item_name = '오트밀 미니바이트'
@@ -660,7 +720,7 @@ class Application:
             return result
         if method == "GET" and path == "/api/products":
             with self.db.transaction() as tx:
-                return {"products": products(tx)}
+                return {"products": products(tx, event_beverage_limits(tx))}
         if method == 'GET' and path == '/api/event-notices':
             with self.db.transaction() as tx:
                 return {'notices':event_notices(tx)}
@@ -828,6 +888,7 @@ class Application:
                     if row['status'] in ('pending','approved') and row['product_id']==product_id:
                         return {'request':row}
                     check(row['status']=='awaiting_choice', '이미 처리된 요청입니다. 현재 상태를 확인해 주세요.', 409)
+                    check_event_beverage_limit(tx, product_id, 1)
                     product = tx.one('SELECT * FROM products WHERE id=?', (product_id,))
                     change_inventory(tx,product_id,'stock',-1,f"이벤트 요청 #{row['id']} 음료 선택 · 재고 확보",user['name'])
                     tx.execute("UPDATE reward_requests SET product_id=?,product_name=?,status='pending',requested_at=? WHERE id=?",
@@ -881,7 +942,10 @@ class Application:
                 stats["bread_sold"] = tx.one("SELECT COALESCE(SUM(i.quantity),0) AS count FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.status='approved' AND i.product_id NOT IN (?,?)", DRINK_PRODUCT_IDS)["count"]
                 stats["milk_stock"] = milk_stock(tx)
                 stats['pending_rewards'] = tx.one("SELECT COUNT(*) AS n FROM reward_requests WHERE status='pending'")['n']
-                return {"orders": all_orders(tx, include_inventory=True), "products": products(tx), "stats": stats,
+                stats['bread_event_given'] = event_bread_given(tx)
+                drink_limits = event_beverage_limits(tx)
+                return {"orders": all_orders(tx, include_inventory=True), "products": products(tx, drink_limits), "stats": stats,
+                        'event_beverage_limits': list(drink_limits.values()),
                         'event_notices':event_notices(tx),
                         "event_supplies": tx.all('SELECT * FROM event_supplies ORDER BY key'),
                         'reward_requests': reward_requests(tx),
@@ -975,6 +1039,19 @@ class Application:
                     change_supply(tx,'oatmeal',delta,reason,user['name'])
                     return {'supply': tx.one("SELECT * FROM event_supplies WHERE key='oatmeal'")}
                 return idempotent(tx, user, 'event-supply', body, adjust_supply)
+        if method == 'POST' and path == '/api/staff/event-beverage-limits':
+            with self.db.transaction(write=True) as tx:
+                def set_limit():
+                    product_id = body.get('product_id')
+                    check(type(product_id) is int and product_id in DRINK_PRODUCT_IDS, '우유 또는 두유를 선택해 주세요.')
+                    limit = integer(body.get('limit'), '이벤트 제공 한도', minimum=0, maximum=1_000_000)
+                    current = event_beverage_limits(tx)[product_id]
+                    used = current['held'] + current['delivered']
+                    check(limit >= used, f'이미 확보하거나 지급한 {used}개보다 한도를 낮출 수 없어요.', 409)
+                    tx.execute('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                               (f'event_beverage_limit_{product_id}', str(limit)))
+                    return {'beverage': event_beverage_limits(tx)[product_id]}
+                return idempotent(tx, user, 'event-beverage-limit', body, set_limit)
         if method == 'POST' and path == '/api/staff/manual-event-grants':
             with self.db.transaction(write=True) as tx:
                 return idempotent(tx,user,'manual-event-grant',body,lambda:manual_event_grant(tx,body,user))

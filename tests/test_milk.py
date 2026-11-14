@@ -26,6 +26,8 @@ class MilkTests(unittest.TestCase):
         settings.start();self.addCleanup(settings.stop)
         self.app=Application()
         self.staff=self.request('POST','/api/staff/login',{'name':'우유담당','password':'milk-test-password'})['token']
+        self.request('POST','/api/staff/event-beverage-limits',
+                     {'product_id':MILK_PRODUCT_ID,'limit':100,'request_id':uuid.uuid4().hex},self.staff)
 
     def request(self,method,path,body=None,token=None):
         return self.app.handle(method,path,{},account_payload(path,body) or {},'Bearer '+token if token else None)

@@ -957,6 +957,39 @@ test('stock on hold includes pending event requests but excludes unselected and 
   assert.match(f.run('renderAdmin()'),/<td>2<\/td><td>0<\/td><td>3<\/td><td><strong>5<\/strong>/);
 });
 
+test('inventory shows separate beverage limits and ends with the server sales totals',async()=>{
+  const f=adminFixture();f.state.route='inventory';
+  f.state.staffData.stats={bread_sold:12,bread_event_given:4};
+  f.state.staffData.event_beverage_limits=[
+    {product_id:112,name:'우유',limit:8,held:2,delivered:3,remaining:3},
+    {product_id:113,name:'두유',limit:4,held:0,delivered:4,remaining:0},
+  ];
+  const html=f.run('renderAdmin()');
+  assert.match(html,/<th scope="row">우유<\/th><td>8개<\/td><td>2개<\/td><td>3개<\/td><td><strong>3개/);
+  assert.match(html,/<th scope="row">두유<\/th><td>4개<\/td><td>0개<\/td><td>4개<\/td><td><strong>0개/);
+  assert.match(html,/<h2>현재 판매 현황<\/h2>[\s\S]*<dt>판매된 빵<\/dt><dd>12개<\/dd>[\s\S]*<dt>이벤트로 제공된 빵<\/dt><dd>4개<\/dd>[\s\S]*<\/section>$/);
+  let modal='';f.context.shared.modal=markup=>{modal=markup;};
+  await f.run("handleAdminClick('admin-beverage-limit',{dataset:{product:'112'}})");
+  assert.match(modal,/<h2>우유 이벤트 한도 수정/);
+  assert.match(modal,/name="limit"[^>]+min="5"[^>]+value="8"/);
+  f.context.limitForm={id:'admin-event-beverage-limit',dataset:{product:'112'},values:new Map([['limit','10']]),
+    querySelector:()=>null,reset(){}};
+  await f.run('handleAdminSubmit(limitForm)');
+  assert.deepEqual(f.requests[0],{path:'/api/staff/event-beverage-limits',method:'POST',
+    body:{product_id:112,limit:10,request_id:'request-1'}});
+});
+
+test('beverage rewards indicate first-come limits independently of sale stock',async()=>{
+  const f=fixture();await f.run('refresh()');
+  f.run("state.user.score=10;state.products=[{id:112,name:'우유',stock:5,event_reward_remaining:0,beverage_reward_eligible:true},{id:113,name:'두유',stock:5,event_reward_remaining:1,beverage_reward_eligible:true}]");
+  assert.match(f.run('renderMilestoneTrack()'),/10점<small class="milestone-limited">\(선착순\)/);
+  const options=f.run('beverageOptions({id:9})');
+  assert.match(options,/data-product="112" disabled>.*우유 이벤트 소진<\/button>/s);
+  assert.match(options,/선착순 이벤트 우유가 바닥났어요\./);
+  assert.match(options,/data-product="113" >.*두유 선택<\/button>/s);
+  assert.doesNotMatch(options,/모두 품절|선착순 이벤트 두유가/);
+});
+
 test('beverage selection disables sold-out drinks and always separates cancellation from postponing',async()=>{
   const f=fixture();await f.run('refresh()');
   f.run("state.products=[{id:112,name:'우유',stock:0,beverage_reward_eligible:true},{id:113,name:'두유',stock:1,beverage_reward_eligible:true}]");
