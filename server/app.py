@@ -395,6 +395,30 @@ def event_bread_given(tx):
     """, DRINK_PRODUCT_IDS)['count']
 
 
+def sales_totals(tx):
+    return tx.one("""
+        SELECT COALESCE(SUM(CASE WHEN i.product_id NOT IN (?,?) THEN i.quantity END),0) AS bread_sold,
+               COALESCE(SUM(CASE WHEN i.product_id NOT IN (?,?) THEN i.quantity*i.price END),0) AS bread_revenue,
+               COALESCE(SUM(CASE WHEN i.product_id=? THEN i.quantity END),0) AS milk_sold,
+               COALESCE(SUM(CASE WHEN i.product_id=? THEN i.quantity END),0) AS soymilk_sold
+        FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.status='approved'
+    """, (*DRINK_PRODUCT_IDS, *DRINK_PRODUCT_IDS, MILK_PRODUCT_ID, SOYMILK_PRODUCT_ID))
+
+
+def bread_stock_total(tx):
+    placeholders = ','.join('?' for _ in REWARD_PRODUCT_IDS)
+    return tx.one(f"""
+        SELECT COALESCE(SUM(quantity),0) AS count FROM (
+            SELECT id AS product_id, stock+preorder_stock AS quantity FROM products
+            UNION ALL
+            SELECT i.product_id, i.quantity FROM order_items i JOIN orders o ON o.id=i.order_id
+            WHERE o.status='pending'
+            UNION ALL
+            SELECT product_id, 1 FROM reward_requests WHERE status='pending'
+        ) AS remaining_stock WHERE product_id IN ({placeholders})
+    """, REWARD_PRODUCT_IDS)['count']
+
+
 def products(tx, drink_limits=None):
     placeholders = ','.join('?' for _ in PRODUCT_IDS)
     rows = tx.all(f"SELECT * FROM products WHERE id IN ({placeholders}) ORDER BY id", PRODUCT_IDS)
@@ -954,7 +978,8 @@ class Application:
         if method == "GET" and path == "/api/staff/dashboard":
             with self.db.transaction() as tx:
                 stats = tx.one("SELECT COALESCE(SUM(CASE WHEN status = 'approved' THEN total ELSE 0 END),0) AS revenue, COALESCE(SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END),0) AS approved_orders, COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END),0) AS pending_orders FROM orders")
-                stats["bread_sold"] = tx.one("SELECT COALESCE(SUM(i.quantity),0) AS count FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.status='approved' AND i.product_id NOT IN (?,?)", DRINK_PRODUCT_IDS)["count"]
+                stats.update(sales_totals(tx))
+                stats['bread_stock_total'] = bread_stock_total(tx)
                 stats["milk_stock"] = milk_stock(tx)
                 stats['pending_rewards'] = tx.one("SELECT COUNT(*) AS n FROM reward_requests WHERE status='pending'")['n']
                 stats['bread_event_given'] = event_bread_given(tx)

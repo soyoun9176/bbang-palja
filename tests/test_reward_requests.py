@@ -155,19 +155,29 @@ class RewardRequestTests(unittest.TestCase):
         drink=next(row for row in self.dashboard()['event_beverage_limits'] if row['product_id']==113)
         self.assertEqual((drink['limit'],drink['delivered'],drink['remaining']),(1,1,0))
 
-    def test_inventory_summary_counts_only_delivered_event_bread_and_approved_sales(self):
-        self.stock(101,12);self.stock(112,2)
-        order=self.call('POST','/api/orders',{'items':[{'product_id':101,'quantity':2},{'product_id':112,'quantity':1}],
-                        'request_id':uuid.uuid4().hex},self.buyer['token'])['order']
+    def test_inventory_summary_separates_sales_stock_and_event_deliveries(self):
+        self.stock(101,12);self.stock(112,2);self.stock(113,3)
+        self.call('POST','/api/staff/preorders/import',{'reservations':[{
+            'name':'예판 구매자','phone':phone_for('예판 구매자'),'items':[{'product_id':101,'quantity':2}],
+        }]},self.staff)
+        order=self.call('POST','/api/orders',{'items':[
+            {'product_id':101,'quantity':2},{'product_id':112,'quantity':1},{'product_id':113,'quantity':2},
+        ],'request_id':uuid.uuid4().hex},self.buyer['token'])['order']
         first=self.claim_at(20)['reward']['fulfillment']
-        self.assertEqual((self.dashboard()['stats']['bread_sold'],self.dashboard()['stats']['bread_event_given']),(0,0))
+        metrics=('bread_sold','bread_stock_total','bread_revenue','bread_event_given','milk_sold','soymilk_sold')
+        stats=self.dashboard()['stats']
+        self.assertEqual(tuple(stats[key] for key in metrics),(0,12,0,0,0,0))
+
+        # The purchase price is fixed on the order line when it is placed.
+        with self.app.db.transaction(write=True) as tx:
+            tx.execute('UPDATE products SET price=8000 WHERE id=101')
         self.call('POST',f"/api/staff/orders/{order['id']}/approve",{},self.staff)
         self.transition(first,'approve');self.transition(first,'approve')
         second=self.claim_at(30)['reward']['fulfillment'];self.transition(second,'cancel')
         self.call('POST','/api/staff/manual-event-grants',{'guest':True,'name':'이벤트 참여자','kind':'bread',
                   'product_id':101,'quantity':3,'reason':'현장 지급','request_id':uuid.uuid4().hex},self.staff)
         stats=self.dashboard()['stats']
-        self.assertEqual((stats['bread_sold'],stats['bread_event_given']),(2,4))
+        self.assertEqual(tuple(stats[key] for key in metrics),(2,6,5600,4,1,2))
 
     def test_stock_shortage_does_not_use_quota_and_a_pending_hold_blocks_lowering_the_limit(self):
         self.set_limit(112,2)

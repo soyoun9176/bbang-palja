@@ -190,10 +190,20 @@ function eventSuppliesPanel() {
 
 function inventorySalesSummary() {
   const stats=data().stats||{};
-  return `<section class="content-card inventory-summary"><h2>현재 판매 현황</h2><dl class="inventory-sales-totals">
-    <div><dt>판매된 빵</dt><dd>${number(stats.bread_sold)}개</dd></div>
-    <div><dt>이벤트로 제공된 빵</dt><dd>${number(stats.bread_event_given)}개</dd></div>
-  </dl></section>`;
+  return `<section class="content-card inventory-summary" aria-labelledby="inventory-sales-title">
+    <h2 id="inventory-sales-title">현재 판매 현황</h2>
+    <div class="table-wrap"><table aria-labelledby="inventory-sales-title">
+      <thead><tr><th scope="col">항목</th><th scope="col">집계</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">판매된 빵 개수</th><td>${number(stats.bread_sold)}개</td></tr>
+        <tr><th scope="row">총 재고 빵 개수</th><td>${number(stats.bread_stock_total)}개</td></tr>
+        <tr><th scope="row">판매된 빵 총액</th><td>${won(stats.bread_revenue)}</td></tr>
+        <tr><th scope="row">이벤트로 나간 빵 개수</th><td>${number(stats.bread_event_given)}개</td></tr>
+        <tr><th scope="row">판매된 우유/두유 개수</th><td>우유 ${number(stats.milk_sold)}개 · 두유 ${number(stats.soymilk_sold)}개</td></tr>
+      </tbody>
+    </table></div>
+    <p class="form-hint">총 재고는 현판 재고, 예판 대기, 접수 보관 수량을 합한 값입니다.</p>
+  </section>`;
 }
 
 function inventoryPage() {

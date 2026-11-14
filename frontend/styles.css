@@ -188,9 +188,6 @@
 .inventory-direction{display:flex;gap:8px;margin-bottom:8px}.inventory-direction>.tab-chip{flex:1;min-height:44px}
 .inventory-summary{margin-top:20px}
 .inventory-summary h2{font-size:18px;margin:0 0 14px}
-.inventory-sales-totals{display:flex;flex-wrap:wrap;gap:18px 36px;margin:0}
-.inventory-sales-totals dt{font-size:13px;color:var(--muted)}
-.inventory-sales-totals dd{margin:4px 0 0;font-size:22px;font-weight:700}
 .milestone-track,.milestone-stops{height:104px}
 .milestone-limited{display:block;font-size:9px;line-height:12px}
 .beverage-options .form-hint{margin:6px 0 0}
