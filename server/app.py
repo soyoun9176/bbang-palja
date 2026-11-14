@@ -267,6 +267,21 @@ def change_supply(tx, key, delta, reason, actor):
               (supply['name'], 'event_supply', delta, reason, actor, now()))
 
 
+def event_supply_summary(tx):
+    return tx.all("""
+        SELECT s.*,
+               (SELECT COUNT(*) FROM reward_requests r
+                WHERE r.supply_key=s.key AND r.status='pending') AS held,
+               (SELECT COUNT(*) FROM reward_requests r
+                WHERE r.supply_key=s.key AND r.status='approved')
+               + (SELECT COALESCE(SUM(g.quantity),0) FROM manual_event_grants g
+                  WHERE g.supply_key=s.key)
+               + (SELECT COUNT(*) FROM milestone_claims m WHERE m.kind=s.key
+                  AND NOT EXISTS (SELECT 1 FROM reward_requests r WHERE r.milestone_id=m.id)) AS delivered
+        FROM event_supplies s ORDER BY s.key
+    """)
+
+
 def create_reward_request(tx, user, kind, selected=None, *, milestone_id=None, roll_id=None):
     selected = selected or {'id': None, 'name': '우유·두유 선택'}
     reason = f"{user['name']} 이벤트 지급 요청 · 재고 확보"
@@ -947,7 +962,7 @@ class Application:
                 return {"orders": all_orders(tx, include_inventory=True), "products": products(tx, drink_limits), "stats": stats,
                         'event_beverage_limits': list(drink_limits.values()),
                         'event_notices':event_notices(tx),
-                        "event_supplies": tx.all('SELECT * FROM event_supplies ORDER BY key'),
+                        "event_supplies": event_supply_summary(tx),
                         'reward_requests': reward_requests(tx),
                         'manual_grants': tx.all('SELECT * FROM manual_event_grants ORDER BY id DESC LIMIT 300'),
                         'badges': badge_catalog(tx),

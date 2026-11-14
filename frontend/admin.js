@@ -177,12 +177,14 @@ function preorderStatusPanel() {
   return `<details id="inventory-preorders" class="preorder-status-panel"><summary class="secondary-button">${i('chevron')}예판 수령 현황 <span>${list('reservations').length}건</span></summary><div class="preorder-status-content">${searchField('inventory','admin-preorder-status-search','예판 검색','이름 · 전화번호 뒷자리 · 메뉴 검색')}<div id="inventory-preorder-results">${preorderStatusResults()}</div></div></details>`;
 }
 
-function eventBeveragePanel() {
+function eventSuppliesPanel() {
   const limits=list('event_beverage_limits');
-  if(!limits.length)return '';
-  return `<section class="content-card inventory-summary"><h2>선착순 이벤트 음료</h2><p class="form-hint">음료를 선택한 순서대로 확보합니다. 대기 요청을 취소하면 한도가 복구됩니다.</p>
-    <div class="table-wrap"><table><thead><tr><th scope="col">품목</th><th scope="col">제공 한도</th><th scope="col">지급 대기</th><th scope="col">지급 완료</th><th scope="col">남은 한도</th><th scope="col">관리</th></tr></thead><tbody>
+  const oatmeal=list('event_supplies').find(item=>item.key==='oatmeal');
+  if(!limits.length&&!oatmeal)return '';
+  return `<section class="content-card inventory-summary"><h2>이벤트 물품</h2><p class="form-hint">남은 수량은 우유·두유의 이벤트 한도와 오트밀의 실제 재고를 나타냅니다.</p>
+    <div class="table-wrap"><table><thead><tr><th scope="col">품목</th><th scope="col">제공 한도</th><th scope="col">지급 대기</th><th scope="col">지급 완료</th><th scope="col">남은 수량</th><th scope="col">관리</th></tr></thead><tbody>
       ${limits.map(drink=>`<tr><th scope="row">${escape(drink.name)}</th><td>${number(drink.limit)}개</td><td>${number(drink.held)}개</td><td>${number(drink.delivered)}개</td><td><strong>${number(drink.remaining)}개</strong></td><td><button type="button" class="secondary-button" data-action="admin-beverage-limit" data-product="${drink.product_id}" aria-label="${escape(drink.name)} 이벤트 제공 한도 수정">한도 수정</button></td></tr>`).join('')}
+      ${oatmeal?`<tr><th scope="row">${escape(oatmeal.name)}</th><td>—</td><td>${number(oatmeal.held)}개</td><td>${number(oatmeal.delivered)}개</td><td><strong>${number(oatmeal.stock)}개</strong></td><td><button type="button" class="secondary-button" data-action="admin-supply-adjust" aria-label="오트밀 미니바이트 재고 수정">재고 수정</button></td></tr>`:''}
     </tbody></table></div></section>`;
 }
 
@@ -199,12 +201,11 @@ function inventoryPage() {
   return `${heading('재고관리','',`<button class="secondary-button" data-action="admin-import">예판 등록</button><button class="primary-button" data-action="admin-adjust">재고 수정</button>`)}
   ${help('재고 보는 방법','빵과 음료는 판매와 이벤트 지급에 같은 현판 재고를 사용합니다. 이벤트 우유·두유는 품목별 제공 한도도 적용합니다. 접수 보관에는 판매와 이벤트 지급 대기를 함께 표시합니다. 예판 대기와 접수 보관 수량은 추첨에 사용하지 않습니다. 매장 예상은 현판·예판 대기·접수 보관의 합입니다.')}
   ${preorderStatusPanel()}
-  <section class="content-card event-supply-card"><div><h2>이벤트 물품</h2><p>오트밀 미니바이트 <strong>${data().event_supplies?.find(s=>s.key==='oatmeal')?.stock||0}개</strong><small> · 지급 대기 ${list('reward_requests').filter(r=>r.status==='pending'&&r.supply_key==='oatmeal').length}개</small></p></div><button class="secondary-button" data-action="admin-supply-adjust">수정</button></section>
   <div class="table-wrap"><table><thead><tr><th>품목</th><th>현판·이벤트 가능</th><th>예판 대기</th><th>접수 보관</th><th>매장 예상</th><th></th></tr></thead><tbody>${productList().map(p=>{
     const held=heldStock(p.id);
     return `<tr><td><strong>${escape(p.name)}</strong></td><td>${p.stock}</td><td>${p.preorder_stock}</td><td>${held}</td><td><strong>${p.stock+p.preorder_stock+held}</strong></td><td><button class="secondary-button" data-action="admin-adjust" data-product="${p.id}">수정</button></td></tr>`;
   }).join('')}</tbody></table></div>
-  ${eventBeveragePanel()}
+  ${eventSuppliesPanel()}
   <details id="inventory-history" class="history-section"><summary>재고 수정 히스토리</summary><div class="admin-subtabs">${[['all','전체'],['stock','현판·이벤트'],['preorder_stock','예판']].map(([key,label])=>`<button class="tab-chip ${inventoryBucket===key?'active':''}" data-action="admin-inventory-filter" data-bucket="${key}">${label}</button>`).join('')}</div>${logs.length?`<div class="table-wrap"><table><thead><tr><th>시간</th><th>품목</th><th>구분</th><th>변동</th><th>사유</th><th>담당자</th></tr></thead><tbody>${logs.map(log=>`<tr><td>${stamp(log.created_at)}</td><td>${escape(log.product_name)}</td><td>${bucketLabel(log.bucket)}</td><td>${log.delta>0?'+':''}${log.delta}</td><td>${escape(log.reason)}</td><td>${escape(log.actor)}</td></tr>`).join('')}</tbody></table></div>`:'<p>기록이 없습니다.</p>'}</details>
   ${inventorySalesSummary()}`;
 }

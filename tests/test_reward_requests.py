@@ -169,6 +169,52 @@ class RewardRequestTests(unittest.TestCase):
         stats=self.dashboard()['stats']
         self.assertEqual((stats['bread_sold'],stats['bread_event_given']),(2,4))
 
+    def test_stock_shortage_does_not_use_quota_and_a_pending_hold_blocks_lowering_the_limit(self):
+        self.set_limit(112,2)
+        self.stock(112,0)
+        row=self.milk_roll()['fulfillment']
+        with self.assertRaises(APIError) as error:
+            self.choose(row,112)
+        self.assertEqual((error.exception.status,error.exception.message),(409,'우유 재고가 부족합니다.'))
+        drink=self.dashboard()['event_beverage_limits'][0]
+        self.assertEqual((drink['held'],drink['remaining']),(0,2))
+
+        self.stock(112,2)
+        held=self.choose(row,112)
+        with self.assertRaises(APIError) as error:
+            self.set_limit(112,0)
+        self.assertEqual(error.exception.status,409)
+        self.transition(held,'cancel')
+        self.transition(held,'cancel')
+        self.assertEqual(self.set_limit(112,0)['remaining'],0)
+        self.assertEqual(self.available(112),2)
+
+    def test_oatmeal_summary_keeps_physical_stock_separate_and_counts_each_delivery_once(self):
+        with self.app.db.transaction(write=True) as tx:
+            tx.execute("UPDATE event_supplies SET stock=6 WHERE key='oatmeal'")
+        uid=self.buyer['user']['id']
+        other=self.register('오트밀 당첨자')
+        with self.app.db.transaction(write=True) as tx:
+            tx.execute('UPDATE users SET score=5 WHERE id IN (?,?)',(uid,other['user']['id']))
+
+        def claim(buyer):
+            return self.call('POST','/api/rewards/claim',{'threshold':5,'request_id':uuid.uuid4().hex},
+                             buyer['token'])['reward']['fulfillment']
+
+        first,second=claim(self.buyer),claim(other)
+        self.assertEqual(self.dashboard()['event_supplies'][0]['held'],2)
+        self.transition(first,'approve')
+        self.transition(first,'approve')
+        self.transition(second,'cancel')
+        self.transition(second,'cancel')
+        self.call('POST','/api/staff/manual-event-grants',{'guest':True,'name':'오트밀 지급 대상',
+                  'kind':'gift','gift':'oatmeal','quantity':2,'reason':'현장 지급','request_id':uuid.uuid4().hex},self.staff)
+        summary=self.dashboard()
+        oatmeal=summary['event_supplies'][0]
+        self.assertEqual((oatmeal['stock'],oatmeal['held'],oatmeal['delivered']),(3,0,3))
+        self.assertEqual([(drink['held'],drink['delivered']) for drink in summary['event_beverage_limits']],[(0,0),(0,0)])
+        self.assertEqual(summary['stats']['bread_event_given'],0)
+
     def test_sold_out_options_are_rejected_and_buyer_can_decline_without_reroll(self):
         self.stock(112,0);self.stock(113,0)
         identity=uuid.uuid4().hex

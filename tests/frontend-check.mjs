@@ -957,16 +957,19 @@ test('stock on hold includes pending event requests but excludes unselected and 
   assert.match(f.run('renderAdmin()'),/<td>2<\/td><td>0<\/td><td>3<\/td><td><strong>5<\/strong>/);
 });
 
-test('inventory shows separate beverage limits and ends with the server sales totals',async()=>{
+test('inventory groups oatmeal stock with beverage limits and ends with the server sales totals',async()=>{
   const f=adminFixture();f.state.route='inventory';
   f.state.staffData.stats={bread_sold:12,bread_event_given:4};
   f.state.staffData.event_beverage_limits=[
     {product_id:112,name:'우유',limit:8,held:2,delivered:3,remaining:3},
     {product_id:113,name:'두유',limit:4,held:0,delivered:4,remaining:0},
   ];
+  f.state.staffData.event_supplies=[{key:'oatmeal',name:'오트밀 미니바이트',stock:5,held:1,delivered:2}];
   const html=f.run('renderAdmin()');
+  assert.equal((html.match(/<h2>이벤트 물품<\/h2>/g)||[]).length,1);
   assert.match(html,/<th scope="row">우유<\/th><td>8개<\/td><td>2개<\/td><td>3개<\/td><td><strong>3개/);
   assert.match(html,/<th scope="row">두유<\/th><td>4개<\/td><td>0개<\/td><td>4개<\/td><td><strong>0개/);
+  assert.match(html,/<th scope="row">오트밀 미니바이트<\/th><td>—<\/td><td>1개<\/td><td>2개<\/td><td><strong>5개<\/strong><\/td><td><button[^>]+data-action="admin-supply-adjust"/);
   assert.match(html,/<h2>현재 판매 현황<\/h2>[\s\S]*<dt>판매된 빵<\/dt><dd>12개<\/dd>[\s\S]*<dt>이벤트로 제공된 빵<\/dt><dd>4개<\/dd>[\s\S]*<\/section>$/);
   let modal='';f.context.shared.modal=markup=>{modal=markup;};
   await f.run("handleAdminClick('admin-beverage-limit',{dataset:{product:'112'}})");
