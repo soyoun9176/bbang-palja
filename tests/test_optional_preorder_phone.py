@@ -75,16 +75,22 @@ class OptionalPreorderPhoneTests(unittest.TestCase):
         self.assertEqual(self.rows('orders'), [])
         self.assertEqual(self.me(buyer)['dice_balance'], 0)
 
-    def test_contact_lookup_uses_account_defaults_but_name_only_cannot_open_protected_booking(self):
+    def test_name_lookup_lists_all_contact_variants_without_assigning_any_booking(self):
         buyer = self.buyer()
         blank = self.reserve()
-        protected = self.reserve(phone=buyer['phone'])
-        self.reserve(phone='010-9999-9999')
+        matching_phone = self.reserve(phone=buyer['phone'])
+        other_phone = self.reserve(phone='010-9999-9999')
+        self.reserve(name='다른 예약자')
+        expected = [blank['id'], matching_phone['id'], other_phone['id']]
         result = self.call('/api/preorders/lookup', token=buyer['token'], method='GET')
-        self.assertEqual([r['id'] for r in result['reservations']], [blank['id'], protected['id']])
-        self.assertEqual([r['id'] for r in self.lookup(buyer)['reservations']], [blank['id']])
+        self.assertEqual([r['id'] for r in result['reservations']], expected)
+        self.assertEqual([r['id'] for r in self.lookup(buyer)['reservations']], expected)
+        self.assertEqual([r['id'] for r in self.lookup(buyer, phone='010-7777-7777')['reservations']], expected)
+        self.assertTrue(all('phone' not in r for r in result['reservations']))
+        self.assertTrue(all(r['user_id'] is None for r in self.rows('reservations')))
+        self.assertEqual(self.rows('orders'), [])
         with self.assertRaises(APIError) as error:
-            self.claim(protected, self.buyer())
+            self.claim(other_phone, self.buyer())
         self.assertEqual(error.exception.status, 403)
 
     def test_buyer_selection_only_creates_pending_order_until_staff_explicitly_approves(self):

@@ -160,28 +160,28 @@ function pickupFixture(){
   return f;
 }
 
-test('pickup form defaults to the logged-in nickname and phone and both fields are editable',async()=>{
+test('pickup form asks only for the editable reservation name and keeps account phone private',async()=>{
   const f=pickupFixture();await f.run('refresh()');
   const html=f.run('renderPickup()');
   assert.match(html,/id="preorder-name"[^>]*value="구매자1"/);
-  assert.match(html,/id="preorder-phone"[^>]*value="010-1234-5678"/);
+  assert.doesNotMatch(html,/preorder-phone|name="phone"|010-1234-5678|전화번호/);
   assert.doesNotMatch(html,/readonly|가입한 전화번호의 예약만/);
   assert.doesNotMatch(f.run('profileEditor(state.user)'),/010-1234-5678|name="phone"/);
 });
 
-test('edited pickup inputs survive refreshes without changing account defaults',async()=>{
+test('edited pickup name survives refreshes without changing account defaults',async()=>{
   const f=pickupFixture();await f.run('refresh()');
-  f.run("state.reservation={id:1};editPickupField('name','다른 예약자');editPickupField('phone','01055556666')");
+  f.run("state.reservation={id:1};editPickupField('name','다른 예약자')");
   await f.run('refresh()');
   const html=f.run('renderPickup()');
   assert.match(html,/id="preorder-name"[^>]*value="다른 예약자"/);
-  assert.match(html,/id="preorder-phone"[^>]*value="01055556666"/);
+  assert.doesNotMatch(html,/name="phone"/);
   assert.equal(f.run('state.reservation'),null);
   assert.equal(f.run('state.user.name'),'구매자1');
   assert.equal(f.run('state.pickupDefaults.phone'),'010-1234-5678');
 });
 
-test('pickup lookup submits the edited pair with normalized phone and retains the query',async()=>{
+test('pickup lookup submits only the edited name even if old draft data contains a phone',async()=>{
   const f=pickupFixture();await f.run('refresh()');
   const normal=f.context.fetchOverride;
   f.context.fetchOverride=(path,options)=>path.startsWith('/api/preorders/lookup?')?
@@ -189,10 +189,10 @@ test('pickup lookup submits the edited pair with normalized phone and retains th
   await f.run("lookupPreorder({name:' 예약한 실명 ',phone:'01055556666'})");
   const request=f.requests.find(r=>r.path.startsWith('/api/preorders/lookup?'));
   const query=new URL('http://test'+request.path).searchParams;
-  assert.equal(query.get('name'),'예약한 실명');assert.equal(query.get('phone'),'010-5555-6666');
+  assert.deepEqual([...query.entries()],[['name','예약한 실명']]);
   assert.equal(request.headers.Authorization,'Bearer token-A');
   assert.equal(f.run('state.reservation.id'),7);
-  assert.equal(f.run('state.pickupDraft.phone'),'010-5555-6666');
+  assert.equal(f.run('state.pickupDraft.phone'),undefined);
   assert.equal(f.run('state.pickupDefaults.phone'),'010-1234-5678');
 });
 
@@ -214,7 +214,7 @@ test('phoneless pickup shows every same-name booking without automatically claim
   ]}):normal(path,options);
   await f.run("lookupPreorder({name:'동명이인',phone:''})");
   const query=new URL('http://test'+f.requests.find(r=>r.path.startsWith('/api/preorders/lookup?')).path).searchParams;
-  assert.equal(query.get('phone'),'');
+  assert.equal(query.has('phone'),false);
   assert.equal(f.run('state.reservation'),null);
   const html=f.run('renderPickup()');
   assert.match(html,/예약 #7/);assert.match(html,/예약 #8/);
@@ -254,11 +254,11 @@ test('a response from an earlier pickup query cannot overwrite a later edit',asy
 
 test('switching accounts resets the pickup draft to the new accounts own defaults',async()=>{
   const f=pickupFixture();await f.run('refresh()');
-  f.run("editPickupField('name','조회 중인 예약자');editPickupField('phone','01055556666');state.token='token-B'");
+  f.run("editPickupField('name','조회 중인 예약자');state.token='token-B'");
   await f.run('refresh()');
   assert.equal(f.run('state.pickupDraft'),null);
   assert.equal(f.run('pickupValues().name'),'구매자2');
-  assert.equal(f.run('pickupValues().phone'),'010-9999-8888');
+  assert.equal(f.run('pickupValues().phone'),undefined);
   assert.equal(f.run('state.reservation'),null);
 });
 

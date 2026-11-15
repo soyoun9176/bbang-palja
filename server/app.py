@@ -663,7 +663,7 @@ def staff_reservation_data(tx, reservation):
     return result
 
 
-def matching_reservations(tx, name, phone, *, staff=False, reservation_id=None):
+def matching_reservations(tx, name, phone=None, *, reservation_id=None):
     conditions, values = ['name=?'], [name]
     if reservation_id is not None:
         conditions.append('id=?')
@@ -671,10 +671,8 @@ def matching_reservations(tx, name, phone, *, staff=False, reservation_id=None):
     if phone is not None:
         conditions.append('(phone=? OR phone IS NULL)')
         values.append(phone)
-    elif not staff:
-        conditions.append('phone IS NULL')
     rows = tx.all('SELECT * FROM reservations WHERE ' + ' AND '.join(conditions) + ' ORDER BY id', values)
-    check(bool(rows), '예약 내역을 찾지 못했어요. 이름을 확인하고, 전화번호를 남긴 예약은 전화번호도 입력해 주세요.', 404)
+    check(bool(rows), '예약 내역을 찾지 못했어요. 예약자 이름을 확인해 주세요.', 404)
     return rows
 
 
@@ -922,9 +920,8 @@ class Application:
                 return idempotent(tx, user, "order", body, lambda: {"order": insert_order(tx, user, normalize_items(tx, body.get("items")), "walkin", user["name"])})
         if method == "GET" and path == "/api/preorders/lookup":
             name = person_name(query.get('name', [user['name']])[0])
-            phone = optional_phone(query.get('phone', [user['phone']])[0])
             with self.db.transaction(write=True) as tx:
-                reservations = matching_reservations(tx, name, phone)
+                reservations = matching_reservations(tx, name)
                 expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(timespec="milliseconds")
                 results = []
                 for reservation in reservations:
@@ -1218,7 +1215,7 @@ class Application:
         if method == 'POST' and path == '/api/staff/preorders/lookup':
             name, phone = person_name(body.get('name')), optional_phone(body.get('phone'))
             with self.db.transaction() as tx:
-                rows = matching_reservations(tx, name, phone, staff=True, reservation_id=body.get('reservation_id'))
+                rows = matching_reservations(tx, name, phone, reservation_id=body.get('reservation_id'))
                 results = [staff_reservation_data(tx, row) for row in rows]
                 return {'reservation': results[0] if len(results) == 1 else None, 'reservations': results}
         pickup_match = re.fullmatch(r'/api/staff/preorders/([0-9]+)/complete',path)

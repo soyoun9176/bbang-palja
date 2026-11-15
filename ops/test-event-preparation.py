@@ -102,7 +102,7 @@ def run(output_dir):
         for index, row in enumerate(DUMMY_ROWS, 1):
             buyer = api('/api/auth/register', {'name': row[0], 'phone': f'010-0000-{index:04}', 'pin': '1234'})
             token = buyer['token']
-            query = urllib.parse.urlencode({'name': row[0], 'phone': row[1]})
+            query = urllib.parse.urlencode({'name': row[0]})
             lookup = api('/api/preorders/lookup?' + query, token=token)
             if not row[1]:
                 assert lookup['reservation'] is None and len(lookup['reservations']) == 2

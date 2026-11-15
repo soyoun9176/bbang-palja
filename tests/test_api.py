@@ -277,23 +277,24 @@ class APIIntegrationTests(unittest.TestCase):
         approved = self.ok("POST", path, {"request_id": request_id()}, token)["order"]
         self.assertEqual(approved["id"], new["id"])
 
-    def test_preorder_claim_requires_phone_verification(self):
-        # The demo fixture's first reservation belongs to 김소연. Knowing its
-        # identifier must never replace verifying the reservation telephone.
+    def test_preorder_claim_requires_name_lookup(self):
+        # An ID alone cannot request pickup. The buyer must first look up the
+        # reservation name, then staff must confirm receipt before any award.
         login = self.ok("POST", "/api/auth/login", {"name": "김소연", "pin": "1234"})
         token = login["token"]
         path = "/api/preorders/1/claim"
         status, _ = self.call("POST", path, {"request_id": request_id()}, token)
         self.assertEqual(status, 403)
-        wrong = urllib.parse.urlencode({"name": "김소연", "phone": "01000000000"})
+        wrong = urllib.parse.urlencode({"name": "존재하지 않는 예약자"})
         status, _ = self.call("GET", "/api/preorders/lookup?" + wrong, token=token)
         self.assertEqual(status, 404)
         status, _ = self.call("POST", path, {"request_id": request_id()}, token)
         self.assertEqual(status, 403)
-        correct = urllib.parse.urlencode({"name": "김소연", "phone": "01012345678"})
+        correct = urllib.parse.urlencode({"name": "김소연"})
         reservation = self.ok("GET", "/api/preorders/lookup?" + correct, token=token)["reservation"]
         self.assertEqual(reservation["id"], 1)
         order = self.ok("POST", path, {"request_id": request_id()}, token)["order"]
+        self.assertEqual(order['status'], 'pending')
         self.transition(order["id"], "cancel")
 
     def test_instagram_bonus_once_and_milk_inventory(self):
