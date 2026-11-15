@@ -5,6 +5,7 @@ import {diceChoiceArt} from './dice-icons.js';
 
 const isAdmin = /^\/admin(?:\/|$)/.test(location.pathname);
 const tokenKey = `kambo.${isAdmin ? 'staff' : 'buyer'}.token`;
+const paymentAccountNumber = '3333373117950';
 function loadGuestReceipts(){try{const saved=JSON.parse(localStorage.getItem('kambo.guest.orders')||'[]');return Array.isArray(saved)?saved.filter(r=>Number.isSafeInteger(r.id)&&r.id>0&&typeof r.token==='string'):[];}catch{return [];}}
 const state = {isAdmin,token:localStorage.getItem(tokenKey),user:null,config:{},products:[],orders:[],rewards:[],rewardRequests:[],eventNotices:[],leaderboard:null,staffData:null,route:location.hash.slice(1)||(isAdmin?'queue':'shop'),cart:{},reservation:null,pickupDefaults:null,pickupDraft:null,pickupUserId:null,authMode:'login',rolling:false,rollStage:'idle',diceAnimationPromise:Promise.resolve(),leveling:false,lastRoll:null,selectedDice:null,guestName:sessionStorage.getItem('kambo.guest.name')||'',guestReceipts:isAdmin?[]:loadGuestReceipts()};
 function guestPurchase(){return !isAdmin&&!state.user&&['guest','guest-orders'].includes(state.route);}
@@ -432,6 +433,15 @@ async function saveProfile(form,data) {
 }
 function openAuth(mode='login') { modal(`<h2>로그인</h2>${buyerAuthForm(mode)}${guestEntry()}`); }
 
+async function copyPaymentAccount(){
+  try{
+    await navigator.clipboard.writeText(paymentAccountNumber);
+    toast('계좌번호를 복사했어요.');
+  }catch{
+    toast('계좌번호를 복사하지 못했어요. 번호를 직접 입력해 주세요.','error');
+  }
+}
+
 async function checkout(button){
   if(!cartCount())return;
   const guest=guestPurchase(),name=state.guestName.trim();
@@ -445,7 +455,7 @@ async function checkout(button){
     if(guest){state.guestReceipts=[...state.guestReceipts.filter(r=>r.id!==order.id),{id:order.id,token:op.id}];localStorage.setItem('kambo.guest.orders',JSON.stringify(state.guestReceipts));}
     state.cart={};op.done();if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);
     await refreshAfterAction();state.route=guest?'guest-orders':'orders';history.replaceState(null,'',`#${state.route}`);render();
-    modal(`<div class="order-success"><div class="success-icon">${icon('check')}</div><h2>빵 구매 요청을 보냈어요!</h2><p>담당자에게 주문을 보여 주고<br>안내받은 계좌로 입금해 주세요.</p><div class="success-box">주문 #${String(order.id).padStart(3,'0')}${guest?` · ${esc(order.customer_name)}`:''} · 선택 수량 ${order.quantity}<strong>${money(order.total)}원</strong>${guest?'':orderDice(order)?`확인 후 주사위 ${orderDice(order)}개가 지급돼요.`:'음료 구매에는 주사위가 지급되지 않아요.'}</div><button class="primary-button full" data-action="close-modal">주문 내역 확인하기 ${icon('arrow')}</button></div>`);
+    modal(`<div class="order-success"><div class="success-icon">${icon('check')}</div><h2>빵 구매 요청을 보냈어요!</h2><p>담당자에게 주문을 보여 주고<br>아래 계좌로 입금해 주세요.</p><div class="success-box">주문 #${String(order.id).padStart(3,'0')}${guest?` · ${esc(order.customer_name)}`:''} · 선택 수량 ${order.quantity}<strong>${money(order.total)}원</strong><button type="button" class="text-button" data-action="copy-bank-account" aria-label="카카오뱅크 최원혁 계좌번호 복사"><span>${paymentAccountNumber}<br>카카오뱅크 최원혁으로 입금 부탁드립니다!</span></button></div><button class="primary-button full" data-action="close-modal">주문 내역 확인하기 ${icon('arrow')}</button></div>`);
   }catch(error){if(error.status>=400&&error.status<500)op.done();button.disabled=false;toast(error.message,'error');await refresh().catch(()=>{});render();}
 }
 function openLevelUp() {
@@ -511,6 +521,7 @@ else if(action==='logout'){if(profileSaving)return;await api('/api/auth/logout',
 else if(action==='cart-plus'||action==='cart-minus'||action==='remove-cart'){const id=Number(el.dataset.id),p=state.products.find(p=>p.id===id);const quantity=action==='remove-cart'?0:(state.cart[id]||0)+(action==='cart-plus'?1:-1);if(quantity>p.stock){toast('지금 남은 수량만큼 담을 수 있어요.','error');return;}const basketOpen=!!document.querySelector('.modal .basket');if(quantity>0)state.cart[id]=quantity;else delete state.cart[id];render();if(basketOpen)modal(renderBasket());}
 else if(action==='open-cart')modal(renderBasket());
 else if(action==='checkout')await checkout(el);
+else if(action==='copy-bank-account')await copyPaymentAccount();
 else if(action==='claim-preorder'){el.disabled=true;try{const {order}=await api(`/api/preorders/${el.dataset.id}/claim`,{method:'POST',body:{request_id:el.dataset.requestId||(el.dataset.requestId=requestId())}});if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);await refreshAfterAction();state.route='orders';location.hash='orders';render();toast(order.status==='approved'?'이미 픽업을 완료한 예약이에요.':'픽업을 요청했어요. 담당자에게 말씀해 주세요.');}catch(error){el.disabled=false;throw error;}}
 else if(action==='select-dice'){if(!state.rolling&&!state.leveling){state.selectedDice=el.dataset.kind;state.lastRoll=null;render();}}
 else if(action==='roll-dice')await rollDice();

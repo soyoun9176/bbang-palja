@@ -1511,7 +1511,7 @@ test('inventory offers a collapsed preorder status table with plain menu text an
   assert.match(f.run('renderAdmin()'),/등록된 예판이 없습니다/);
 });
 
-test('milk purchase and mixed order messages use bread dice rather than total quantity',async()=>{
+test('order messages use bread dice counts and checkout shows bank transfer instructions',async()=>{
   const f=fixture();
   await f.run('refresh()');
   f.run("state.route='orders'; state.orders=[{id:1,type:'walkin',status:'approved',quantity:3,dice_quantity:2,total:6600,items:[{name:'빵',quantity:2,price:2800},{name:'우유',quantity:1,price:1000}]}]; renderPage()");
@@ -1528,8 +1528,33 @@ test('milk purchase and mixed order messages use bread dice rather than total qu
     return f.context.normalFetch(path,options);
   };
   await f.run('checkout({disabled:false})');
-  assert.match(prompt,/음료 구매에는 주사위가 지급되지 않아요/);
+  assert.match(prompt,/<button type="button" class="text-button" data-action="copy-bank-account"/);
+  assert.match(prompt,/3333373117950<br>카카오뱅크 최원혁으로 입금 부탁드립니다!/);
   assert.doesNotMatch(prompt,/주사위 2개/);
+});
+
+test('tapping payment instructions copies only the account digits and confirms after completion',async()=>{
+  const f=fixture(),copied=[],messages=[];
+  let finish;
+  f.context.navigator={clipboard:{writeText:value=>{copied.push(value);return new Promise(resolve=>{finish=resolve;});}}};
+  f.context.captureToast=(message,type)=>messages.push({message,type});f.run('toast=captureToast');
+  const click=f.listeners.click({target:{closest:()=>({dataset:{action:'copy-bank-account'}})}});
+  assert.deepEqual(copied,['3333373117950']);
+  assert.equal(messages.length,0);
+  finish();await click;
+  assert.deepEqual(messages,[{message:'계좌번호를 복사했어요.',type:undefined}]);
+  assert.equal(f.requests.length,0);
+});
+
+test('unavailable or denied clipboard reports failure without claiming a successful copy',async()=>{
+  for(const clipboard of [undefined,{writeText:async()=>{throw new Error('Permission denied');}}]){
+    const f=fixture(),messages=[];
+    f.context.navigator={clipboard};
+    f.context.captureToast=(message,type)=>messages.push({message,type});f.run('toast=captureToast');
+    await f.listeners.click({target:{closest:()=>({dataset:{action:'copy-bank-account'}})}});
+    assert.deepEqual(messages,[{message:'계좌번호를 복사하지 못했어요. 번호를 직접 입력해 주세요.',type:'error'}]);
+    assert.equal(f.requests.length,0);
+  }
 });
 
 const testBadges=[
