@@ -1096,7 +1096,7 @@ test('beverage selection disables sold-out drinks and always separates cancellat
   let html=f.run('beverageOptions({id:9})');
   assert.match(html,/data-product="112" disabled/);
   assert.match(html,/data-product="113" >.*두유 선택/s);
-  assert.match(html,/data-action="decline-beverage" data-request="9">취소하기/);
+  assert.match(html,/data-action="decline-beverage" data-request="9">안 받을래요/);
   assert.match(html,/data-action="close-modal">나중에 선택하기/);
   f.run('state.products[1].stock=0');html=f.run('beverageOptions({id:9})');
   assert.match(html,/모두 소진/);
@@ -1932,7 +1932,7 @@ test('failed cancellation keeps its retry id and the request available instead o
   };
   await f.run("chooseBeverage({dataset:{request:'9'}},true)");
   assert.equal(f.run('state.rewardRequests[0].status'),'awaiting_choice');
-  assert.match(prompt,/data-action="decline-beverage" data-request="9">취소하기/);
+  assert.match(prompt,/data-action="decline-beverage" data-request="9">안 받을래요/);
   await f.run("chooseBeverage({dataset:{request:'9'}},true)");
   const posts=f.requests.filter(r=>r.path.endsWith('/decline'));
   assert.equal(JSON.parse(posts[0].body).request_id,JSON.parse(posts[1].body).request_id);
