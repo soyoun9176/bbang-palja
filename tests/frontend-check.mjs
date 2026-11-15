@@ -205,6 +205,42 @@ test('a failed lookup clears the previous reservation and preserves edited input
   assert.equal(f.run('state.pickupDraft.name'),'다른 이름');
 });
 
+test('phoneless pickup shows every same-name booking without automatically claiming one',async()=>{
+  const f=pickupFixture();await f.run('refresh()');
+  const normal=f.context.fetchOverride;
+  f.context.fetchOverride=(path,options)=>path.startsWith('/api/preorders/lookup?')?f.response({reservation:null,reservations:[
+    {id:7,name:'동명이인',status:'reserved',items:[{name:'플레인 휘낭시에',quantity:1,price:2800}],total:2800},
+    {id:8,name:'동명이인',status:'reserved',items:[{name:'초코 휘낭시에',quantity:3,price:3000}],total:9000},
+  ]}):normal(path,options);
+  await f.run("lookupPreorder({name:'동명이인',phone:''})");
+  const query=new URL('http://test'+f.requests.find(r=>r.path.startsWith('/api/preorders/lookup?')).path).searchParams;
+  assert.equal(query.get('phone'),'');
+  assert.equal(f.run('state.reservation'),null);
+  const html=f.run('renderPickup()');
+  assert.match(html,/예약 #7/);assert.match(html,/예약 #8/);
+  assert.match(html,/플레인 휘낭시에/);assert.match(html,/초코 휘낭시에/);
+  assert.match(html,/data-action="claim-preorder" data-id="7"/);
+  assert.match(html,/data-action="claim-preorder" data-id="8"/);
+  assert.match(html,/담당자가 예약 수령을 확인하고 승인/);
+  assert.doesNotMatch(html,/<input[^>]*name="phone"[^>]*required/);
+  assert.equal(f.requests.filter(r=>r.path.endsWith('/claim')).length,0);
+  f.run("editPickupField('name','다른예약')");
+  assert.doesNotMatch(f.run('renderPickup()'),/예약 #7|예약 #8/);
+});
+
+test('pending and completed pickup results cannot be requested again from their cards',async()=>{
+  const f=pickupFixture();await f.run('refresh()');
+  f.context.fetchOverride=()=>f.response({reservations:[
+    {id:7,name:'동명이인',status:'pending',items:[],total:2800},
+    {id:8,name:'동명이인',status:'approved',items:[],total:2800},
+  ]});
+  await f.run("lookupPreorder({name:'동명이인',phone:''})");
+  const html=f.run('renderPickup()');
+  assert.match(html,/담당자 확인을 기다려/);
+  assert.match(html,/이미 수령 완료/);
+  assert.doesNotMatch(html,/data-action="claim-preorder"/);
+});
+
 test('a response from an earlier pickup query cannot overwrite a later edit',async()=>{
   const f=pickupFixture();await f.run('refresh()');
   let release;
@@ -1184,7 +1220,7 @@ test('pickup search selects a matching reservation and checks its latest status 
   assert.doesNotMatch(html,/다른예약 예약 확인/);
   assert.equal(f.requests.length,0);
   await f.run("handleAdminClick('admin-preorder-select',{dataset:{id:'7'},disabled:false})");
-  assert.deepEqual(f.requests,[{path:'/api/staff/preorders/lookup',method:'POST',body:{name:'김이박',phone:'01012345678'}}]);
+  assert.deepEqual(f.requests,[{path:'/api/staff/preorders/lookup',method:'POST',body:{name:'김이박',phone:'01012345678',reservation_id:7}}]);
   html=f.run('renderAdmin()');
   assert.match(html,/이미 수령 완료한 예약입니다. 주문 #13/);
   assert.doesNotMatch(html,/id="admin-manual-preorder-complete"/);
@@ -1292,7 +1328,7 @@ test('reservation lookup shows original items and completes for the matching buy
   assert.match(html,/6600원/);
   assert.match(html,/주사위 2개를 지급/);
   assert.match(html,/<select id="admin-pickup-user" name="user_id" required/);
-  assert.match(html,/<option value="10" selected>등록사용자/);
+  assert.match(html,/<option value="10" >등록사용자/);
   assert.doesNotMatch(html,/name="pin"|data-sale-product/);
   await f.submit({user_id:'10'},'admin-manual-preorder-complete');
   assert.deepEqual(f.requests[1],{path:'/api/staff/preorders/7/complete',method:'POST',body:{
@@ -1317,8 +1353,8 @@ test('reservation pickup creates a new buyer PIN only when no account exists',as
   assert.match(html,/name="pin" type="password"/);
   assert.match(html,/우유·두유는 주사위를 지급하지 않습니다/);
   assert.doesNotMatch(html,/name="user_id"/);
-  await f.submit({pin:'2345'},'admin-manual-preorder-complete');
-  assert.deepEqual(f.requests[1].body,{name:'새예약자',phone:reservation.phone,pin:'2345',request_id:'request-1'});
+  await f.submit({buyer_phone:'010-2222-3333',pin:'2345'},'admin-manual-preorder-complete');
+  assert.deepEqual(f.requests[1].body,{name:'새예약자',phone:reservation.phone,buyer_phone:'010-2222-3333',pin:'2345',request_id:'request-1'});
   assert.doesNotMatch(f.messages[0],/주사위/);
   assert.doesNotMatch(f.run('renderAdmin()'),/id="admin-manual-preorder-complete"/);
 });
@@ -1342,6 +1378,51 @@ test('staff can choose a differently named existing account and retain it across
   html=f.run('renderAdmin()');
   assert.match(html,/수령 계정: 등록사용자/);
   assert.doesNotMatch(html,/id="admin-manual-preorder-complete"/);
+});
+
+test('staff phoneless pickup selects an explicit booking ID and never preselects a same-name account',async()=>{
+  const f=adminFixture();f.state.route='sales';
+  const reservation=manualReservation({name:'동명이인',phone:null});
+  f.state.staffData.users=[{id:10,name:'동명이인',phone:'010-1111-2222'},{id:11,name:'동명이인',phone:'010-3333-4444'}];
+  f.state.staffData.reservations=[reservation,{...reservation,id:8,total:2800}];
+  f.context.respond=async()=>({reservation});
+  await f.run("handleAdminClick('admin-sale-type',{dataset:{type:'preorder'}})");
+  const list=f.run('renderAdmin()');
+  assert.match(list,/예약 #7/);assert.match(list,/예약 #8/);assert.match(list,/연락처 미등록/);
+  await f.run("handleAdminClick('admin-preorder-select',{dataset:{id:'7'},disabled:false})");
+  assert.deepEqual(f.requests[0].body,{name:'동명이인',phone:'',reservation_id:7});
+  const html=f.run('renderAdmin()');
+  assert.equal(f.run('manualPickupUser'),'');
+  assert.match(html,/<option value="">수령 계정 선택/);
+  assert.match(html,/010-1111-2222/);assert.match(html,/010-3333-4444/);
+  assert.doesNotMatch(html,/<option value="(?:10|11)" selected/);
+  assert.match(html,/예약 수령 확인 · 승인/);
+  assert.equal(f.requests.filter(r=>r.path.endsWith('/complete')).length,0);
+});
+
+test('staff new-account pickup collects a separate phone and preserves a phoneless reservation',async()=>{
+  const f=adminFixture();f.state.route='sales';
+  const reservation=manualReservation({name:'예약 실명',phone:null});
+  f.context.respond=async path=>path.endsWith('/lookup')?{reservation}:{
+    reservation:{...reservation,status:'approved'},order:{dice_quantity:1}};
+  await f.run("handleAdminClick('admin-sale-type',{dataset:{type:'preorder'}})");
+  await f.lookup({name:reservation.name,phone:''});
+  await f.run("handleAdminClick('admin-pickup-mode',{dataset:{mode:'new'}})");
+  assert.match(f.run('renderAdmin()'),/name="buyer_phone"[^>]*required/);
+  f.listeners.input({target:{name:'buyer_phone',value:'010-2222-3333',closest:selector=>selector==='#admin-manual-preorder-complete'?{}:null}});
+  assert.match(f.run('renderAdmin()'),/name="buyer_phone"[^>]*value="010-2222-3333"/);
+  await f.submit({buyer_phone:'010-2222-3333',pin:'1234'},'admin-manual-preorder-complete');
+  assert.deepEqual(f.requests[1].body,{name:'예약 실명',phone:null,buyer_phone:'010-2222-3333',pin:'1234',request_id:'request-1'});
+});
+
+test('preorder approval shows both the original reservation and the selected account contact',()=>{
+  const f=adminFixture();f.state.route='queue';
+  f.state.staffData.users=[{id:10,name:'동명이인',phone:'010-1111-2222'}];
+  f.state.staffData.reservations=[manualReservation({phone:null,name:'예약 실명'})];
+  const html=f.run("orderCard({id:9,reservation_id:7,user_id:10,customer_name:'동명이인',type:'preorder',status:'pending',items:[]})");
+  assert.match(html,/예약 #7 · 예약자 예약 실명 · 연락처 미등록/);
+  assert.match(html,/수령 계정: 동명이인 · 010-1111-2222/);
+  assert.match(html,/예약 수령 확인 · 승인/);
 });
 
 test('a reservation with no registered buyers can still create its first account',async()=>{

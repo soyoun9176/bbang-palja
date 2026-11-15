@@ -72,18 +72,19 @@ def reconcile(tx,stamp,*,notify=True):
             award(tx,user_id,'elements','',stamp,'ach_elements','elements',notify=notify)
         if all(counts.get(pid,0)>0 for pid in BREADS):
             award(tx,user_id,'all_breads','',stamp,'ach_vvip','vvip',notify=notify)
-    # Import order is the original preorder application order. Rank distinct people,
-    # including uncollected reservations; arrival/pickup order cannot steal a slot.
-    phones=[]
+    # Import order is the original application order, including uncollected bookings.
+    # Group known phones; each phoneless booking occupies its own place.
+    people=[]
     for reservation in tx.all('SELECT id,phone FROM reservations ORDER BY created_at,id'):
-        if reservation['phone'] not in phones:
-            phones.append(reservation['phone'])
-        if phones.index(reservation['phone'])>=10:
+        identity = reservation['phone'] or 'reservation:' + str(reservation['id'])
+        if identity not in people:
+            people.append(identity)
+        if people.index(identity)>=10:
             continue
         order=tx.one("SELECT id,user_id,approved_at FROM orders WHERE reservation_id=? AND status='approved' ORDER BY id LIMIT 1",(reservation['id'],))
         if order and order['user_id'] is not None:
             award(tx,order['user_id'],'preorder_fast','',order['approved_at'] or stamp,'ach_fast','fast',
-                  order_id=order['id'],reservation_id=reservation['id'],exclusive_key='preorder:'+reservation['phone'],notify=notify)
+                  order_id=order['id'],reservation_id=reservation['id'],exclusive_key='preorder:'+identity,notify=notify)
     # First non-cancelled bread order per KST date. An earlier pending order blocks
     # later approvals; a guest order occupies the first spot but earns no account reward.
     days=set()

@@ -14,6 +14,7 @@ let manualReservation = null;
 let manualLookupVersion = 0;
 let manualPickupMode = 'existing';
 let manualPickupUser = '';
+let manualPickupPhone = '';
 let inputListenerAdded = false;
 const pendingRequests = new Map();
 const staffSearch = {inventory:'',pickup:'',queue:'',users:'',events:''};
@@ -43,6 +44,10 @@ export function initAdmin(shared) {
       }
       if (event.target.name==='user_id' && event.target.closest('#admin-manual-preorder-complete')) {
         manualPickupUser = event.target.value;
+        return;
+      }
+      if (event.target.name==='buyer_phone' && event.target.closest('#admin-manual-preorder-complete')) {
+        manualPickupPhone = event.target.value;
         return;
       }
       const form = event.target.closest('#admin-manual-sale');
@@ -85,7 +90,7 @@ const statusLabel = status => ({ pending: '확인 대기', approved: '승인 완
 const bucketLabel = bucket => ({ stock: '현판·이벤트', preorder_stock: '예판', reward_stock: '이전 이벤트(통합 전)', milk: '이전 우유(통합 전)', event_supply: '이벤트 물품' }[bucket] || bucket);
 const pendingOrders = () => list('orders').filter(order => order.status === 'pending');
 const preorderLabel = status => ({reserved:'수령 대기',pending:'수령 요청 접수',approved:'수령 완료'}[status]||status);
-const phoneLabel = phone => String(phone).replace(/^(\d{3})(\d{3,4})(\d{4})$/,'$1-$2-$3');
+const phoneLabel = phone => phone ? String(phone).replace(/^(\d{3})(\d{3,4})(\d{4})$/,'$1-$2-$3') : '연락처 미등록';
 const preorderMenu = r => r.items.map(item=>`${item.name} ${item.quantity}${productList().find(p=>p.id===item.product_id)?.unit||'개'}`).join(', ');
 function buyerIdentity(id,name='') {
   if(id===null)return `<span class="profile-name"><span>${escape(name)}</span><small class="muted">비회원</small></span>`;
@@ -99,7 +104,7 @@ function matchesSearch(query,...fields) {
   return String(query).trim().split(/\s+/).filter(Boolean).every(term=>text.includes(normalize(term)));
 }
 function matchingPreorders(query) {
-  return list('reservations').filter(r=>matchesSearch(query,r.name,r.phone,preorderMenu(r),preorderLabel(r.status)));
+  return list('reservations').filter(r=>matchesSearch(query,r.name,r.phone,`#${r.id}`,preorderMenu(r),preorderLabel(r.status)));
 }
 function searchField(key,id,label,placeholder) {
   return `<div class="field admin-search"><label for="${id}">${label}</label><input id="${id}" type="search" data-admin-search="${key}" value="${escape(staffSearch[key])}" placeholder="${placeholder}" autocomplete="off"></div>`;
@@ -147,7 +152,10 @@ function orderStockNote(order, item) {
 
 function orderCard(order) {
   const pending = order.status === 'pending';
-  return `<article class="pending-order"><div class="pending-title"><h3>${buyerIdentity(order.user_id,order.customer_name)}<small>#${order.id} · ${typeLabel(order.type)}</small></h3><span class="status ${escape(order.status)}">${i(pending ? 'clock' : order.status === 'approved' ? 'check' : 'x')}${statusLabel(order.status)}</span></div><div class="order-lines">${(order.items || []).map(item => `<div class="order-line"><span>${escape(item.name)} <b>× ${item.quantity}</b>${orderStockNote(order, item)}</span><span>${won(item.price * item.quantity)}</span></div>`).join('')}</div><div class="order-bottom"><span>${stamp(order.created_at)} 접수 · 총 ${order.quantity}개</span><strong>${won(order.total)}</strong></div>${pending ? `<div class="order-controls"><button class="secondary-button" data-action="admin-cancel" data-id="${order.id}">${i('x')}취소</button><button class="primary-button" data-action="admin-approve" data-id="${order.id}">${i('check')}${order.type === 'preorder' ? '품목 전달 완료 · 승인' : '입금 · 전달 확인 후 승인'}</button></div>` : ''}</article>`;
+  const reservation=list('reservations').find(r=>r.id===order.reservation_id);
+  const account=list('users').find(u=>u.id===order.user_id);
+  const pickup=reservation?`<p class="form-hint">예약 #${reservation.id} · 예약자 ${escape(reservation.name)} · ${escape(phoneLabel(reservation.phone))}${account?`<br>수령 계정: ${escape(account.name)} · ${escape(phoneLabel(account.phone))}`:''}</p>`:'';
+  return `<article class="pending-order"><div class="pending-title"><h3>${buyerIdentity(order.user_id,order.customer_name)}<small>#${order.id} · ${typeLabel(order.type)}</small></h3><span class="status ${escape(order.status)}">${i(pending ? 'clock' : order.status === 'approved' ? 'check' : 'x')}${statusLabel(order.status)}</span></div>${pickup}<div class="order-lines">${(order.items || []).map(item => `<div class="order-line"><span>${escape(item.name)} <b>× ${item.quantity}</b>${orderStockNote(order, item)}</span><span>${won(item.price * item.quantity)}</span></div>`).join('')}</div><div class="order-bottom"><span>${stamp(order.created_at)} 접수 · 총 ${order.quantity}개</span><strong>${won(order.total)}</strong></div>${pending ? `<div class="order-controls"><button class="secondary-button" data-action="admin-cancel" data-id="${order.id}">${i('x')}취소</button><button class="primary-button" data-action="admin-approve" data-id="${order.id}">${i('check')}${order.type === 'preorder' ? '예약 수령 확인 · 승인' : '입금 · 전달 확인 후 승인'}</button></div>` : ''}</article>`;
 }
 
 function queueResults() {
@@ -171,7 +179,7 @@ function heldStock(productId) {
 
 function preorderStatusResults() {
   const reservations=matchingPreorders(staffSearch.inventory);
-  return `<p class="search-count" role="status">검색 결과 ${reservations.length}건 / 전체 ${list('reservations').length}건</p>${reservations.length?`<div class="table-wrap"><table><thead><tr><th>이름</th><th>전화번호</th><th>메뉴</th><th>수령 상태</th></tr></thead><tbody>${reservations.map(r=>`<tr><td><strong>${escape(r.name)}</strong></td><td>${escape(phoneLabel(r.phone))}</td><td class="preorder-menu">${escape(preorderMenu(r))}</td><td><span class="status ${r.status==='approved'?'approved':'pending'}">${escape(preorderLabel(r.status))}</span></td></tr>`).join('')}</tbody></table></div>`:`<p class="form-hint">${list('reservations').length?'검색 결과가 없습니다.':'등록된 예판이 없습니다.'}</p>`}`;
+  return `<p class="search-count" role="status">검색 결과 ${reservations.length}건 / 전체 ${list('reservations').length}건</p>${reservations.length?`<div class="table-wrap"><table><thead><tr><th>이름</th><th>전화번호</th><th>메뉴</th><th>수령 상태</th></tr></thead><tbody>${reservations.map(r=>`<tr><td><strong>${escape(r.name)}</strong><small>예약 #${r.id}</small></td><td>${escape(phoneLabel(r.phone))}</td><td class="preorder-menu">${escape(preorderMenu(r))}</td><td><span class="status ${r.status==='approved'?'approved':'pending'}">${escape(preorderLabel(r.status))}</span></td></tr>`).join('')}</tbody></table></div>`:`<p class="form-hint">${list('reservations').length?'검색 결과가 없습니다.':'등록된 예판이 없습니다.'}</p>`}`;
 }
 function preorderStatusPanel() {
   return `<details id="inventory-preorders" class="preorder-status-panel"><summary class="secondary-button">${i('chevron')}예판 수령 현황 <span>${list('reservations').length}건</span></summary><div class="preorder-status-content">${searchField('inventory','admin-preorder-status-search','예판 검색','이름 · 전화번호 뒷자리 · 메뉴 검색')}<div id="inventory-preorder-results">${preorderStatusResults()}</div></div></details>`;
@@ -227,18 +235,20 @@ function buyerOptions(selected='',placeholder='구매자 선택',query='') {
 
 function manualPreorderMatches() {
   const reservations=matchingPreorders(staffSearch.pickup);
-  return `<p class="search-count" role="status">검색 결과 ${reservations.length}건</p>${reservations.length?`<div class="preorder-matches">${reservations.map(r=>`<article class="preorder-match"><div><strong>${escape(r.name)}</strong><small>${escape(phoneLabel(r.phone))} · ${escape(preorderLabel(r.status))}</small><p>${escape(preorderMenu(r))}</p></div><button type="button" class="secondary-button" data-action="admin-preorder-select" data-id="${r.id}" aria-label="${escape(r.name)} 예약 확인">예약 확인</button></article>`).join('')}</div>`:`<p class="form-hint">${list('reservations').length?'검색 결과가 없습니다.':'등록된 예약이 없습니다.'}</p>`}`;
+  return `<p class="search-count" role="status">검색 결과 ${reservations.length}건</p>${reservations.length?`<div class="preorder-matches">${reservations.map(r=>`<article class="preorder-match"><div><strong>${escape(r.name)}</strong><small>예약 #${r.id} · ${escape(phoneLabel(r.phone))} · ${escape(preorderLabel(r.status))}</small><p>${escape(preorderMenu(r))}</p></div><button type="button" class="secondary-button" data-action="admin-preorder-select" data-id="${r.id}" aria-label="${escape(r.name)} 예약 확인">예약 확인</button></article>`).join('')}</div>`:`<p class="form-hint">${list('reservations').length?'검색 결과가 없습니다.':'등록된 예약이 없습니다.'}</p>`}`;
 }
 
-async function lookupManualPreorder(name,phone) {
+async function lookupManualPreorder(name,phone,reservationId) {
   const version=++manualLookupVersion;
   manualReservation=null;
   document.querySelector('#manual-preorder-result')?.remove();
   try {
-    const response=await helpers.api('/api/staff/preorders/lookup',{method:'POST',body:{name:String(name).trim(),phone:String(phone).trim()}});
+    const response=await helpers.api('/api/staff/preorders/lookup',{method:'POST',body:{name:String(name).trim(),phone:String(phone??'').trim(),...(reservationId===undefined?{}:{reservation_id:reservationId})}});
     if(version!==manualLookupVersion||manualSaleType!=='preorder')return;
     manualReservation=response.reservation;
-    manualPickupUser=String(list('users').find(u=>u.name===manualReservation.name)?.id||'');
+    manualPickupUser='';
+    manualPickupPhone=manualReservation?.phone||'';
+    if(!manualReservation){helpers.render();helpers.toast('같은 이름의 예약이 여러 건입니다. 목록에서 예약번호와 메뉴를 확인해 선택해 주세요.');return;}
     manualPickupMode=list('users').length?'existing':'new';
     staffSearch.users='';
     helpers.render();
@@ -251,15 +261,15 @@ async function lookupManualPreorder(name,phone) {
 function manualPickupAccount(reservation, order) {
   if (order?.user_id===null) return '<input type="hidden" name="guest" value="1"><p class="callout">비회원 수령 · 주사위 미지급</p>';
   if (order) {
-    const name=order.customer_name || list('users').find(u=>u.id===order.user_id)?.name || reservation.name;
-    return `<input type="hidden" name="user_id" value="${order.user_id}"><p class="callout">수령 계정: ${buyerIdentity(order.user_id,name)}<span>이미 접수한 계정에 주사위를 추가합니다.</span></p>`;
+    const account=list('users').find(u=>u.id===order.user_id);
+    const name=order.customer_name || account?.name || reservation.name;
+    return `<input type="hidden" name="user_id" value="${order.user_id}"><p class="callout">수령 계정: ${buyerIdentity(order.user_id,name)}${account?.phone?`<span>${escape(phoneLabel(account.phone))}</span>`:''}<span>이미 접수한 계정에 주사위를 추가합니다.</span></p>`;
   }
   const guestButton=`<button class="tab-chip ${manualPickupMode==='guest'?'active':''}" data-action="admin-pickup-mode" data-mode="guest" type="button" aria-pressed="${manualPickupMode==='guest'}">계정 없이 수령</button>`;
   if(manualPickupMode==='guest')return `<div class="admin-subtabs">${guestButton}<button class="tab-chip" data-action="admin-pickup-mode" data-mode="existing" type="button" ${!list('users').length?'disabled':''}>기존 계정에 추가</button><button class="tab-chip" data-action="admin-pickup-mode" data-mode="new" type="button">새 계정 만들기</button></div><input type="hidden" name="guest" value="1"><p class="form-hint">예약자 이름으로 수령만 기록합니다. 계정 생성과 주사위 지급은 하지 않습니다.</p>`;
-  const samePhone=list('users').some(u=>u.phone===reservation.phone);
-  const existing=manualPickupMode!=='new'||samePhone;
-  return `<div class="admin-subtabs" role="group" aria-label="예약 수령 계정">${guestButton}<button class="tab-chip ${existing?'active':''}" data-action="admin-pickup-mode" data-mode="existing" type="button" aria-pressed="${existing}" ${!list('users').length?'disabled':''}>기존 계정에 추가</button><button class="tab-chip ${!existing?'active':''}" data-action="admin-pickup-mode" data-mode="new" type="button" aria-pressed="${!existing}" ${samePhone?'disabled':''}>새 계정 만들기</button></div>
-    ${existing?`${searchField('users','admin-pickup-user-search','기존 계정 검색','닉네임 · 전화번호 검색')}<div class="field"><label for="admin-pickup-user">수령할 구매자 계정</label><select id="admin-pickup-user" name="user_id" required>${buyerOptions(manualPickupUser,'수령 계정 선택',staffSearch.users)}</select><div class="selected-profile" data-selected-profile>${manualPickupUser?buyerIdentity(Number(manualPickupUser)):''}</div><p id="pickup-account-count" class="search-count" role="status">검색된 계정 ${list('users').filter(u=>matchesSearch(staffSearch.users,u.name,u.phone)).length}명</p><p class="form-hint">검색 후 수령 계정을 선택해 주세요. 주사위는 선택한 계정에 추가됩니다.</p></div>`:`<p class="form-hint">${escape(reservation.name)} 님의 예약 전화번호로 계정을 함께 만듭니다. 아래 비밀번호를 구매자에게 알려주세요.</p><div class="field"><label for="admin-pickup-pin">새 구매자 숫자 4자리 비밀번호</label><input id="admin-pickup-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" required autocomplete="new-password"></div>`}`;
+  const existing=manualPickupMode!=='new';
+  return `<div class="admin-subtabs" role="group" aria-label="예약 수령 계정">${guestButton}<button class="tab-chip ${existing?'active':''}" data-action="admin-pickup-mode" data-mode="existing" type="button" aria-pressed="${existing}" ${!list('users').length?'disabled':''}>기존 계정에 추가</button><button class="tab-chip ${!existing?'active':''}" data-action="admin-pickup-mode" data-mode="new" type="button" aria-pressed="${!existing}" >새 계정 만들기</button></div>
+    ${existing?`${searchField('users','admin-pickup-user-search','기존 계정 검색','닉네임 · 전화번호 검색')}<div class="field"><label for="admin-pickup-user">수령할 구매자 계정</label><select id="admin-pickup-user" name="user_id" required>${buyerOptions(manualPickupUser,'수령 계정 선택',staffSearch.users)}</select><div class="selected-profile" data-selected-profile>${manualPickupUser?buyerIdentity(Number(manualPickupUser)):''}</div><p id="pickup-account-count" class="search-count" role="status">검색된 계정 ${list('users').filter(u=>matchesSearch(staffSearch.users,u.name,u.phone)).length}명</p><p class="form-hint">검색 후 수령 계정을 선택해 주세요. 주사위는 선택한 계정에 추가됩니다.</p></div>`:`<p class="form-hint">${escape(reservation.name)} 님의 새 계정에 사용할 전화번호와 비밀번호를 입력해 주세요. 이미 가입한 번호라면 기존 비밀번호를 확인합니다.</p><div class="field"><label for="admin-pickup-phone">계정 전화번호</label><input id="admin-pickup-phone" name="buyer_phone" type="tel" inputmode="tel" value="${escape(manualPickupPhone)}" placeholder="010-1234-5678" maxlength="13" pattern="010(?:[0-9]{8}|-[0-9]{4}-[0-9]{4})" data-phone-input required></div><div class="field"><label for="admin-pickup-pin">계정 비밀번호 (숫자 4자리)</label><input id="admin-pickup-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" required autocomplete="new-password"></div>`}`;
 }
 
 function manualPreorderPage() {
@@ -268,8 +278,8 @@ function manualPreorderPage() {
   if (r) {
     const order = list('orders').find(o=>o.reservation_id===r.id&&o.status!=='cancelled') || r.order;
     const completed = order?.status==='approved' || r.status==='approved';
-    result = `<div id="manual-preorder-result" class="reservation-result"><div class="order-top"><h2>${escape(r.name)} 님의 예약</h2><span class="status ${completed?'approved':'pending'}">${completed?'수령 완료':order?.status==='pending'?'수령 요청 접수됨':'수령 대기'}</span></div><div class="order-lines">${r.items.map(item=>`<div class="order-line"><span class="manual-preorder-product">${helpers.productPhoto?.({...productList().find(p=>p.id===item.product_id),name:item.name})||''}<span>${escape(item.name)} × ${item.quantity}</span></span><span>${won(item.price*item.quantity)}</span></div>`).join('')}</div><div class="basket-total"><span>예약 금액</span><strong>${won(r.total)}</strong></div>
-    ${completed?`<p class="callout">이미 수령 완료한 예약입니다.${order?` 주문 #${order.id} · 수령 계정: ${escape(order.customer_name||list('users').find(u=>u.id===order.user_id)?.name||r.name)}`:''}</p>`:`<form id="admin-manual-preorder-complete"><p class="form-hint">예약된 품목을 전달한 뒤 승인해 주세요. ${order?.user_id===null||manualPickupMode==='guest'?'비회원 수령은 주사위를 지급하지 않습니다.':r.dice_quantity?`주사위 ${r.dice_quantity}개를 지급합니다.`:'우유·두유는 주사위를 지급하지 않습니다.'}</p>${manualPickupAccount(r,order)}<button class="primary-button full" type="submit">예약한 빵 전달 완료 · 승인</button></form>`}</div>`;
+    result = `<div id="manual-preorder-result" class="reservation-result"><div class="order-top"><h2>${escape(r.name)} 님의 예약 #${r.id}</h2><span class="status ${completed?'approved':'pending'}">${completed?'수령 완료':order?.status==='pending'?'수령 요청 접수됨':'수령 대기'}</span></div><div class="order-lines">${r.items.map(item=>`<div class="order-line"><span class="manual-preorder-product">${helpers.productPhoto?.({...productList().find(p=>p.id===item.product_id),name:item.name})||''}<span>${escape(item.name)} × ${item.quantity}</span></span><span>${won(item.price*item.quantity)}</span></div>`).join('')}</div><div class="basket-total"><span>예약 금액</span><strong>${won(r.total)}</strong></div>
+    ${completed?`<p class="callout">이미 수령 완료한 예약입니다.${order?` 주문 #${order.id} · 수령 계정: ${escape(order.customer_name||list('users').find(u=>u.id===order.user_id)?.name||r.name)}`:''}</p>`:`<form id="admin-manual-preorder-complete"><p class="form-hint">예약된 품목을 전달한 뒤 승인해 주세요. ${order?.user_id===null||manualPickupMode==='guest'?'비회원 수령은 주사위를 지급하지 않습니다.':r.dice_quantity?`주사위 ${r.dice_quantity}개를 지급합니다.`:'우유·두유는 주사위를 지급하지 않습니다.'}</p>${manualPickupAccount(r,order)}<button class="primary-button full" type="submit">예약 수령 확인 · 승인</button></form>`}</div>`;
   }
   return `${help('예약 수령 처리 방법','이름·전화번호 일부·메뉴로 검색한 뒤 예약 확인을 누릅니다. 예약 내역 그대로 빵을 전달하고 계정 없이 수령하거나 수령 계정을 선택해 승인합니다. 이미 접수된 요청은 같은 주문으로 처리하며, 완료된 예약은 다시 지급하지 않습니다.')}<section class="content-card narrow">${searchField('pickup','admin-pickup-search','예약 검색','이름 · 전화번호 뒷자리 · 메뉴 검색')}<div id="manual-preorder-matches">${manualPreorderMatches()}</div>${result}</section>`;
 }
@@ -420,7 +430,7 @@ function beverageLimitModal(productId) {
 }
 
 function importModal() {
-  helpers.modal(`<h2>예판 예약 등록</h2><p class="form-hint">예약 수량은 현판에서 예판 재고로 이동합니다.</p><form id="admin-preorder-import"><div class="form-grid"><div class="field"><label for="reservation-name">예약자 이름</label><input id="reservation-name" name="name" maxlength="30" required></div><div class="field"><label for="reservation-phone">전화번호</label><input id="reservation-phone" name="phone" type="tel" maxlength="13" pattern="010(?:[0-9]{8}|-[0-9]{4}-[0-9]{4})" data-phone-input required></div></div>${productList().map(p=>`<div class="qty-input"><label for="reservation-qty-${p.id}">${escape(p.name)}<small>현판 가능 ${p.stock}개</small></label><input id="reservation-qty-${p.id}" type="number" min="0" max="${Math.min(p.stock,100)}" value="0" step="1" data-reservation-product="${p.id}" aria-label="${escape(p.name)} 예약 수량"></div>`).join('')}<button class="primary-button full" type="submit">예판 등록</button></form>`,{wide:true});
+  helpers.modal(`<h2>예판 예약 등록</h2><p class="form-hint">예약 수량은 현판에서 예판 재고로 이동합니다.</p><form id="admin-preorder-import"><div class="form-grid"><div class="field"><label for="reservation-name">예약자 이름</label><input id="reservation-name" name="name" maxlength="30" required></div><div class="field"><label for="reservation-phone">전화번호 (선택)</label><input id="reservation-phone" name="phone" type="tel" maxlength="13" pattern="010(?:[0-9]{8}|-[0-9]{4}-[0-9]{4})" data-phone-input></div></div>${productList().map(p=>`<div class="qty-input"><label for="reservation-qty-${p.id}">${escape(p.name)}<small>현판 가능 ${p.stock}개</small></label><input id="reservation-qty-${p.id}" type="number" min="0" max="${Math.min(p.stock,100)}" value="0" step="1" data-reservation-product="${p.id}" aria-label="${escape(p.name)} 예약 수량"></div>`).join('')}<button class="primary-button full" type="submit">예판 등록</button></form>`,{wide:true});
 }
 
 function memoModal() {
@@ -491,7 +501,7 @@ export async function handleAdminClick(action, element) {
     const reservation=list('reservations').find(r=>r.id===Number(element.dataset.id));
     if(!reservation){toast('예약 목록을 새로고침해 주세요.','error');return true;}
     element.disabled=true;
-    try { await lookupManualPreorder(reservation.name,reservation.phone); }
+    try { await lookupManualPreorder(reservation.name,reservation.phone,reservation.id); }
     catch(error) { toast(error.message||'예약을 확인하지 못했어요.','error'); }
     finally { element.disabled=false; }
   }
@@ -617,7 +627,7 @@ export async function handleAdminSubmit(form) {
       const body = {name:reservation.name,phone:reservation.phone};
       if (values.has('guest')) body.guest = true;
       else if (values.has('user_id')) body.user_id = Number(values.get('user_id'));
-      else body.pin = values.get('pin');
+      else { body.buyer_phone = helpers.normalizePhone(values.get('buyer_phone')); body.pin = values.get('pin'); }
       const response = await createAction('manual-preorder',`/api/staff/preorders/${reservation.id}/complete`,body);
       if (manualSaleType==='preorder' && version===manualLookupVersion && manualReservation?.id===reservation.id) manualReservation = response.reservation;
       message = response.already_completed ? '이미 수령 완료한 예약이에요.' : `예약 수령을 완료했어요.${response.order.dice_quantity?` 주사위 ${response.order.dice_quantity}개를 지급했어요.`:''}`;
@@ -631,7 +641,7 @@ export async function handleAdminSubmit(form) {
       const items=[...form.querySelectorAll('[data-reservation-product]')].map(input=>({product_id:Number(input.dataset.reservationProduct),quantity:Number(input.value)})).filter(item=>item.quantity>0);
       if(!items.length)throw new Error('예약할 빵을 1개 이상 입력해 주세요.');
       const reservations=[{name:values.get('name'),phone:values.get('phone'),items}];
-      const response = await api('/api/staff/preorders/import', { method: 'POST', body: { reservations } });
+      const response = await createAction('preorder-import', '/api/staff/preorders/import', { reservations });
       message = `예약 ${response.imported}건을 등록했어요. 예판 재고도 함께 반영되었습니다.`;
     } else if (form.id === 'admin-cancel-confirm') {
       await api(`/api/staff/orders/${Number(form.dataset.order)}/cancel`, { method: 'POST', body: {} });

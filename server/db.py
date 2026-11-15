@@ -69,11 +69,12 @@ CREATE TABLE IF NOT EXISTS products (
 CREATE TABLE IF NOT EXISTS reservations (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  name TEXT NOT NULL,
- phone TEXT NOT NULL,
+ phone TEXT,
  status TEXT NOT NULL DEFAULT 'reserved' CHECK (status IN ('reserved','pending','approved')),
  user_id INTEGER REFERENCES users(id),
  order_id INTEGER,
  created_at TEXT NOT NULL,
+ import_batch TEXT,
  UNIQUE(name,phone)
 );
 CREATE TABLE IF NOT EXISTS reservation_items (
@@ -300,6 +301,7 @@ CREATE TABLE IF NOT EXISTS idempotency (
 CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id, id);
 CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_reservation_items_parent ON reservation_items(reservation_id);
+CREATE INDEX IF NOT EXISTS idx_reservations_import_batch ON reservations(import_batch);
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_staff_name ON users(name) WHERE role='staff';
 """
@@ -385,6 +387,7 @@ class Database:
             finally:
                 conn.close()
         self.allow_guest_orders()
+        self.allow_optional_reservation_phone()
         schema = SCHEMA.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY") if self.postgres else SCHEMA
         with self.transaction(write=True) as tx:
             for statement in schema.split(";"):
@@ -453,6 +456,46 @@ class Database:
                     conn.execute(row['sql'])
             if conn.execute('PRAGMA foreign_key_check').fetchone():
                 raise RuntimeError('배지·도전과제 구조 업데이트 중 외래키 검사에 실패했습니다. 기존 DB를 유지합니다.')
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def allow_optional_reservation_phone(self):
+        """Make reservation contacts optional without losing records, references or IDs."""
+        if self.postgres:
+            with self.transaction(write=True) as tx:
+                if tx.one("SELECT 1 FROM information_schema.tables WHERE table_schema=current_schema() AND table_name='reservations'"):
+                    tx.execute('ALTER TABLE reservations ALTER COLUMN phone DROP NOT NULL')
+                    tx.execute('ALTER TABLE reservations ADD COLUMN IF NOT EXISTS import_batch TEXT')
+                    tx.execute("UPDATE reservations SET phone=NULL WHERE phone=''")
+            return
+        conn = self.connect()
+        try:
+            conn.execute('PRAGMA foreign_keys=OFF')
+            conn.execute('BEGIN IMMEDIATE')
+            columns = conn.execute('PRAGMA table_info(reservations)').fetchall()
+            if any(row['name'] == 'phone' and row['notnull'] for row in columns):
+                sequence = conn.execute("SELECT seq FROM sqlite_sequence WHERE name='reservations'").fetchone()
+                objects = conn.execute("SELECT sql FROM sqlite_master WHERE tbl_name='reservations' AND type IN ('index','trigger') AND sql IS NOT NULL").fetchall()
+                ddl = SCHEMA[SCHEMA.index('CREATE TABLE IF NOT EXISTS reservations ('):].split(';', 1)[0]
+                conn.execute(ddl.replace('IF NOT EXISTS reservations', 'reservations_phone_upgrade'))
+                fields = ','.join(row['name'] for row in columns)
+                conn.execute(f'INSERT INTO reservations_phone_upgrade ({fields}) SELECT {fields} FROM reservations')
+                conn.execute('DROP TABLE reservations')
+                conn.execute('ALTER TABLE reservations_phone_upgrade RENAME TO reservations')
+                if sequence:
+                    conn.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='reservations'", (sequence['seq'],))
+                for row in objects:
+                    conn.execute(row['sql'])
+            elif columns and 'import_batch' not in {row['name'] for row in columns}:
+                conn.execute('ALTER TABLE reservations ADD COLUMN import_batch TEXT')
+            if columns:
+                conn.execute("UPDATE reservations SET phone=NULL WHERE phone=''")
+                if conn.execute('PRAGMA foreign_key_check').fetchone():
+                    raise RuntimeError('예판 연락처 구조 업데이트 중 외래키 검사에 실패했습니다. 기존 DB를 유지합니다.')
             conn.commit()
         except BaseException:
             conn.rollback()
