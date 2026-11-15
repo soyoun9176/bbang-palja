@@ -1,0 +1,32 @@
+[Unit]
+Description=Verified offsite SQLite backup for Cambo Delight
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/usr/local/lib/bbang-palja-backup
+EnvironmentFile=/etc/bbang-palja/api.env
+EnvironmentFile=/etc/bbang-palja/backup.env
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 /usr/local/lib/bbang-palja-backup/db_backup.py backup
+StateDirectory=bbang-palja-backup
+StateDirectoryMode=0700
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+IOWeight=10
+CPUQuota=20%
+MemoryMax=192M
+TasksMax=32
+TimeoutStartSec=120s
+PrivateTmp=yes
+ProtectSystem=strict
+# Read-only SQLite connections may need to create WAL shared-memory coordination files.
+ReadWritePaths=/var/lib/bbang-palja
+ProtectHome=yes
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
