@@ -402,8 +402,11 @@ DB에 `UNIQUE(user_id, threshold)`는 없고 쓰기 잠금·보상 횟수·요�
 | `requested_at` | TEXT | NULL 허용 | 재고 확보 시각 |
 | `processed_at` | TEXT | NULL 허용 | 승인/취소 시각 |
 | `processed_by` | TEXT | NULL 허용 | 처리 담당자/미수령 선택자 |
+| `fallback_dice_kind` | TEXT | NULL 또는 `walkin` | 음료 소진 시 일반 주사위 1개 대체 지급 표시 |
 
-CHECK로 두 원본 중 정확히 하나만 연결하고 각 원본의 UNIQUE로 중복 요청을 막습니다. 빵·오트밀은 생성 시 재고를 확보하여 pending, 음료는 awaiting_choice에서 구매자의 재고 있는 품목 선택 후 pending이 됩니다. 승인 시 재차 차감하지 않고, pending 취소 시 1개 반환합니다. 선택 전 취소는 재고 변화가 없습니다. 동일 처리는 반복 가능하며 승인↔취소 전환은 거부합니다. 취소 후 재추첨·주사위 환급·점수 단계 재사용은 없습니다. 디지털 보상은 이 테이블을 만들지 않습니다. 과거 보상도 소급하여 대기로 생성하지 않습니다.
+CHECK로 두 원본 중 정확히 하나만 연결하고 각 원본의 UNIQUE로 중복 요청을 막습니다. 빵·오트밀은 생성 시 재고를 확보하여 pending, 음료는 awaiting_choice에서 선택 후 pending이 됩니다. 승인 시 재차 차감하지 않고, pending 취소 시 1개 반환합니다. 선택 전 취소는 재고 변화가 없습니다. 승인↔취소 전환은 거부합니다. 선글라스는 이 테이블을 만들지 않습니다. 과거 보상을 소급하여 대기로 생성하지 않습니다.
+
+음료 두 종류 모두 이벤트 잔여 한도 또는 실제 재고가 없으면 같은 쓰기 트랜잭션에서 `dice_wallet.walkin`과 `users.dice_balance`를 1 늘립니다. 요청은 `approved`, `fallback_dice_kind='walkin'`, `processed_by='시스템'`, `product_id=NULL`로 기록하여 중복 지급을 막고 음료 제공량에 합산하지 않습니다. 10점 단계·배지는 유지합니다. 이미 확보한 음료·취소된 보상은 대체하지 않습니다. 기존 DB에는 이 nullable 컬럼만 자동 추가하며 초기화하지 않습니다.
 
 ### 4.23 `guest_order_access` — 비회원 주문 조회
 
