@@ -444,6 +444,47 @@ def bread_stock_total(tx):
     """, REWARD_PRODUCT_IDS)['count']
 
 
+def inventory_summary(tx):
+    """Staff totals use all records, independently of dashboard history limits."""
+    return tx.all("""
+        WITH quantities AS (
+            SELECT product_id, quantity AS preorder_sold, 0 AS walkin_sold, 0 AS event_given, 0 AS held
+            FROM reservation_items
+            UNION ALL
+            SELECT i.product_id, 0, i.quantity, 0, 0 FROM order_items i JOIN orders o ON o.id=i.order_id
+            WHERE o.status='approved' AND o.type IN ('walkin','manual')
+            UNION ALL
+            SELECT product_id, 0, 0, 1, 0 FROM reward_requests WHERE status='approved' AND product_id IS NOT NULL
+            UNION ALL
+            SELECT product_id, 0, 0, quantity, 0 FROM manual_event_grants WHERE product_id IS NOT NULL
+            UNION ALL
+            SELECT product_id, 0, 0, 1, 0 FROM rewards
+            UNION ALL
+            SELECT m.product_id, 0, 0, 1, 0 FROM milestone_claims m
+            WHERE m.kind IN ('bread','milk') AND m.product_id IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM reward_requests r WHERE r.milestone_id=m.id)
+            UNION ALL
+            SELECT ?, 0, 0, 1, 0 FROM typed_dice_rolls d WHERE d.result='milk'
+                AND NOT EXISTS (SELECT 1 FROM reward_requests r WHERE r.roll_id=d.id)
+            UNION ALL
+            SELECT ?, 0, 0, milk_quantity, 0 FROM events WHERE milk_quantity>0
+            UNION ALL
+            SELECT i.product_id, 0, 0, 0, i.quantity FROM order_items i JOIN orders o ON o.id=i.order_id
+            WHERE o.status='pending'
+            UNION ALL
+            SELECT product_id, 0, 0, 0, 1 FROM reward_requests WHERE status='pending'
+        )
+        SELECT p.id AS product_id,
+               COALESCE(SUM(q.preorder_sold),0) AS preorder_sold,
+               COALESCE(SUM(q.walkin_sold),0) AS walkin_sold,
+               COALESCE(SUM(q.event_given),0) AS event_given,
+               COALESCE(SUM(q.held),0) AS held,
+               p.stock+COALESCE(SUM(q.held),0) AS remaining
+        FROM products p LEFT JOIN quantities q ON q.product_id=p.id
+        GROUP BY p.id,p.stock ORDER BY p.id
+    """, (MILK_PRODUCT_ID, MILK_PRODUCT_ID))
+
+
 def products(tx, drink_limits=None):
     placeholders = ','.join('?' for _ in PRODUCT_IDS)
     rows = tx.all(f"SELECT * FROM products WHERE id IN ({placeholders}) ORDER BY id", PRODUCT_IDS)
@@ -1039,6 +1080,7 @@ class Application:
                 stats['bread_event_given'] = event_bread_given(tx)
                 drink_limits = event_beverage_limits(tx)
                 return {"orders": all_orders(tx, include_inventory=True), "products": products(tx, drink_limits), "stats": stats,
+                        'inventory_summary': inventory_summary(tx),
                         'event_beverage_limits': list(drink_limits.values()),
                         'event_notices':event_notices(tx),
                         "event_supplies": event_supply_summary(tx),
