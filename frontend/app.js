@@ -445,7 +445,7 @@ async function checkout(button){
     if(guest){state.guestReceipts=[...state.guestReceipts.filter(r=>r.id!==order.id),{id:order.id,token:op.id}];localStorage.setItem('kambo.guest.orders',JSON.stringify(state.guestReceipts));}
     state.cart={};op.done();if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);
     await refreshAfterAction();state.route=guest?'guest-orders':'orders';history.replaceState(null,'',`#${state.route}`);render();
-    modal(`<div class="order-success"><div class="success-icon">${icon('check')}</div><h2>빵 구매 요청을 보냈어요!</h2><p>담당자에게 주문을 보여 주고<br>안내받은 계좌로 입금해 주세요.</p><div class="success-box">주문 #${String(order.id).padStart(3,'0')}${guest?` · ${esc(order.customer_name)}`:''} · 선택 수량 ${order.quantity}<strong>${money(order.total)}원</strong>${guest?'':orderDice(order)?`확인 후 주사위 ${orderDice(order)}개가 지급돼요.`:'음료 구매에는 주사위가 지급되지 않아요.'}</div><button class="primary-button full" data-action="close-modal">주문 내역 확인하기 ${icon('arrow')}</button></div>`);
+    modal(`<div class="order-success"><div class="success-icon">${icon('check')}</div><h2>빵 구매 요청을 보냈어요!</h2><p>담당자에게 주문을 보여 주고<br>아래 계좌로 입금해 주세요.</p><div class="success-box">주문 #${String(order.id).padStart(3,'0')}${guest?` · ${esc(order.customer_name)}`:''} · 선택 수량 ${order.quantity}<strong>${money(order.total)}원</strong>3333373117950<br>카카오뱅크 최원혁으로 입금 부탁드립니다!</div><button class="primary-button full" data-action="close-modal">주문 내역 확인하기 ${icon('arrow')}</button></div>`);
   }catch(error){if(error.status>=400&&error.status<500)op.done();button.disabled=false;toast(error.message,'error');await refresh().catch(()=>{});render();}
 }
 function openLevelUp() {

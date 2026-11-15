@@ -1511,7 +1511,7 @@ test('inventory offers a collapsed preorder status table with plain menu text an
   assert.match(f.run('renderAdmin()'),/등록된 예판이 없습니다/);
 });
 
-test('milk purchase and mixed order messages use bread dice rather than total quantity',async()=>{
+test('order messages use bread dice counts and checkout shows bank transfer instructions',async()=>{
   const f=fixture();
   await f.run('refresh()');
   f.run("state.route='orders'; state.orders=[{id:1,type:'walkin',status:'approved',quantity:3,dice_quantity:2,total:6600,items:[{name:'빵',quantity:2,price:2800},{name:'우유',quantity:1,price:1000}]}]; renderPage()");
@@ -1528,7 +1528,7 @@ test('milk purchase and mixed order messages use bread dice rather than total qu
     return f.context.normalFetch(path,options);
   };
   await f.run('checkout({disabled:false})');
-  assert.match(prompt,/음료 구매에는 주사위가 지급되지 않아요/);
+  assert.match(prompt,/3333373117950<br>카카오뱅크 최원혁으로 입금 부탁드립니다!/);
   assert.doesNotMatch(prompt,/주사위 2개/);
 });
 
