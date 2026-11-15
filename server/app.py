@@ -734,7 +734,8 @@ class Application:
             tx.insert("INSERT INTO memos (content,author,created_at) VALUES (?,?,?)", ("오픈 준비 완료! 현판은 입금과 빵 전달을 모두 확인한 뒤 승인해 주세요. 예판은 이름과 예약 빵을 한 번 더 확인해 주세요.", "오픈팀", stamp))
             tx.execute("INSERT INTO settings (key,value) VALUES ('demo_seeded','1')")
 
-    def import_reservations(self, tx, raw, actor):
+    @staticmethod
+    def import_reservations(tx, raw, actor, *, dry_run=False):
         check(isinstance(raw, list) and 1 <= len(raw) <= 500, "예약 목록은 1~500건으로 입력해 주세요.")
         prepared = []
         seen = set()
@@ -746,6 +747,21 @@ class Application:
             check(key not in seen and not tx.one("SELECT id FROM reservations WHERE name = ? AND phone = ?", key), f"{name}님의 같은 전화번호 예약이 이미 있습니다.", 409)
             seen.add(key)
             prepared.append((name, phone, normalize_items(tx, item.get("items"))))
+        required = {}
+        for _, _, items in prepared:
+            for item in items:
+                required[item['product_id']] = required.get(item['product_id'], 0) + item['quantity']
+        inventory = []
+        for product_id, quantity in sorted(required.items()):
+            product = tx.one('SELECT name,stock FROM products WHERE id=?', (product_id,))
+            inventory.append({'product_id': product_id, 'name': product['name'], 'quantity': quantity,
+                              'available': product['stock'], 'remaining_after': product['stock'] - quantity})
+        ready = all(item['remaining_after'] >= 0 for item in inventory)
+        if dry_run:
+            return {'reservations': len(prepared), 'quantity': sum(required.values()),
+                    'total': sum(item['price'] * item['quantity'] for _, _, items in prepared for item in items),
+                    'products': inventory, 'ready': ready}
+        check(ready, '예판에 배정할 재고가 부족합니다. 관리자 재고관리에서 총재고를 먼저 입력해 주세요.', 409)
         for name, phone, items in prepared:
             reservation_id = tx.insert("INSERT INTO reservations (name,phone,created_at) VALUES (?,?,?)", (name, phone, now()))
             for item in items:
