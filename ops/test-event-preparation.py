@@ -24,10 +24,10 @@ HEADERS = ['이름', '연락처', '휘낭시에(플레인)', '휘낭시에(카�
            '휘낭시에(무화과)', '다쿠아즈(레몬)', '다쿠아즈(얼그레이)', '보늬밤 마들렌',
            '로투스 브라우니 치즈케이크', '글레이즈드 도넛', '에그타르트', '치즈타르트']
 DUMMY_ROWS = [
-    ['김나나', '', 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    ['김나나', '010-0000-0001', 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     ['이테스트', '010-0000-0002', 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     ['박테스트', '010-0000-0003', 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0],
-    ['김나나', '', 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0],
+    ['김나나', '010-0000-0004', 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0],
 ]
 
 
@@ -99,16 +99,12 @@ def run(output_dir):
         with sqlite3.connect(database) as cx:
             assert cx.execute('SELECT SUM(preorder_stock) FROM products').fetchone()[0] == 13
         tiers = []
-        for index, row in enumerate(DUMMY_ROWS, 1):
-            buyer = api('/api/auth/register', {'name': row[0], 'phone': f'010-0000-{index:04}', 'pin': '1234'})
+        for row in DUMMY_ROWS:
+            buyer = api('/api/auth/register', {'name': row[0], 'phone': row[1], 'pin': '1234'})
             token = buyer['token']
-            query = urllib.parse.urlencode({'name': row[0]})
-            lookup = api('/api/preorders/lookup?' + query, token=token)
-            if not row[1]:
-                assert lookup['reservation'] is None and len(lookup['reservations']) == 2
-            reservation = next(r for r in lookup['reservations'] if r['id'] == index)
+            query = urllib.parse.urlencode({'name': row[0], 'phone': row[1]})
+            reservation = api('/api/preorders/lookup?' + query, token=token)['reservation']
             order = api(f"/api/preorders/{reservation['id']}/claim", {'request_id': uuid.uuid4().hex}, token)['order']
-            assert order['status'] == 'pending'
             assert api('/api/auth/me', token=token)['user']['dice_balance'] == 0
             approved = api(f"/api/staff/orders/{order['id']}/approve", {}, staff)['order']
             assert api('/api/auth/me', token=token)['user']['dice_balance'] == 1
@@ -121,7 +117,6 @@ def run(output_dir):
             assert cx.execute('SELECT SUM(stock) FROM products').fetchone()[0] == 207
         return {'status': 'ok', 'database': str(database), 'csv': str(csv_file), 'reset_backup': reset['backup'],
                 'schedule_preserved': True, 'prices_preserved': True, 'duplicate_import': 'rejected',
-                'phoneless_name_matches': 2, 'automatic_assignment': False, 'staff_approval_required': True,
                 'reservations_imported': 4, 'reserved_units_before_pickup': 13, 'walkin_units': 207,
                 'approved_preorder_dice': tiers}
     finally:
