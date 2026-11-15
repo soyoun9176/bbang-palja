@@ -142,13 +142,14 @@ erDiagram
 | --- | --- | --- | --- |
 | `id` | INTEGER | PK, 자동 증가 | 예약 번호 |
 | `name` | TEXT | NN | 원래 예약자 이름 |
-| `phone` | TEXT | NN | 010-NNNN-NNNN 예약 전화번호 |
+| `phone` | TEXT | NULL 허용 | 010-NNNN-NNNN 예약 전화번호. 미등록은 NULL |
 | `status` | TEXT | NN, 기본 `reserved` | `reserved` / `pending` / `approved` |
 | `user_id` | INTEGER | NULL 허용, FK → `users.id` | 예약을 수령하는 구매자 계정 |
 | `order_id` | INTEGER | NULL 허용, 코드상 → `orders.id` | 현재 수령 주문. DB 외래키 선언 없음 |
 | `created_at` | TEXT | NN | 예약 등록 시각 |
+| `import_batch` | TEXT | NULL 허용 | CSV 내용의 SHA-256. 동일 파일 재등록 방지 |
 
-`UNIQUE(name, phone)`으로 같은 이름·전화번호의 예약을 중복 등록하지 않습니다. 전화번호는 정수형이 아니므로 앞의 0을 보존합니다.
+`UNIQUE(name, phone)`으로 번호가 있는 같은 이름·전화번호의 중복을 거절합니다. 번호가 없으면 이름·메뉴가 같아도 예약별 별도 행입니다. 빈 문자열은 NULL로 저장합니다. 전화번호는 정수형이 아니므로 앞의 0을 보존합니다. CSV 재실행은 `import_batch`로 막고, 관리자 등록의 재시도는 `preorder-import` 요청 ID로 막습니다.
 
 | 상태 | 의미 | 연결 계정·주문 |
 | --- | --- | --- |
@@ -156,7 +157,7 @@ erDiagram
 | `pending` | 구매자가 수령 요청, 담당자 승인 대기 | 계정·대기 주문 연결 |
 | `approved` | 담당자가 수령 승인 | 계정·승인 주문 연결 |
 
-담당자는 미접수 예약을 이름이 다른 기존 계정에도 연결할 수 있습니다. 원래 예약자 이름·전화번호는 유지하고 주문·주사위는 선택한 계정에 추가합니다. 접수·완료된 예약은 연결 계정을 바꾸지 않습니다. 상태별 연결 값의 조합은 CHECK 제약이 아니라 앱이 관리합니다.
+조회·가입 시 계정을 자동 배정하지 않습니다. 고객은 조회한 예약 목록에서 선택해 대기 요청을 만들며, 담당자가 예약 수령을 확인·승인해야 주사위가 지급됩니다. 담당자 수기 처리도 기존 계정을 직접 선택합니다. 새 계정은 별도 `buyer_phone`과 PIN을 받고, 원래 예약자 이름·연락처는 유지합니다. 접수·완료된 예약은 연결 계정을 바꾸지 않으며, 잘못 접수했으면 담당자 취소 후 다시 선택합니다. 상태별 연결 값의 조합은 CHECK 제약이 아니라 앱이 관리합니다.
 
 ### 4.5 `reservation_items` — 예약 품목
 
@@ -178,7 +179,7 @@ erDiagram
 | `reservation_id` | INTEGER | NN, 복합 PK, FK → `reservations.id` | 확인한 예약 |
 | `expires_at` | TEXT | NN | 확인 유효기간 |
 
-복합 기본키는 `(user_id, reservation_id)`입니다. 구매자가 입력한 예약자 이름·전화번호로 예약을 조회하면 해당 계정에 24시간 유효한 확인을 기록합니다. 가입 정보와 다른 조회값도 허용합니다. 수령 요청은 이 확인을 검사하며, 이미 다른 계정에 연결된 예약은 가져올 수 없습니다. 담당자의 조회는 이 확인 기록을 만들지 않습니다.
+복합 기본키는 `(user_id, reservation_id)`입니다. 구매자가 조회한 모든 후보에 24시간 확인을 기록하되, 예약 계정·주문은 만들지 않습니다. 번호 미등록 예약은 이름으로, 번호 등록 예약은 이름·번호로 확인합니다. 가입 정보와 다른 조회값도 허용합니다. 수령 요청은 이 확인을 검사하며, 이미 다른 계정에 연결된 예약은 가져올 수 없습니다. 담당자의 조회는 이 확인 기록을 만들지 않습니다.
 
 ### 4.7 `orders` — 구매와 수령 주문
 
@@ -322,7 +323,7 @@ DB에 `UNIQUE(user_id, threshold)`는 없고 쓰기 잠금·보상 횟수·요�
 
 복합 기본키는 `(user_id, scope, request_id)`입니다. 같은 키와 같은 내용이면 저장한 응답을 반환하고, 같은 키에 다른 내용이면 409로 거부합니다. 실제 변경과 이 기록을 같은 트랜잭션으로 저장하므로 실패한 작업이 성공 결과로 남지 않습니다.
 
-현재 scope에는 `order`, `manual-sale`, `manual-preorder`, `preorder:<예약번호>`, `roll`, `reward`, `instagram`, `inventory`가 있습니다. 재고 수정의 요청 ID는 API에서 선택 사항입니다. 승인·취소는 이 테이블 대신 주문 상태 검사로 반복 실행을 막고, 예판 등록은 이름·전화번호 UNIQUE 제약으로 중복을 거부합니다.
+현재 scope에는 `order`, `manual-sale`, `manual-preorder`, `preorder:<예약번호>`, `roll`, `reward`, `instagram`, `inventory`, `preorder-import`가 있습니다. 재고 수정의 요청 ID는 API에서 선택 사항입니다. 승인·취소는 이 테이블 대신 주문 상태 검사로 반복 실행을 막고, 번호가 있는 예판은 이름·전화번호 UNIQUE 제약으로 중복을 거부하고, CSV는 `import_batch`로 같은 내용의 재등록을 막습니다.
 
 ### 4.17 `user_profiles` — 캐릭터 프로필
 
@@ -499,12 +500,12 @@ CHECK로 두 원본 중 정확히 하나만 연결하고 각 원본의 UNIQUE로
 | `user_id` | INTEGER | NN, FK → users |
 | `achievement_key` | TEXT | NN. elements / all_breads / focus / preorder_fast / walkin_fast |
 | `scope` | TEXT | NN, 기본 빈 문자열. focus는 품목 ID, walkin_fast는 KST 날짜 |
-| `exclusive_key` | TEXT | NULL 허용, UNIQUE. 일별 현판/예약 전화번호별 선착순 독점 키 |
+| `exclusive_key` | TEXT | NULL 허용, UNIQUE. 일별 현판/예판 번호 또는 미등록 예약 건별 선착순 독점 키 |
 | `order_id` | INTEGER | NULL 허용, FK → orders. 선착순 근거 주문 |
 | `reservation_id` | INTEGER | NULL 허용, FK → reservations. 예판 선착순 근거 |
 | `earned_at` | TEXT | NN. 달성 시각 |
 
-`UNIQUE(user_id,achievement_key,scope)`로 같은 달성을 반복 기록하지 않습니다. 승인된 예판·현판·수기 빵 판매만 합산하고 대기/취소·음료·무료 지급은 제외합니다. 주문 승인·취소와 같은 쓰기 잠금 안에서 달성과 배지·칭호를 함께 반영합니다. 현판은 같은 KST 날짜의 첫 유효 빵 주문만 인정하며, 앞 대기 주문이 있으면 지급을 기다립니다. 비회원 첫 주문도 선착순 자리를 차지합니다. 예판은 등록 순서의 전화번호가 다른 첫 10명이 수령 승인 시 인정됩니다.
+`UNIQUE(user_id,achievement_key,scope)`로 같은 달성을 반복 기록하지 않습니다. 승인된 예판·현판·수기 빵 판매만 합산하고 대기/취소·음료·무료 지급은 제외합니다. 주문 승인·취소와 같은 쓰기 잠금 안에서 달성과 배지·칭호를 함께 반영합니다. 현판은 같은 KST 날짜의 첫 유효 빵 주문만 인정하며, 앞 대기 주문이 있으면 지급을 기다립니다. 비회원 첫 주문도 선착순 자리를 차지합니다. 예판은 등록 순서로 첫 10명을 정하며 번호가 있으면 번호별, 없으면 예약 건별로 계산하고 담당자 수령 승인 시 인정됩니다.
 
 화면에는 예판·현판 선착순을 **우사인볼트 연금술사**(`fast`) 한 카드로 표시하며, 둘 중 하나를 달성하면 완료됩니다. DB의 `preorder_fast`·`walkin_fast` 기록과 현판 달성 날짜는 각각 보존합니다. 공통 알림에도 같은 도전과제 이름을 씁니다.
 
@@ -597,6 +598,7 @@ SQLite 쓰기는 `BEGIN IMMEDIATE`, 읽기는 `BEGIN`을 사용합니다. 연결
 | --- | --- | --- |
 | `idx_orders_user` | `orders(user_id, id)` | 구매자별 주문 내역 |
 | `idx_order_items_order` | `order_items(order_id)` | 주문 품목 조회 |
+| `idx_reservations_import_batch` | `reservations(import_batch)` | CSV 재등록 확인 |
 | `idx_reservation_items_parent` | `reservation_items(reservation_id)` | 예약 품목 조회 |
 | `idx_sessions_expiry` | `sessions(expires_at)` | 만료 세션 정리 |
 | `idx_staff_name` | `users(name) WHERE role=staff` | 담당자 이름 UNIQUE |
