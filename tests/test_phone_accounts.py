@@ -81,22 +81,22 @@ class PhoneAccountTests(unittest.TestCase):
         users=self.call('/api/staff/dashboard',token=staff['token'],method='GET')['users']
         self.assertEqual(users[0]['phone'],'010-1234-5678')
 
-    def test_name_lookup_can_request_another_phone_reservation_without_changing_the_account(self):
+    def test_edited_lookup_can_claim_another_phone_reservation_without_changing_the_account(self):
         account=self.register();other=self.register('01011112222')
         staff=self.call('/api/staff/login',{'name':'담당','password':'test-phone-password'})['token']
         with self.app.db.transaction(write=True) as tx:tx.execute('UPDATE products SET stock=2 WHERE id=101')
         self.call('/api/staff/preorders/import',{'reservations':[{'name':'예약한 실명','phone':'01012345678','items':[{'product_id':101,'quantity':1}]}]},staff)
         found=self.call('/api/preorders/lookup',token=account['token'],method='GET',query={'name':['예약한 실명']})['reservation']
         self.assertNotIn('phone',found)
+        with self.assertRaises(APIError) as error:self.call('/api/preorders/lookup',token=other['token'],method='GET',query={'name':['예약한 실명']})
+        self.assertEqual(error.exception.status,404)
         with self.assertRaises(APIError) as error:self.call(f"/api/preorders/{found['id']}/claim",{'request_id':uuid.uuid4().hex},other['token'])
         self.assertEqual(error.exception.status,403)
         edited=self.call('/api/preorders/lookup',token=other['token'],method='GET',
-                         query={'name':['예약한 실명']})['reservation']
+                         query={'name':['예약한 실명'],'phone':['01012345678']})['reservation']
         self.assertEqual(edited['id'],found['id'])
         result=self.call(f"/api/preorders/{found['id']}/claim",{'request_id':uuid.uuid4().hex},other['token'])
         self.assertEqual(result['order']['user_id'],other['user']['id'])
-        self.assertEqual(result['order']['status'],'pending')
-        self.assertEqual(self.call('/api/auth/me',token=other['token'],method='GET')['user']['dice_balance'],0)
         with self.assertRaises(APIError) as error:self.call(f"/api/preorders/{found['id']}/claim",{'request_id':uuid.uuid4().hex},account['token'])
         self.assertEqual(error.exception.status,409)
         me=self.call('/api/auth/me',token=other['token'],method='GET')
@@ -105,7 +105,7 @@ class PhoneAccountTests(unittest.TestCase):
             row=tx.one('SELECT name,phone FROM reservations WHERE id=?',(found['id'],))
             self.assertEqual(row,{'name':'예약한 실명','phone':'010-1234-5678'})
 
-    def test_lookup_defaults_to_account_name_and_ignores_legacy_phone_query(self):
+    def test_lookup_uses_account_defaults_when_omitted_and_still_validates_edited_phone(self):
         account=self.register(name='기본 예약자')
         staff=self.call('/api/staff/login',{'name':'담당','password':'test-phone-password'})['token']
         with self.app.db.transaction(write=True) as tx:tx.execute('UPDATE products SET stock=1 WHERE id=101')
@@ -114,8 +114,8 @@ class PhoneAccountTests(unittest.TestCase):
         found=self.call('/api/preorders/lookup',token=account['token'],method='GET')['reservation']
         self.assertEqual(found['name'],'기본 예약자')
         for phone in ['010-12345678','010 1234 5678','0101234abcd']:
-            legacy=self.call('/api/preorders/lookup',token=account['token'],method='GET',query={'phone':[phone]})
-            self.assertEqual(legacy['reservation']['id'],found['id'])
+            with self.assertRaises(APIError) as error:self.call('/api/preorders/lookup',token=account['token'],method='GET',query={'phone':[phone]})
+            self.assertEqual(error.exception.status,400)
         with self.app.db.transaction(write=True) as tx:
             tx.execute("UPDATE preorder_verifications SET expires_at='2000-01-01T00:00:00Z'")
         with self.assertRaises(APIError) as error:self.call(f"/api/preorders/{found['id']}/claim",{'request_id':uuid.uuid4().hex},account['token'])

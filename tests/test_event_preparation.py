@@ -192,6 +192,7 @@ class EventPreparationTests(unittest.TestCase):
         self.stock(101, 10)
         invalid = [
             ['다른 이름', '010-0000-0002-', 1],
+            ['다른 이름', '', 1],
             ['다른 이름', '010 0000 0002', 1],
             ['다른 이름', '01000000002', -1],
             ['다른 이름', '01000000002', '1.5'],
@@ -208,49 +209,6 @@ class EventPreparationTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'CSV 3행'):
                     imports.run_import(self.csv, apply=True)
                 self.assertEqual(self.dump(), before)
-
-    def test_phoneless_csv_keeps_identical_people_and_rejects_reimport_in_any_row_order(self):
-        self.stock(101, 20)
-        self.stock(102, 10)
-        rows = [['동명이인', '', 1, 2], ['동명이인', '', 1, 2], ['다른예약', '', 3, 0]]
-        self.write_csv(rows, ['이름', '연락처', '휘낭시에(플레인)', '휘낭시에(초코)'])
-        before = self.dump()
-        self.assertEqual(imports.run_import(self.csv)['reservations'], 3)
-        self.assertEqual(self.dump(), before)
-        imports.run_import(self.csv, apply=True)
-        with self.app.db.transaction() as tx:
-            self.assertEqual(tx.all('SELECT name,phone FROM reservations ORDER BY id'), [
-                {'name': '동명이인', 'phone': None}, {'name': '동명이인', 'phone': None}, {'name': '다른예약', 'phone': None}])
-        before = self.dump()
-        for apply in (False, True):
-            with self.assertRaisesRegex(APIError, '이미 등록한 CSV'):
-                imports.run_import(self.csv, apply=apply)
-            self.assertEqual(self.dump(), before)
-        # Reordering the sheet's rows/columns cannot silently allocate the same stock twice.
-        self.write_csv([[row[3], row[0], row[2], row[1]] for row in reversed(rows)],
-                       ['휘낭시에(초코)', '이름', '휘낭시에(플레인)', '연락처'])
-        with self.assertRaisesRegex(APIError, '이미 등록한 CSV'):
-            imports.run_import(self.csv, apply=True)
-        self.assertEqual(self.dump(), before)
-        reset.reset_event()
-        self.staff = self.call('/api/staff/login', {'name': '테스트 담당', 'password': 'event-preparation-test'})['token']
-        self.stock(101, 20)
-        self.stock(102, 10)
-        self.assertTrue(imports.run_import(self.csv, apply=True)['applied'])
-
-    def test_concurrent_phoneless_csv_import_reserves_only_once(self):
-        self.stock(101, 10)
-        self.write_csv([['동명이인', '', 2], ['동명이인', '', 2]], ['이름', '연락처', '휘낭시에(플레인)'])
-        def attempt():
-            try:
-                return imports.run_import(self.csv, apply=True)['applied']
-            except APIError:
-                return False
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-            self.assertEqual(sorted(pool.map(lambda _: attempt(), range(2))), [False, True])
-        with self.app.db.transaction() as tx:
-            self.assertEqual(tx.one('SELECT stock,preorder_stock FROM products WHERE id=101'), {'stock': 6, 'preorder_stock': 4})
-            self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM reservations')['n'], 2)
 
     def test_unknown_or_duplicate_menu_and_empty_csv_are_rejected(self):
         for headers in (['이름', '연락처', '알 수 없는 빵'], ['이름', '연락처', '휘낭시에(초코)', '초코 휘낭시에'], ['이름', '연락처']):

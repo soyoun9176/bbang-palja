@@ -186,10 +186,6 @@ def phone_number(value):
     return f'{digits[:3]}-{digits[3:7]}-{digits[7:]}'
 
 
-def optional_phone(value):
-    return None if value is None or value == '' else phone_number(value)
-
-
 def pin_value(value):
     check(isinstance(value, str) and re.fullmatch(r"[0-9]{4}", value) is not None, "비밀번호는 숫자 네 자리로 입력해 주세요.")
     return value
@@ -551,10 +547,7 @@ def manual_buyer(tx, body, reservation_name=None):
         buyer = user_by_id(tx, integer(body.get('user_id'), '구매자 번호', maximum=1_000_000), buyer=True)
     else:
         name = reservation_name if reservation_name is not None else person_name(body.get('name'))
-        contact = body.get('phone')
-        if reservation_name is not None:
-            contact = body.get('buyer_phone', contact)
-        phone = phone_number(contact)
+        phone = phone_number(body.get('phone'))
         pin = pin_value(body.get('pin'))
         buyer = tx.one("SELECT * FROM users WHERE phone = ? AND role = 'buyer'", (phone,))
         if buyer is None:
@@ -663,19 +656,6 @@ def staff_reservation_data(tx, reservation):
     return result
 
 
-def matching_reservations(tx, name, phone=None, *, reservation_id=None):
-    conditions, values = ['name=?'], [name]
-    if reservation_id is not None:
-        conditions.append('id=?')
-        values.append(integer(reservation_id, '예약 번호', maximum=1_000_000))
-    if phone is not None:
-        conditions.append('(phone=? OR phone IS NULL)')
-        values.append(phone)
-    rows = tx.all('SELECT * FROM reservations WHERE ' + ' AND '.join(conditions) + ' ORDER BY id', values)
-    check(bool(rows), '예약 내역을 찾지 못했어요. 예약자 이름을 확인해 주세요.', 404)
-    return rows
-
-
 def all_reservations(tx):
     reservations = tx.all('SELECT id,name,phone,status FROM reservations ORDER BY id DESC')
     by_id = {row['id']: row for row in reservations}
@@ -755,20 +735,16 @@ class Application:
             tx.execute("INSERT INTO settings (key,value) VALUES ('demo_seeded','1')")
 
     @staticmethod
-    def import_reservations(tx, raw, actor, *, dry_run=False, import_batch=None):
+    def import_reservations(tx, raw, actor, *, dry_run=False):
         check(isinstance(raw, list) and 1 <= len(raw) <= 500, "예약 목록은 1~500건으로 입력해 주세요.")
-        if import_batch is not None:
-            check(not tx.one('SELECT id FROM reservations WHERE import_batch=? LIMIT 1', (import_batch,)),
-                  '이미 등록한 CSV입니다. 기존 예판을 확인해 주세요.', 409)
         prepared = []
         seen = set()
         for item in raw:
             check(isinstance(item, dict), "예약 데이터 형식이 올바르지 않습니다.")
             name = person_name(item.get("name"))
-            phone = optional_phone(item.get("phone"))
+            phone = phone_number(item.get("phone"))
             key = (name, phone)
-            if phone is not None:
-                check(key not in seen and not tx.one("SELECT id FROM reservations WHERE name = ? AND phone = ?", key), f"{name}님의 같은 전화번호 예약이 이미 있습니다.", 409)
+            check(key not in seen and not tx.one("SELECT id FROM reservations WHERE name = ? AND phone = ?", key), f"{name}님의 같은 전화번호 예약이 이미 있습니다.", 409)
             seen.add(key)
             prepared.append((name, phone, normalize_items(tx, item.get("items"))))
         required = {}
@@ -787,7 +763,7 @@ class Application:
                     'products': inventory, 'ready': ready}
         check(ready, '예판에 배정할 재고가 부족합니다. 관리자 재고관리에서 총재고를 먼저 입력해 주세요.', 409)
         for name, phone, items in prepared:
-            reservation_id = tx.insert("INSERT INTO reservations (name,phone,created_at,import_batch) VALUES (?,?,?,?)", (name, phone, now(), import_batch))
+            reservation_id = tx.insert("INSERT INTO reservations (name,phone,created_at) VALUES (?,?,?)", (name, phone, now()))
             for item in items:
                 change_inventory(tx, item["product_id"], "stock", -item["quantity"], f"{name} 예판 배정", actor)
                 change_inventory(tx, item["product_id"], "preorder_stock", item["quantity"], f"{name} 예판 배정", actor)
@@ -920,16 +896,15 @@ class Application:
                 return idempotent(tx, user, "order", body, lambda: {"order": insert_order(tx, user, normalize_items(tx, body.get("items")), "walkin", user["name"])})
         if method == "GET" and path == "/api/preorders/lookup":
             name = person_name(query.get('name', [user['name']])[0])
+            phone = phone_number(query.get('phone', [user['phone']])[0])
             with self.db.transaction(write=True) as tx:
-                reservations = matching_reservations(tx, name)
+                reservation = tx.one("SELECT * FROM reservations WHERE name = ? AND phone = ?", (name, phone))
+                check(reservation is not None, "해당 이름과 전화번호의 예약이 없습니다. 담당자에게 문의해 주세요.", 404)
                 expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(timespec="milliseconds")
-                results = []
-                for reservation in reservations:
-                    tx.execute("INSERT INTO preorder_verifications (user_id,reservation_id,expires_at) VALUES (?,?,?) ON CONFLICT (user_id,reservation_id) DO UPDATE SET expires_at = excluded.expires_at", (user["id"], reservation["id"], expires))
-                    result = reservation_data(tx, reservation)
-                    result.pop('phone')
-                    results.append(result)
-                return {'reservation': results[0] if len(results) == 1 else None, 'reservations': results}
+                tx.execute("INSERT INTO preorder_verifications (user_id,reservation_id,expires_at) VALUES (?,?,?) ON CONFLICT (user_id,reservation_id) DO UPDATE SET expires_at = excluded.expires_at", (user["id"], reservation["id"], expires))
+                result=reservation_data(tx,reservation)
+                result.pop('phone')
+                return {"reservation": result}
         match = re.fullmatch(r"/api/preorders/([0-9]+)/claim", path)
         if method == "POST" and match:
             with self.db.transaction(write=True) as tx:
@@ -937,7 +912,7 @@ class Application:
                     reservation = tx.one("SELECT * FROM reservations WHERE id = ?", (int(match.group(1)),))
                     check(reservation is not None, "예약을 찾을 수 없습니다.", 404)
                     verification = tx.one("SELECT expires_at FROM preorder_verifications WHERE user_id = ? AND reservation_id = ? AND expires_at > ?", (user["id"], reservation["id"], now()))
-                    check(verification is not None, "예약자 이름으로 예약을 먼저 조회해 주세요.", 403)
+                    check(verification is not None, "이름과 전화번호로 예약을 먼저 조회해 주세요.", 403)
                     check(reservation["user_id"] in (None, user["id"]), "이미 다른 계정으로 접수된 예약입니다.", 409)
                     if reservation["order_id"]:
                         return {"order": order_data(tx, reservation["order_id"])}
@@ -1213,17 +1188,17 @@ class Application:
                     return idempotent(tx, user, "inventory", body, adjust_inventory)
                 return adjust_inventory()
         if method == 'POST' and path == '/api/staff/preorders/lookup':
-            name, phone = person_name(body.get('name')), optional_phone(body.get('phone'))
+            name, phone = person_name(body.get('name')), phone_number(body.get('phone'))
             with self.db.transaction() as tx:
-                rows = matching_reservations(tx, name, phone, reservation_id=body.get('reservation_id'))
-                results = [staff_reservation_data(tx, row) for row in rows]
-                return {'reservation': results[0] if len(results) == 1 else None, 'reservations': results}
+                reservation = tx.one('SELECT * FROM reservations WHERE name = ? AND phone = ?', (name,phone))
+                check(reservation is not None, '해당 이름과 전화번호의 예약이 없습니다.', 404)
+                return {'reservation': staff_reservation_data(tx,reservation)}
         pickup_match = re.fullmatch(r'/api/staff/preorders/([0-9]+)/complete',path)
         if method == 'POST' and pickup_match:
             with self.db.transaction(write=True) as tx:
                 def complete_preorder():
-                    name, phone = person_name(body.get('name')), optional_phone(body.get('phone'))
-                    reservation = tx.one("SELECT * FROM reservations WHERE id = ? AND name = ? AND COALESCE(phone,'') = COALESCE(?,'')",
+                    name, phone = person_name(body.get('name')), phone_number(body.get('phone'))
+                    reservation = tx.one('SELECT * FROM reservations WHERE id = ? AND name = ? AND phone = ?',
                                          (int(pickup_match.group(1)),name,phone))
                     check(reservation is not None, '예약자 이름과 전화번호를 다시 확인해 주세요.', 404)
                     if reservation['order_id']:
@@ -1241,7 +1216,7 @@ class Application:
                     else:
                         check(reservation['status'] == 'reserved', '예약 상태를 다시 확인해 주세요.', 409)
                         buyer = {'id':None,'name':reservation['name']} if body.get('guest') is True else manual_buyer(tx,body,reservation_name=reservation['name'])
-                        check(body.get('guest') is not True or not any(body.get(key) is not None for key in ('user_id','pin','buyer_phone')),
+                        check(body.get('guest') is not True or not any(body.get(key) is not None for key in ('user_id','pin')),
                               '비회원 수령에는 계정을 선택하지 마세요.')
                         items = reservation_data(tx,reservation)['items']
                         check(bool(items), '예약된 품목이 없습니다.', 409)
@@ -1281,9 +1256,7 @@ class Application:
                 return {"memo": tx.one("SELECT * FROM memos WHERE id = ?", (memo_id,))}
         if method == "POST" and path == "/api/staff/preorders/import":
             with self.db.transaction(write=True) as tx:
-                def import_preorders():
-                    return self.import_reservations(tx, body.get('reservations'), user['name'])
-                return idempotent(tx, user, 'preorder-import', body, import_preorders) if 'request_id' in body else import_preorders()
+                return self.import_reservations(tx, body.get("reservations"), user["name"])
         raise APIError(404, "요청한 담당자 API를 찾을 수 없습니다.")
 
 

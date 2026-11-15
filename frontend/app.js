@@ -71,31 +71,29 @@ function authRequired() { return renderBuyerLogin(); }
 function orderDice(order){return order.user_id===null?0:order.dice_quantity??order.quantity;}
 function orderLines(order){return `<div class="order-lines">${order.items.map(i=>`<div class="order-line"><span>${esc(i.name)} <span>× ${i.quantity}</span></span><span>${money(i.price*i.quantity)}원</span></div>`).join('')}</div>`;}
 function orderStatus(status){return `<span class="status ${status}">${icon(status==='approved'?'check':status==='cancelled'?'x':'clock')}${{pending:'담당자 확인 중',approved:'수령 완료',cancelled:'취소 완료'}[status]||status}</span>`;}
-let pickupLookupVersion=0,pickupMatches=[];
-function pickupValues(){return state.pickupDraft||{name:state.pickupDefaults?.name||state.user?.name||''};}
-function clearPickupResult(){state.reservation=null;pickupMatches=[];document.querySelector('.reservation-result')?.remove();}
+let pickupLookupVersion=0;
+function pickupValues(){return state.pickupDraft||state.pickupDefaults||{name:state.user?.name||'',phone:''};}
+function clearPickupResult(){state.reservation=null;document.querySelector('.reservation-result')?.remove();}
 function resetPickup(){pickupLookupVersion++;state.pickupUserId=null;state.pickupDefaults=null;state.pickupDraft=null;clearPickupResult();}
 function editPickupField(name,value){
-  if(name!=='name')return;
+  if(!['name','phone'].includes(name))return;
   state.pickupDraft={...pickupValues(),[name]:value};pickupLookupVersion++;clearPickupResult();
 }
 async function lookupPreorder(data){
   const version=++pickupLookupVersion,token=state.token,userId=state.user?.id;
   clearPickupResult();
-  const query={name:data.name.trim()};
+  const query={name:data.name.trim(),phone:normalizePhone(data.phone)};
   state.pickupDraft=query;
   try{
-    const result=await api(`/api/preorders/lookup?${new URLSearchParams(query)}`,{token});
+    const {reservation}=await api(`/api/preorders/lookup?${new URLSearchParams(query)}`,{token});
     if(version!==pickupLookupVersion||token!==state.token||userId!==state.user?.id)return;
-    pickupMatches=result.reservations||(result.reservation?[result.reservation]:[]);
-    state.reservation=pickupMatches.length===1?pickupMatches[0]:null;render();toast('예약 내역을 찾았어요.');
+    state.reservation=reservation;render();toast('예약 내역을 찾았어요.');
   }catch(error){if(version===pickupLookupVersion&&token===state.token&&userId===state.user?.id)throw error;}
 }
 function renderPickup() {
   const values=pickupValues();
-  const matches=pickupMatches.length?pickupMatches:state.reservation?[state.reservation]:[];
-  return `${purchaseHeading()}<section class="content-card narrow"><h2>예약 내역 조회</h2><form id="preorder-lookup"><div class="field"><label for="preorder-name">예약자 이름</label><input id="preorder-name" name="name" value="${esc(values.name)}" placeholder="예약할 때 사용한 이름" required maxlength="30"></div><button class="primary-button full" type="submit">예약 조회</button></form>
-  ${matches.length?`<div class="reservation-result">${matches.length>1?'<p class="form-hint">같은 이름의 예약이 여러 건이에요. 메뉴와 수량을 확인해 내 예약을 선택해 주세요.</p>':''}${matches.map(r=>`<article class="order-card"><h3>${esc(r.name)} 님의 예약</h3><p class="form-hint">예약 #${r.id}</p>${orderLines(r)}<div class="basket-total"><span>예약 금액</span><strong>${money(r.total)}원</strong></div>${!r.status||r.status==='reserved'?`<p class="form-hint">수령 계정: ${esc(state.user.name)}</p><button class="primary-button full" data-action="claim-preorder" data-id="${r.id}">담당자에게 수령 요청</button><p class="form-hint">담당자가 예약 수령을 확인하고 승인하면 완료됩니다.</p>`:`<p class="callout">${r.status==='approved'?'이미 수령 완료한 예약입니다.':'수령 요청을 보냈어요. 담당자 확인을 기다려 주세요.'}</p>`}</article>`).join('')}</div>`:''}</section>`;
+  return `${purchaseHeading()}<section class="content-card narrow"><h2>예약 내역 조회</h2><form id="preorder-lookup"><div class="field"><label for="preorder-name">예약자 이름</label><input id="preorder-name" name="name" value="${esc(values.name)}" placeholder="예약할 때 사용한 이름" required maxlength="30"></div><div class="field"><label for="preorder-phone">예약자 전화번호</label><input id="preorder-phone" name="phone" type="tel" inputmode="tel" value="${esc(values.phone)}" placeholder="010-1234-5678" minlength="11" maxlength="13" pattern="010(?:[0-9]{8}|-[0-9]{4}-[0-9]{4})" data-phone-input required></div><p class="form-hint">예약할 때 사용한 이름과 전화번호로 조회해 주세요.</p><button class="primary-button full" type="submit">예약 조회</button></form>
+  ${state.reservation?`<div class="reservation-result"><h3>${esc(state.reservation.name)} 님의 예약</h3>${orderLines(state.reservation)}<div class="basket-total"><span>예약 금액</span><strong>${money(state.reservation.total)}원</strong></div><button class="primary-button full" data-action="claim-preorder" data-id="${state.reservation.id}">담당자에게 수령 요청</button><p class="form-hint">담당자가 예약한 빵을 전달하고 승인하면 완료됩니다.</p></div>`:''}</section>`;
 }
 function renderOrders() {
   return `${purchaseHeading()}<div class="narrow">${guestPurchase()?'<p class="form-hint">이 기기에서 접수한 비회원 주문입니다. 담당자에게 주문 번호와 이름을 보여주세요.</p>':''}${state.orders.length?state.orders.map(o=>`<article class="order-card"><div class="order-top"><strong>${{walkin:'현장 구매',preorder:'예약한 빵 수령',manual:'수기 판매'}[o.type]} #${String(o.id).padStart(3,'0')}</strong>${orderStatus(o.status)}</div>${guestPurchase()?`<p class="guest-order-name">${esc(o.customer_name)} 님</p>`:''}${orderLines(o)}<div class="order-bottom"><span>${time(o.created_at)}</span><strong>${money(o.total)}원</strong></div>
@@ -501,7 +499,7 @@ document.addEventListener('input',event=>{
   if(input.closest?.('#preorder-lookup'))editPickupField(input.name,input.value);
   if(input.id==='guest-name'){state.guestName=input.value;sessionStorage.setItem('kambo.guest.name',state.guestName);}
 });
-document.addEventListener('focusout',event=>{const input=event.target;if(!input.matches?.('[data-phone-input]'))return;formatPhoneInput(input);if(!input.value)return;try{input.value=normalizePhone(input.value);input.setCustomValidity('');}catch(error){input.setCustomValidity(error.message);}});
+document.addEventListener('focusout',event=>{const input=event.target;if(!input.matches?.('[data-phone-input]'))return;formatPhoneInput(input);if(!input.value)return;try{input.value=normalizePhone(input.value);if(input.closest?.('#preorder-lookup'))state.pickupDraft={...pickupValues(),phone:input.value};input.setCustomValidity('');}catch(error){input.setCustomValidity(error.message);}});
 document.addEventListener('error',event=>{if(event.target.matches?.('.product-photo img'))event.target.remove();},true);
 document.addEventListener('change',event=>{const form=event.target.closest?.('#profile-editor');if(form)updateProfilePreview(form);});
 document.addEventListener('click',async event=>{const el=event.target.closest('[data-action]');if(!el)return;const action=el.dataset.action;try{
