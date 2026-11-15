@@ -294,7 +294,10 @@ def create_reward_request(tx, user, kind, selected=None, *, milestone_id=None, r
                            'VALUES(?,?,?,?,?,?,?,?,?,?)',
                            (user['id'],milestone_id,roll_id,kind,'awaiting_choice' if kind=='milk' else 'pending',
                             selected['id'],'oatmeal' if kind=='oatmeal' else None,selected['name'],stamp,None if kind=='milk' else stamp))
-    return reward_request(tx, request_id)
+    row = reward_request(tx, request_id)
+    if kind == 'milk' and not has_event_beverage(tx):
+        return replace_beverage_with_die(tx, row)
+    return row
 
 
 def process_reward_request(tx, row, action, actor):
@@ -378,6 +381,28 @@ def event_beverage_limits(tx):
 def check_event_beverage_limit(tx, product_id, quantity):
     beverage = event_beverage_limits(tx)[product_id]
     check(beverage['remaining'] >= quantity, f"선착순 이벤트 {beverage['name']}가 바닥났어요.", 409)
+
+
+def has_event_beverage(tx):
+    limits = event_beverage_limits(tx)
+    return any(product['stock'] > 0 and limits[product['id']]['remaining'] > 0
+               for product in tx.all('SELECT id,stock FROM products WHERE id IN (?,?)', DRINK_PRODUCT_IDS))
+
+
+def replace_beverage_with_die(tx, row):
+    """Called only inside a write transaction; each entitlement converts at most once."""
+    check(row['kind'] == 'milk', '음료 보상만 일반 주사위로 받을 수 있습니다.')
+    if row['fallback_dice_kind'] is not None:
+        return row
+    check(row['status'] == 'awaiting_choice', '이미 처리된 요청입니다. 현재 상태를 확인해 주세요.', 409)
+    check(not has_event_beverage(tx), '선택할 수 있는 이벤트 음료가 남아 있어요. 우유 또는 두유를 선택해 주세요.', 409)
+    grant_dice(tx, row['user_id'], 'walkin', 1)
+    stamp = now()
+    tx.execute("UPDATE reward_requests SET status='approved',fallback_dice_kind='walkin',product_name='일반 주사위',"
+               'requested_at=?,processed_at=?,processed_by=? WHERE id=?', (stamp,stamp,'시스템',row['id']))
+    if row['milestone_id'] is not None:
+        tx.execute("UPDATE milestone_claims SET product_name='일반 주사위' WHERE id=?", (row['milestone_id'],))
+    return reward_request(tx, row['id'])
 
 
 def event_bread_given(tx):
@@ -897,9 +922,10 @@ class Application:
                     roll_id = tx.insert('INSERT INTO typed_dice_rolls(user_id,kind,result,value,created_at) VALUES(?,?,?,?,?)',
                                         (user['id'], kind, 'milk' if face == 'milk' else 'score', value, now()))
                     fulfillment = create_reward_request(tx, current, 'milk', roll_id=roll_id) if face=='milk' else None
+                    updated = public_user(user_by_id(tx, user['id']))
                     return {'id': roll_id, 'dice': public_dice(kind), 'result': 'milk' if face == 'milk' else 'score',
-                            "value": value, "score": current["score"] + value, "dice_balance": current["dice_balance"] - 1,
-                            'user': public_user(user_by_id(tx, user['id'])), 'fulfillment': fulfillment}
+                            'value': value, 'score': updated['score'], 'dice_balance': updated['dice_balance'],
+                            'user': updated, 'fulfillment': fulfillment}
                 return idempotent(tx, user, "roll", body, roll)
         if method == "GET" and path == "/api/leaderboard":
             with self.db.transaction() as tx:
@@ -911,12 +937,16 @@ class Application:
         if method == "GET" and path == "/api/rewards":
             with self.db.transaction() as tx:
                 return {"rewards": reward_history(tx, user['id']), 'requests': reward_requests(tx, user['id'])}
-        match = re.fullmatch(r'/api/reward-requests/([0-9]+)/(choose|decline)', path)
+        match = re.fullmatch(r'/api/reward-requests/([0-9]+)/(choose|decline|fallback)', path)
         if method == 'POST' and match:
             with self.db.transaction(write=True) as tx:
                 def choose_reward():
                     row = reward_request(tx, int(match.group(1)))
                     check(row['user_id'] == user['id'], '본인의 이벤트 지급 요청만 처리할 수 있습니다.', 403)
+                    if match.group(2) == 'fallback':
+                        check(set(body) <= {'request_id'}, '요청 번호만 보내 주세요.')
+                        row = replace_beverage_with_die(tx, row)
+                        return {'request': row, 'user': public_user(user_by_id(tx, user['id']))}
                     if match.group(2) == 'decline':
                         if row['status']=='cancelled':
                             return {'request':row}
@@ -924,9 +954,14 @@ class Application:
                         return {'request':process_reward_request(tx,row,'cancel',user['name'])}
                     product_id = integer(body.get('product_id'), '음료 번호', maximum=1_000_000)
                     check(product_id in DRINK_PRODUCT_IDS and row['kind']=='milk', '우유 또는 두유를 선택해 주세요.')
+                    if row['fallback_dice_kind'] is not None:
+                        return {'request': row, 'user': public_user(user_by_id(tx, user['id']))}
                     if row['status'] in ('pending','approved') and row['product_id']==product_id:
                         return {'request':row}
                     check(row['status']=='awaiting_choice', '이미 처리된 요청입니다. 현재 상태를 확인해 주세요.', 409)
+                    if not has_event_beverage(tx):
+                        row = replace_beverage_with_die(tx, row)
+                        return {'request': row, 'user': public_user(user_by_id(tx, user['id']))}
                     check_event_beverage_limit(tx, product_id, 1)
                     product = tx.one('SELECT * FROM products WHERE id=?', (product_id,))
                     change_inventory(tx,product_id,'stock',-1,f"이벤트 요청 #{row['id']} 음료 선택 · 재고 확보",user['name'])
@@ -935,7 +970,8 @@ class Application:
                     if row['milestone_id'] is not None:
                         tx.execute('UPDATE milestone_claims SET product_id=?,product_name=? WHERE id=?', (product_id,product['name'],row['milestone_id']))
                     return {'request':reward_request(tx,row['id'])}
-                return idempotent(tx,user,f'reward-choice:{match.group(1)}',body,choose_reward)
+                scope = f'reward-choice:{match.group(1)}' + (':fallback' if match.group(2)=='fallback' else '')
+                return idempotent(tx,user,scope,body,choose_reward)
         if method == "POST" and path == "/api/rewards/claim":
             with self.db.transaction(write=True) as tx:
                 def reward():
@@ -968,6 +1004,8 @@ class Application:
                     tx.execute("UPDATE users SET rewards_claimed = rewards_claimed + 1 WHERE id = ?", (user["id"],))
                     result = tx.one('SELECT id,product_id,product_name,threshold,kind,created_at FROM milestone_claims WHERE id=?', (reward_id,))
                     result['fulfillment'] = create_reward_request(tx,current,kind,selected,milestone_id=reward_id) if kind!='sunglasses' else None
+                    if result['fulfillment'] and result['fulfillment']['fallback_dice_kind']:
+                        result['product_name'] = result['fulfillment']['product_name']
                     award_milestone_badges(tx,tx.one('SELECT * FROM milestone_claims WHERE id=?',(reward_id,)))
                     award_milestone_titles(tx,tx.one('SELECT * FROM milestone_claims WHERE id=?',(reward_id,)))
                     return {"reward": result, "user": public_user(user_by_id(tx, user["id"]))}

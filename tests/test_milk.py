@@ -130,21 +130,22 @@ class MilkTests(unittest.TestCase):
             self.assertEqual(error.exception.status,400)
 
     def test_milk_face_keeps_its_outcome_while_choice_stock_changes(self):
-        buyer=self.buyer();self.certify(buyer);self.stock(0);identity=uuid.uuid4().hex
+        buyer=self.buyer();self.certify(buyer);self.stock(1);identity=uuid.uuid4().hex
         body={'kind':'instagram','request_id':identity}
         with patch('server.app.secrets.randbelow',return_value=5):
             first=self.request('POST','/api/dice/roll',body,buyer['token'])
             self.assertEqual(self.request('POST','/api/dice/roll',body,buyer['token']),first)
         self.assertEqual((first['result'],first['value'],first['score']),('milk',0,0))
         row=first['fulfillment'];path=f"/api/reward-requests/{row['id']}/choose"
+        self.stock(0)
         choice={'product_id':112,'request_id':uuid.uuid4().hex}
-        with self.assertRaises(APIError) as error:self.request('POST',path,choice,buyer['token'])
-        self.assertEqual(error.exception.status,409)
-        self.assertEqual(self.me(buyer)['dice_balance'],0)
+        converted=self.request('POST',path,choice,buyer['token'])
+        self.assertEqual(converted['request']['fallback_dice_kind'],'walkin')
+        self.assertEqual(self.me(buyer)['dice_balance'],1)
         self.stock(1)
         selected=self.request('POST',path,choice,buyer['token'])
         self.assertEqual(self.request('POST',path,choice,buyer['token']),selected)
-        self.assertEqual((self.product()['stock'],selected['request']['status']),(0,'pending'))
+        self.assertEqual((self.product()['stock'],selected['request']['status']),(1,'approved'))
         records=self.request('GET','/api/rewards',token=buyer['token'])['rewards']
         self.assertEqual((len(records),records[0]['kind']),(1,'dice_milk'))
 
@@ -161,7 +162,11 @@ class MilkTests(unittest.TestCase):
                 return 200,result
             except APIError as error:return error.status,None
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(compete,['sale','choice']))
-        self.assertEqual(sorted(status for status,_ in results),[200,409])
+        self.assertIn(sorted(status for status,_ in results),[[200,200],[200,409]])
+        if all(status==200 for status,_ in results):
+            converted=next(value['request'] for _,value in results if 'request' in value)
+            self.assertEqual(converted['fallback_dice_kind'],'walkin')
+            self.assertEqual(self.me(participant)['dice_balance'],1)
         self.assertEqual(self.product()['stock'],0)
         with self.app.db.transaction() as tx:
             self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM inventory_logs WHERE product_id=? AND delta=-1',(MILK_PRODUCT_ID,))['n'],1)

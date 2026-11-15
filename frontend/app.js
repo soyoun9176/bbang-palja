@@ -136,7 +136,7 @@ function diceAction() {
 }
 function renderDiceControl() {
   const last=state.lastRoll,chosen=selectedDie(),visual=last?.dice?.kind===chosen?.kind?last:null,busy=state.rolling||state.leveling;
-  const result=state.rolling?'주사위를 굴리고 있어요…':last?.result==='milk'?'음료 보상 당첨! 우유 또는 두유를 선택해 주세요.':last?`${last.value}점`:chosen?'사용할 주사위를 고르고 굴려요.':'빵 구매 승인 후 주사위가 지급돼요.';
+  const result=state.rolling?'주사위를 굴리고 있어요…':last?.fulfillment?.fallback_dice_kind?'이벤트 음료가 소진되어 일반 주사위 1개를 받았어요.':last?.result==='milk'?'음료 보상 당첨! 우유 또는 두유를 선택해 주세요.':last?`${last.value}점`:chosen?'사용할 주사위를 고르고 굴려요.':'빵 구매 승인 후 주사위가 지급돼요.';
   return `<div class="inline-dice ${state.rolling?'rolling':''}" aria-label="주사위 굴리기" aria-busy="${state.rolling}">
     <div class="dice-control-head"><div class="dice-visual" aria-hidden="true"><span class="dice-fallback">${die(visual?.result==='milk'?'milk':visual?.value||1,chosen?.color||'plain')}</span><canvas class="dice-canvas" aria-hidden="true"></canvas></div><div><p class="dice-balance">남은 주사위 <strong>${state.user.dice_balance}개</strong></p><p class="dice-feedback ${last&&!state.rolling?'has-result':''}" role="status">${esc(result)}</p></div></div>
     ${ownedDice().length?`<div class="dice-picker" role="group" aria-label="사용할 주사위">${ownedDice().map(d=>`<button class="dice-choice die-${esc(d.color)} ${d.kind===chosen?.kind?'selected':''}" data-action="select-dice" data-kind="${esc(d.kind)}" aria-pressed="${d.kind===chosen?.kind}" ${busy?'disabled':''}>${dicePickerArt(d.kind,d.color)}<span><strong>${esc(d.name)}</strong><small>${d.kind.startsWith('preorder_')?`${dieColors[d.color]} · `:''}${d.quantity}개</small></span>${d.kind===chosen?.kind?icon('check'):''}</button>`).join('')}</div>`:''}
@@ -153,8 +153,8 @@ function openMilestone(threshold){
   const {milestones,claimed}=eventProgress(),m=milestones.find(m=>m.threshold===Number(threshold));if(!m)return;
   const received=claimed.includes(m.threshold),achieved=state.user.score>=m.threshold;
   const record=state.rewards.find(r=>r.threshold===m.threshold&&r.kind!=='legacy_bread'),request=record?.fulfillment;
-  const status=received?(request?rewardStatus(request.status):'보상 받기 완료'):achieved?`${m.threshold}점 달성!`:`${m.threshold-state.user.score}점 더 모으면 받을 수 있어요.`;
-  modal(`<div class="draw-prompt milestone-detail ${achieved||received?'is-achieved':'is-locked'}"><span class="label-kicker">${m.threshold}점 보상</span><img class="milestone-detail-image" src="${milestoneImage(m)}" alt="${esc(m.name)}" width="112" height="112"><h2>${esc(m.name)}</h2><p class="milestone-detail-status">${esc(status)}</p>${m.extra?`<p class="form-hint">${esc(m.extra)}</p>`:''}${!received&&achieved?`<button class="primary-button full" data-action="claim-reward" data-threshold="${m.threshold}">상품 받기</button>`:''}${request?.status==='awaiting_choice'?`<button class="primary-button full" data-action="open-beverage-choice" data-request="${request.id}">우유·두유 선택하기</button>`:''}${received&&request?.status==='pending'?'<p class="form-hint">담당자에게 이벤트 요청을 보여주고 물품을 받아주세요.</p>':''}</div>`);
+  const status=received?(request?.fallback_dice_kind?'일반 주사위 지급 완료':request?rewardStatus(request.status):'보상 받기 완료'):achieved?`${m.threshold}점 달성!`:`${m.threshold-state.user.score}점 더 모으면 받을 수 있어요.`;
+  modal(`<div class="draw-prompt milestone-detail ${achieved||received?'is-achieved':'is-locked'}"><span class="label-kicker">${m.threshold}점 보상</span><img class="milestone-detail-image" src="${milestoneImage(m)}" alt="${esc(m.name)}" width="112" height="112"><h2>${esc(m.name)}</h2><p class="milestone-detail-status">${esc(status)}</p>${m.extra?`<p class="form-hint">${esc(m.extra)}</p>`:''}${!received&&achieved?`<button class="primary-button full" data-action="claim-reward" data-threshold="${m.threshold}">상품 받기</button>`:''}${request?.status==='awaiting_choice'?beverageChoiceButton(request,'primary-button full'):''}${received&&request?.status==='pending'?'<p class="form-hint">담당자에게 이벤트 요청을 보여주고 물품을 받아주세요.</p>':''}</div>`);
 }
 function renderLevelCard() {
   const {level,target,next,remaining,eligible}=eventProgress();
@@ -166,37 +166,56 @@ function renderLevelCard() {
   </section>`;
 }
 const rewardStatus = status => ({awaiting_choice:'음료 선택 필요',pending:'담당자 지급 대기',approved:'수령 완료',cancelled:'지급 취소'}[status]||status);
+function eventDrinksExhausted(){
+  const drinks=state.products.filter(p=>p.beverage_reward_eligible);
+  return drinks.length>0&&drinks.every(p=>p.stock<=0||p.event_reward_remaining===0);
+}
+function beverageChoiceButton(request,className='secondary-button full'){
+  const fallback=eventDrinksExhausted();
+  const attributes=`${fallback?' data-fallback="true"':''}${state.rolling||state.leveling?' disabled':''}`;
+  return `<button class="${className}" data-action="${fallback?'choose-beverage':'open-beverage-choice'}" data-request="${request.id}"${attributes}>${fallback?'일반 주사위 받기':'우유·두유 선택하기'}</button>`;
+}
+function showDiceFallback(){
+  modal(`<div class="draw-prompt"><div class="draw-icon">${icon('dice')}</div><h2>일반 주사위 1개 지급!</h2><p>이벤트 우유와 두유가 모두 소진되어<br>일반 주사위 1개를 드렸어요.</p><button class="primary-button full" data-action="close-modal">확인</button></div>`);
+}
 function beverageOptions(request){
   const drinks=state.products.filter(p=>p.beverage_reward_eligible);
+  if(eventDrinksExhausted())return `<p class="form-hint">이벤트 우유와 두유가 모두 소진되었어요. 일반 주사위 1개로 보상을 받을 수 있어요.</p>${beverageChoiceButton(request,'primary-button full')}`;
   const options=drinks.map(product=>{
     const limitReached=product.event_reward_remaining===0;
     const soldOut=product.stock<=0;
     const label=limitReached?'이벤트 소진':soldOut?'품절':'선택';
     return `<div><button class="secondary-button full" data-action="choose-beverage" data-request="${request.id}" data-product="${product.id}" ${limitReached||soldOut?'disabled':''}>${icon('milk')}${esc(product.name)} ${label}</button>${limitReached?`<p class="form-hint">선착순 이벤트 ${esc(product.name)}가 바닥났어요.</p>`:''}</div>`;
   }).join('');
-  return `<div class="beverage-options">${options}</div>${drinks.length&&drinks.every(p=>p.stock<=0)?'<p class="form-hint">우유와 두유가 모두 품절이에요.</p>':''}<p class="form-hint">취소하면 이번 음료 보상은 받지 않는 것으로 처리돼요.</p><div class="button-row"><button class="secondary-button" data-action="decline-beverage" data-request="${request.id}">취소하기</button><button class="text-button" data-action="close-modal">나중에 선택하기</button></div>`;
+  return `<div class="beverage-options">${options}</div>${drinks.length&&drinks.every(p=>p.stock<=0)?'<p class="form-hint">우유와 두유가 모두 품절이에요.</p>':''}<div class="button-row beverage-actions"><button class="text-button" data-action="decline-beverage" data-request="${request.id}">안 받을래요</button><button class="text-button" data-action="close-modal">나중에 선택하기</button></div>`;
 }
 function openBeverageChoice(request){
   if(!request)return;
   request=state.rewardRequests.find(r=>r.id===request.id)||request;
+  if(request.fallback_dice_kind){showDiceFallback();return;}
   if(request.status&&request.status!=='awaiting_choice')return;
-  modal(`<div class="draw-prompt"><div class="draw-icon">${icon('milk')}</div><h2>우유 보상 당첨!</h2><p>우유 또는 두유 중 1개를 선택해 주세요.<br>선택 후 담당자에게 요청을 보여주세요.</p>${beverageOptions(request)}<p class="form-hint">이벤트 요청 #${request.id}</p></div>`);
+  const exhausted=eventDrinksExhausted();
+  modal(`<div class="draw-prompt"><div class="draw-icon">${icon(exhausted?'dice':'milk')}</div><h2>${exhausted?'이벤트 음료 소진':'우유 보상 당첨!'}</h2>${exhausted?'':'<p>우유 또는 두유 중 1개를 선택해 주세요.<br>선택 후 담당자에게 요청을 보여주세요.</p>'}${beverageOptions(request)}<p class="form-hint">이벤트 요청 #${request.id}</p></div>`);
 }
 function renderRewardRequests(){
   const active=state.rewardRequests.filter(r=>['awaiting_choice','pending'].includes(r.status));
-  return active.length?`<section class="content-card buyer-reward-requests"><h2>이벤트 물품 수령</h2>${active.map(r=>`<article class="buyer-reward-request"><div><strong>${esc(r.product_name)}${r.status==='pending'?' × 1':''}</strong><span class="status pending">${rewardStatus(r.status)}</span></div><p class="form-hint">이벤트 #${r.id} · ${r.roll_id?'주사위 당첨':`${r.threshold}점 보상`}</p>${r.status==='awaiting_choice'?`<button class="secondary-button full" data-action="open-beverage-choice" data-request="${r.id}" ${state.rolling||state.leveling?'disabled':''}>우유·두유 선택하기</button>`:'<p class="form-hint">담당자에게 이 요청을 보여주고 물품을 받아주세요.</p>'}</article>`).join('')}</section>`:'';
+  return active.length?`<section class="content-card buyer-reward-requests"><h2>이벤트 물품 수령</h2>${active.map(r=>`<article class="buyer-reward-request"><div><strong>${esc(r.product_name)}${r.status==='pending'?' × 1':''}</strong><span class="status pending">${rewardStatus(r.status)}</span></div><p class="form-hint">이벤트 #${r.id} · ${r.roll_id?'주사위 당첨':`${r.threshold}점 보상`}</p>${r.status==='awaiting_choice'?beverageChoiceButton(r):'<p class="form-hint">담당자에게 이 요청을 보여주고 물품을 받아주세요.</p>'}</article>`).join('')}</section>`:'';
 }
 async function chooseBeverage(button,decline=false){
   if(state.rolling||state.leveling)return;
-  const id=Number(button.dataset.request),body=decline?{}:{product_id:Number(button.dataset.product)};
-  const op=operation(`beverage-${id}`,body);state.leveling=true;button.disabled=true;
+  const action=decline?'decline':button.dataset.fallback==='true'?'fallback':'choose';
+  const id=Number(button.dataset.request),body=action==='choose'?{product_id:Number(button.dataset.product)}:{};
+  const op=operation(`beverage-${id}-${action}`,body);state.leveling=true;button.disabled=true;
   try{
-    const result=await api(`/api/reward-requests/${id}/${decline?'decline':'choose'}`,{method:'POST',body:{...body,request_id:op.id}});
+    const result=await api(`/api/reward-requests/${id}/${action}`,{method:'POST',body:{...body,request_id:op.id}});
     op.done();
+    if(result.user)state.user=result.user;
     state.rewardRequests=[result.request,...state.rewardRequests.filter(r=>r.id!==id)];
-    state.rewards=state.rewards.map(r=>r.fulfillment?.id===id?{...r,fulfillment:{...r.fulfillment,...result.request}}:r);
+    state.rewards=state.rewards.map(r=>r.fulfillment?.id===id?{...r,product_name:result.request.product_name,fulfillment:{...r.fulfillment,...result.request}}:r);
+    if(result.request.fallback_dice_kind&&state.lastRoll?.id===result.request.roll_id)state.lastRoll={...state.lastRoll,fulfillment:result.request};
     await refreshAfterAction();state.leveling=false;closeModal();render();
-    toast(decline?'이번 음료 보상은 받지 않는 것으로 처리했어요.':'음료를 확보하고 담당자에게 지급을 요청했어요.');
+    if(result.request.fallback_dice_kind){showDiceFallback();toast('일반 주사위 1개를 받았어요.');}
+    else toast(decline?'이번 음료 보상은 받지 않는 것으로 처리했어요.':'음료를 확보하고 담당자에게 지급을 요청했어요.');
   }catch(error){
     if(error.status>=400&&error.status<500)op.done();state.leveling=false;
     await refresh().catch(()=>{});render();
@@ -205,7 +224,7 @@ async function chooseBeverage(button,decline=false){
   }
 }
 function renderRewardHistory() {
-  return state.rewards.length?`<details id="buyer-reward-history" class="content-card reward-history"><summary>이벤트 보상 기록 · ${state.rewards.length}건</summary>${state.rewards.map(r=>`<div class="reward-item"><strong>${esc(r.product_name)}</strong><span>${r.kind==='dice_milk'?'주사위 당첨':r.kind==='legacy_bread'?`이전 이벤트 ${r.threshold}점`:`${r.threshold}점`} · ${r.fulfillment?rewardStatus(r.fulfillment.status):r.kind==='sunglasses'?'자동 지급':'이전 지급 기록'}</span></div>`).join('')}</details>`:'';
+  return state.rewards.length?`<details id="buyer-reward-history" class="content-card reward-history"><summary>이벤트 보상 기록 · ${state.rewards.length}건</summary>${state.rewards.map(r=>`<div class="reward-item"><strong>${esc(r.product_name)}</strong><span>${r.kind==='dice_milk'?'주사위 당첨':r.kind==='legacy_bread'?`이전 이벤트 ${r.threshold}점`:`${r.threshold}점`} · ${r.fulfillment?.fallback_dice_kind?'주사위 자동 지급':r.fulfillment?rewardStatus(r.fulfillment.status):r.kind==='sunglasses'?'자동 지급':'이전 지급 기록'}</span></div>`).join('')}</details>`:'';
 }
 function renderAchievements(){
   const achievements=state.user?.achievements||[];

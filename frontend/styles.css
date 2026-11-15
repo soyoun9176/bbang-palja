@@ -191,6 +191,7 @@
 .milestone-track,.milestone-stops{height:104px}
 .milestone-limited{display:block;font-size:9px;line-height:12px}
 .beverage-options .form-hint{margin:6px 0 0}
+.beverage-actions{justify-content:space-between;align-items:center;gap:16px}
 .custom-title-list{display:grid;gap:10px}.custom-title-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.custom-title-row>.profile-title{max-width:100%;min-width:0}
 .manual-quantity-controls{display:grid;grid-template-columns:40px minmax(0,1fr) 40px;align-items:center;gap:6px;width:100%;min-width:0}
 .manual-quantity-controls>input{width:100%;min-width:0;height:46px;padding:0 6px;border:1px solid #d8cfbd;border-radius:8px;background:#fff;text-align:center;font-size:18px;font-weight:650;appearance:textfield;-moz-appearance:textfield}
