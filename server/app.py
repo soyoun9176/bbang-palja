@@ -425,9 +425,24 @@ def sales_totals(tx):
         SELECT COALESCE(SUM(CASE WHEN i.product_id NOT IN (?,?) THEN i.quantity END),0) AS bread_sold,
                COALESCE(SUM(CASE WHEN i.product_id NOT IN (?,?) THEN i.quantity*i.price END),0) AS bread_revenue,
                COALESCE(SUM(CASE WHEN i.product_id=? THEN i.quantity END),0) AS milk_sold,
-               COALESCE(SUM(CASE WHEN i.product_id=? THEN i.quantity END),0) AS soymilk_sold
+               COALESCE(SUM(CASE WHEN i.product_id=? THEN i.quantity END),0) AS soymilk_sold,
+               COALESCE(SUM(CASE WHEN o.type IN ('walkin','manual') AND i.product_id NOT IN (?,?)
+                   THEN i.quantity*i.price END),0) AS walkin_bread_revenue,
+               COALESCE(SUM(CASE WHEN i.product_id IN (?,?) THEN i.quantity*i.price END),0) AS drink_revenue
         FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.status='approved'
-    """, (*DRINK_PRODUCT_IDS, *DRINK_PRODUCT_IDS, MILK_PRODUCT_ID, SOYMILK_PRODUCT_ID))
+    """, (*DRINK_PRODUCT_IDS, *DRINK_PRODUCT_IDS, MILK_PRODUCT_ID, SOYMILK_PRODUCT_ID,
+          *DRINK_PRODUCT_IDS, *DRINK_PRODUCT_IDS))
+
+
+def bread_revenue_totals(tx):
+    placeholders = ','.join('?' for _ in REWARD_PRODUCT_IDS)
+    return tx.one(f"""
+        SELECT
+            (SELECT COALESCE(SUM(quantity*price),0) FROM reservation_items
+             WHERE product_id NOT IN (?,?)) AS preorder_bread_revenue,
+            (SELECT COALESCE(SUM(stock*price),0) FROM products
+             WHERE id IN ({placeholders})) AS remaining_bread_revenue
+    """, (*DRINK_PRODUCT_IDS, *REWARD_PRODUCT_IDS))
 
 
 def bread_stock_total(tx):
@@ -442,6 +457,47 @@ def bread_stock_total(tx):
             SELECT product_id, 1 FROM reward_requests WHERE status='pending'
         ) AS remaining_stock WHERE product_id IN ({placeholders})
     """, REWARD_PRODUCT_IDS)['count']
+
+
+def inventory_summary(tx):
+    """Staff totals use all records, independently of dashboard history limits."""
+    return tx.all("""
+        WITH quantities AS (
+            SELECT product_id, quantity AS preorder_sold, 0 AS walkin_sold, 0 AS event_given, 0 AS held
+            FROM reservation_items
+            UNION ALL
+            SELECT i.product_id, 0, i.quantity, 0, 0 FROM order_items i JOIN orders o ON o.id=i.order_id
+            WHERE o.status='approved' AND o.type IN ('walkin','manual')
+            UNION ALL
+            SELECT product_id, 0, 0, 1, 0 FROM reward_requests WHERE status='approved' AND product_id IS NOT NULL
+            UNION ALL
+            SELECT product_id, 0, 0, quantity, 0 FROM manual_event_grants WHERE product_id IS NOT NULL
+            UNION ALL
+            SELECT product_id, 0, 0, 1, 0 FROM rewards
+            UNION ALL
+            SELECT m.product_id, 0, 0, 1, 0 FROM milestone_claims m
+            WHERE m.kind IN ('bread','milk') AND m.product_id IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM reward_requests r WHERE r.milestone_id=m.id)
+            UNION ALL
+            SELECT ?, 0, 0, 1, 0 FROM typed_dice_rolls d WHERE d.result='milk'
+                AND NOT EXISTS (SELECT 1 FROM reward_requests r WHERE r.roll_id=d.id)
+            UNION ALL
+            SELECT ?, 0, 0, milk_quantity, 0 FROM events WHERE milk_quantity>0
+            UNION ALL
+            SELECT i.product_id, 0, 0, 0, i.quantity FROM order_items i JOIN orders o ON o.id=i.order_id
+            WHERE o.status='pending'
+            UNION ALL
+            SELECT product_id, 0, 0, 0, 1 FROM reward_requests WHERE status='pending'
+        )
+        SELECT p.id AS product_id,
+               COALESCE(SUM(q.preorder_sold),0) AS preorder_sold,
+               COALESCE(SUM(q.walkin_sold),0) AS walkin_sold,
+               COALESCE(SUM(q.event_given),0) AS event_given,
+               COALESCE(SUM(q.held),0) AS held,
+               p.stock+COALESCE(SUM(q.held),0) AS remaining
+        FROM products p LEFT JOIN quantities q ON q.product_id=p.id
+        GROUP BY p.id,p.stock ORDER BY p.id
+    """, (MILK_PRODUCT_ID, MILK_PRODUCT_ID))
 
 
 def products(tx, drink_limits=None):
@@ -1033,12 +1089,14 @@ class Application:
             with self.db.transaction() as tx:
                 stats = tx.one("SELECT COALESCE(SUM(CASE WHEN status = 'approved' THEN total ELSE 0 END),0) AS revenue, COALESCE(SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END),0) AS approved_orders, COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END),0) AS pending_orders FROM orders")
                 stats.update(sales_totals(tx))
+                stats.update(bread_revenue_totals(tx))
                 stats['bread_stock_total'] = bread_stock_total(tx)
                 stats["milk_stock"] = milk_stock(tx)
                 stats['pending_rewards'] = tx.one("SELECT COUNT(*) AS n FROM reward_requests WHERE status='pending'")['n']
                 stats['bread_event_given'] = event_bread_given(tx)
                 drink_limits = event_beverage_limits(tx)
                 return {"orders": all_orders(tx, include_inventory=True), "products": products(tx, drink_limits), "stats": stats,
+                        'inventory_summary': inventory_summary(tx),
                         'event_beverage_limits': list(drink_limits.values()),
                         'event_notices':event_notices(tx),
                         "event_supplies": event_supply_summary(tx),

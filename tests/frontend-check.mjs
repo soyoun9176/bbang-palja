@@ -877,11 +877,12 @@ function adminFixture() {
   const requests=[],messages=[];
   const listeners={};
   const nodes=new Map();
+  const windowListeners={};
   let renderCalls=0;
   const state={user:{id:1},route:'events',products:[],staffData:{users:[{id:10,name:'등록사용자'}],stats:{milk_stock:2},
     products:[{id:101,name:'플레인 휘낭시에',stock:2,preorder_stock:0,price:2800,dice_per_unit:1},
               {id:112,name:'우유',stock:2,preorder_stock:0,price:1000,dice_per_unit:0}]}};
-  const context={document:{addEventListener(type,listener){listeners[type]=listener;},querySelector:selector=>nodes.get(selector)||null},FormData:class {
+  const context={window:{innerWidth:1024,innerHeight:768,addEventListener(type,listener){windowListeners[type]=listener;}},document:{addEventListener(type,listener){listeners[type]=listener;},querySelector:selector=>nodes.get(selector)||null},FormData:class {
     constructor(form){this.values=form.values;}
     get(key){return this.values.get(key)??null;}
     has(key){return this.values.has(key);}
@@ -892,7 +893,7 @@ function adminFixture() {
     submitButton(){},refresh:async()=>{},render(){renderCalls++;},toast:message=>messages.push(message),closeModal(){}};
   vm.createContext(context);
   vm.runInContext(profileSource+'\n'+adminSource+'\nshared.profileAvatar=profileAvatar;shared.badgePicture=badgePicture;shared.badgeIcons=badgeIcons;shared.profileTitle=profileTitle;shared.titleStyles=titleStyles;initAdmin(shared);',context);
-  return {state,requests,messages,context,listeners,nodes,run:script=>vm.runInContext(script,context),
+  return {state,requests,messages,context,listeners,windowListeners,nodes,run:script=>vm.runInContext(script,context),
     get renders(){return renderCalls;},
     search(key,value){listeners.input({target:{dataset:{adminSearch:key},value,closest:()=>null}});},
     async lookup(fields){
@@ -959,7 +960,8 @@ test('stock on hold includes pending event requests but excludes unselected and 
 
 test('inventory groups oatmeal stock with beverage limits and ends with the server sales totals',async()=>{
   const f=adminFixture();f.state.route='inventory';
-  f.state.staffData.stats={bread_sold:12,bread_stock_total:42,bread_revenue:33600,bread_event_given:4,milk_sold:3,soymilk_sold:2};
+  f.state.staffData.stats={bread_sold:12,bread_stock_total:42,bread_revenue:33600,bread_event_given:4,
+    walkin_bread_revenue:22400,preorder_bread_revenue:56000,remaining_bread_revenue:84000,drink_revenue:5000};
   f.state.staffData.event_beverage_limits=[
     {product_id:112,name:'우유',limit:8,held:2,delivered:3,remaining:3},
     {product_id:113,name:'두유',limit:4,held:0,delivered:4,remaining:0},
@@ -967,15 +969,23 @@ test('inventory groups oatmeal stock with beverage limits and ends with the serv
   f.state.staffData.event_supplies=[{key:'oatmeal',name:'오트밀 미니바이트',stock:5,held:1,delivered:2}];
   const html=f.run('renderAdmin()');
   assert.equal((html.match(/<h2>이벤트 물품<\/h2>/g)||[]).length,1);
-  assert.match(html,/<th scope="row">우유<\/th><td>8개<\/td><td>2개<\/td><td>3개<\/td><td><strong>3개/);
-  assert.match(html,/<th scope="row">두유<\/th><td>4개<\/td><td>0개<\/td><td>4개<\/td><td><strong>0개/);
-  assert.match(html,/<th scope="row">오트밀 미니바이트<\/th><td>—<\/td><td>1개<\/td><td>2개<\/td><td><strong>5개<\/strong><\/td><td><button[^>]+data-action="admin-supply-adjust"/);
+  assert.match(html,/<th scope="col">이벤트 재고<\/th>/);
+  assert.doesNotMatch(html,/<th scope="col">제공 한도|<th scope="col">남은 수량|남은 수량은 우유·두유/);
+  assert.match(html,/<th scope="row">우유<\/th><td><strong>3개<\/strong><\/td><td>2개<\/td><td>3개<\/td>/);
+  assert.match(html,/<th scope="row">두유<\/th><td><strong>0개<\/strong><\/td><td>0개<\/td><td>4개<\/td>/);
+  assert.match(html,/<th scope="row">오트밀 미니바이트<\/th><td><strong>5개<\/strong><\/td><td>1개<\/td><td>2개<\/td><td><button[^>]+data-action="admin-supply-adjust"/);
   const summary=html.slice(html.indexOf('id="inventory-sales-title"'));
   assert.match(summary,/<table aria-labelledby="inventory-sales-title">/);
-  assert.deepEqual([...summary.matchAll(/<th scope="row">([^<]+)<\/th><td>([^<]+)<\/td>/g)].map(row=>row.slice(1)),[
-    ['판매된 빵 개수','12개'],['총 재고 빵 개수','42개'],['판매된 빵 총액','33600원'],
-    ['이벤트로 나간 빵 개수','4개'],['판매된 우유/두유 개수','우유 3개 · 두유 2개'],
+  assert.deepEqual([...summary.matchAll(/<th scope="row"><button[^>]+>([^<]+)<\/button><\/th><td>([^<]+)<\/td>/g)].map(row=>row.slice(1)),[
+    ['판매된 빵 개수','12개'],['이벤트로 증정된 빵 개수','4개'],['총 재고 빵 개수','42개'],
+    ['현판 매출(지금까지)','22400원'],['예판 매출','56000원'],['남은 빵을 다 팔면?','84000원'],['우유/두유 매출','5000원'],
   ]);
+  assert.equal([...summary.matchAll(/class="inventory-stat-name" data-inventory-tooltip="[^"]+"/g)].length,7);
+  assert.match(summary,/data-inventory-tooltip="전체 예약 빵 수량 × 예약 당시 단가 합계\. 수령 여부 무관, 음료 제외\."/);
+  assert.match(summary,/data-inventory-tooltip="현재 현판·이벤트 가능 빵 수량 × 현재 판매가 합계\./);
+  assert.doesNotMatch(summary,/<p|총 재고는 현판/);
+  const visible=summary.replace(/<[^>]*>/g,'');
+  assert.doesNotMatch(visible,/주문 당시|수령 여부|기존 매출 제외/);
   let modal='';f.context.shared.modal=markup=>{modal=markup;};
   await f.run("handleAdminClick('admin-beverage-limit',{dataset:{product:'112'}})");
   assert.match(modal,/<h2>우유 이벤트 한도 수정/);
@@ -1498,6 +1508,7 @@ test('inventory offers a collapsed preorder status table with plain menu text an
   let html=f.run('renderAdmin()');
   assert.match(html,/<details id="inventory-preorders" class="preorder-status-panel">/);
   assert.match(html,/<summary class="secondary-button">.*예판 수령 현황/);
+  assert.match(html,/aria-label="미수령 2건 \/ 전체 3건">2\/3건<\/span>/);
   assert.match(html,/<th>이름<\/th><th>전화번호<\/th><th>메뉴<\/th><th>수령 상태<\/th>/);
   assert.match(html,/010-1234-5678/);
   assert.match(html,/<td class="preorder-menu">플레인 휘낭시에 2개, 우유 1개<\/td>/);
@@ -1506,9 +1517,123 @@ test('inventory offers a collapsed preorder status table with plain menu text an
   assert.match(html,/수령 완료/);
   f.state.staffData.reservations[0].status='approved';
   html=f.run('renderAdmin()');
+  assert.match(html,/aria-label="미수령 1건 \/ 전체 3건">1\/3건<\/span>/);
   assert.doesNotMatch(html,/수령 대기/);
   f.state.staffData.reservations=[];
-  assert.match(f.run('renderAdmin()'),/등록된 예판이 없습니다/);
+  html=f.run('renderAdmin()');
+  assert.match(html,/등록된 예판이 없습니다/);
+  assert.match(html,/>0\/0건<\/span>/);
+});
+
+test('inventory item hover uses complete server totals and includes pending holds in remaining stock',()=>{
+  const f=adminFixture();f.state.route='inventory';
+  f.state.staffData.inventory_summary=[{product_id:101,preorder_sold:12,walkin_sold:7,event_given:3,held:9,remaining:11}];
+  f.state.staffData.orders=[];f.state.staffData.reward_requests=[];
+  const html=f.run('renderAdmin()');
+  assert.match(html,/<button type="button" class="inventory-product-name" data-inventory-tooltip="예판 판매량: 12개\n현판 판매량: 7개\n이벤트 제공량: 3개\n잔여량: 11개"/);
+  assert.doesNotMatch(html,/<button[^>]*class="inventory-product-name"[^>]*title=/);
+  assert.equal(f.run('heldStock(101)'),9);
+  assert.match(html,/<td>2<\/td><td>0<\/td><td>9<\/td><td><strong>11<\/strong>/);
+});
+
+test('preorder progress counts every booking despite an active status search',()=>{
+  const f=adminFixture();f.state.route='inventory';
+  f.state.staffData.reservations=[manualReservation(),manualReservation({id:8,status:'approved',name:'수령완료자'})];
+  f.run("staffSearch.inventory='수령완료자'");
+  const html=f.run('renderAdmin()');
+  assert.match(html,/>1\/2건<\/span>/);
+  assert.match(html,/검색 결과 1건 \/ 전체 2건/);
+});
+
+test('inventory hover keeps donut quantities in sets and tolerates an older server',()=>{
+  const f=adminFixture();f.state.route='inventory';
+  f.state.staffData.products=[{id:108,name:'도넛',unit:'세트',stock:2,preorder_stock:0}];
+  assert.doesNotMatch(f.run('renderAdmin()'),/class="inventory-product-name"/);
+  f.state.staffData.inventory_summary=[{product_id:108,preorder_sold:1,walkin_sold:2,event_given:0,held:0,remaining:2}];
+  assert.match(f.run('renderAdmin()'),/data-inventory-tooltip="예판 판매량: 1세트\n현판 판매량: 2세트\n이벤트 제공량: 0세트\n잔여량: 2세트"/);
+});
+
+function inventoryTooltipFixture() {
+  const f=adminFixture(),attached=[];
+  const doc=f.context.document;
+  doc.activeElement={tagName:'BODY'};
+  doc.body={appendChild(node){attached.push(node);f.nodes.set('.inventory-tooltip',node);}};
+  doc.createElement=()=>({style:{},attributes:new Map(),textContent:'',
+    setAttribute(key,value){this.attributes.set(key,value);},
+    getBoundingClientRect(){return {width:250,height:110};},
+    remove(){attached.splice(attached.indexOf(this),1);f.nodes.delete('.inventory-tooltip');}});
+  const trigger=(text='예판 판매량: 3개\n현판 판매량: 1개',rect={left:960,top:710,bottom:740})=>({
+    dataset:{inventoryTooltip:text},attributes:new Map(),
+    closest(selector){return selector==='[data-inventory-tooltip]'?this:null;},
+    contains(node){return node===this;},getBoundingClientRect(){return rect;},
+    setAttribute(key,value){this.attributes.set(key,value);},removeAttribute(key){this.attributes.delete(key);},
+  });
+  return {...f,attached,trigger};
+}
+
+test('inventory mouse hover opens immediately outside the table and stays within the viewport',()=>{
+  const f=inventoryTooltipFixture(),trigger=f.trigger();
+  f.listeners.pointerover({target:trigger,pointerType:'mouse'});
+  assert.equal(f.attached.length,1);
+  const tooltip=f.attached[0];
+  assert.equal(tooltip.textContent,trigger.dataset.inventoryTooltip);
+  assert.equal(tooltip.attributes.get('role'),'tooltip');
+  assert.equal(trigger.attributes.get('aria-describedby'),tooltip.id);
+  assert.equal(tooltip.style.visibility,'visible');
+  assert.ok(parseFloat(tooltip.style.left)>=12&&parseFloat(tooltip.style.left)+250<=1012);
+  assert.ok(parseFloat(tooltip.style.top)>=12&&parseFloat(tooltip.style.top)+110<=756);
+  f.listeners.pointerout({target:trigger,relatedTarget:null});
+  assert.equal(f.attached.length,0);
+  assert.equal(trigger.attributes.has('aria-describedby'),false);
+  assert.doesNotThrow(()=>f.listeners.pointerout({target:{},relatedTarget:null}));
+});
+
+test('inventory explanations support keyboard focus, Escape and touch click toggling',()=>{
+  const f=inventoryTooltipFixture(),trigger=f.trigger();
+  f.context.document.activeElement=trigger;
+  f.listeners.focusin({target:trigger});
+  assert.equal(f.attached.length,1);
+  f.listeners.keydown({key:'Escape'});
+  assert.equal(f.attached.length,0);
+  f.context.document.activeElement={tagName:'BODY'};
+  f.listeners.pointerover({target:trigger,pointerType:'touch'});
+  assert.equal(f.attached.length,0);
+  // A touch focuses the button before click: the first tap must keep it open.
+  f.context.document.activeElement=trigger;
+  f.listeners.focusin({target:trigger});
+  f.listeners.click({target:trigger});
+  f.listeners.pointerout({target:trigger,relatedTarget:null});
+  assert.equal(f.attached.length,1);
+  f.listeners.click({target:trigger});
+  assert.equal(f.attached.length,0);
+  f.listeners.click({target:trigger});
+  f.listeners.click({target:{}});
+  assert.equal(f.attached.length,0);
+});
+
+test('inventory tooltip switches safely and dismisses on scrolling, resize, blur and navigation',()=>{
+  const f=inventoryTooltipFixture(),first=f.trigger(),second=f.trigger('<img src=x onerror=alert(1)>');
+  f.listeners.pointerover({target:first,pointerType:'mouse'});
+  f.listeners.pointerover({target:second,pointerType:'mouse'});
+  assert.equal(f.attached.length,1);
+  assert.equal(f.attached[0].textContent,'<img src=x onerror=alert(1)>');
+  assert.equal(first.attributes.has('aria-describedby'),false);
+  for(const dismiss of [()=>f.listeners.scroll(),()=>f.windowListeners.resize(),()=>f.windowListeners.blur(),
+                        ()=>f.listeners.focusout({target:second}),()=>f.run('renderAdmin()'),()=>f.run('renderStaffLogin()')]){
+    f.listeners.click({target:second});
+    assert.equal(f.attached.length,1);
+    dismiss();assert.equal(f.attached.length,0);
+  }
+});
+
+test('polling postpones DOM replacement while an inventory explanation is open',async()=>{
+  const f=fixture({admin:true});
+  let open=true;
+  const query=f.context.document.querySelector;
+  f.context.document.querySelector=selector=>selector==='.inventory-tooltip'?(open?{}:null):query(selector);
+  assert.equal(f.run('safeToRender()'),false);
+  open=false;
+  assert.equal(f.run('safeToRender()'),true);
 });
 
 test('order messages use bread dice counts and checkout shows bank transfer instructions',async()=>{

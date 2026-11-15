@@ -15,12 +15,14 @@ let manualLookupVersion = 0;
 let manualPickupMode = 'existing';
 let manualPickupUser = '';
 let inputListenerAdded = false;
+let inventoryTooltip = null;
 const pendingRequests = new Map();
 const staffSearch = {inventory:'',pickup:'',queue:'',users:'',events:''};
 
 export function initAdmin(shared) {
   helpers = shared;
   if (!inputListenerAdded) {
+    initInventoryTooltips();
     const clearFormError = event => event.target.closest?.('form')?.querySelector('[data-form-error]')?.remove();
     document.addEventListener('change', clearFormError);
     document.addEventListener('input', event => {
@@ -51,6 +53,67 @@ export function initAdmin(shared) {
     });
     inputListenerAdded = true;
   }
+}
+
+function hideInventoryTooltip() {
+  if(!inventoryTooltip)return;
+  const {trigger,node}=inventoryTooltip;
+  inventoryTooltip=null;
+  trigger.removeAttribute('aria-describedby');
+  node.remove();
+}
+
+function showInventoryTooltip(trigger,pinned=false) {
+  if(inventoryTooltip?.trigger===trigger){inventoryTooltip.pinned ||= pinned;return;}
+  hideInventoryTooltip();
+  const node=document.createElement('div');
+  node.id='inventory-info-tooltip';
+  node.className='inventory-tooltip';
+  node.setAttribute('role','tooltip');
+  node.textContent=trigger.dataset.inventoryTooltip;
+  node.style.visibility='hidden';
+  document.body.appendChild(node);
+  trigger.setAttribute('aria-describedby',node.id);
+  inventoryTooltip={trigger,node,pinned};
+  const anchor=trigger.getBoundingClientRect(),box=node.getBoundingClientRect(),margin=12,gap=8;
+  const left=Math.max(margin,Math.min(anchor.left,window.innerWidth-box.width-margin));
+  const below=anchor.bottom+gap;
+  const top=Math.max(margin,Math.min(below+box.height<=window.innerHeight-margin?below:anchor.top-box.height-gap,
+                                    window.innerHeight-box.height-margin));
+  node.style.left=`${left}px`;
+  node.style.top=`${top}px`;
+  node.style.visibility='visible';
+}
+
+function initInventoryTooltips() {
+  const triggerFor=target=>target?.closest?.('[data-inventory-tooltip]');
+  document.addEventListener('pointerover',event=>{
+    if(event.pointerType==='touch')return;
+    const trigger=triggerFor(event.target);
+    if(trigger)showInventoryTooltip(trigger);
+  });
+  document.addEventListener('pointerout',event=>{
+    const trigger=triggerFor(event.target);
+    if(inventoryTooltip&&inventoryTooltip.trigger===trigger&&!trigger.contains(event.relatedTarget)&&
+       !inventoryTooltip.pinned&&document.activeElement!==trigger)hideInventoryTooltip();
+  });
+  document.addEventListener('focusin',event=>{
+    const trigger=triggerFor(event.target);
+    if(trigger)showInventoryTooltip(trigger);
+  });
+  document.addEventListener('focusout',event=>{
+    if(inventoryTooltip?.trigger===triggerFor(event.target))hideInventoryTooltip();
+  });
+  document.addEventListener('click',event=>{
+    const trigger=triggerFor(event.target);
+    if(!trigger){hideInventoryTooltip();return;}
+    if(inventoryTooltip?.trigger===trigger&&inventoryTooltip.pinned)hideInventoryTooltip();
+    else showInventoryTooltip(trigger,true);
+  });
+  document.addEventListener('keydown',event=>{if(event.key==='Escape')hideInventoryTooltip();});
+  document.addEventListener('scroll',hideInventoryTooltip,true);
+  window.addEventListener('resize',hideInventoryTooltip);
+  window.addEventListener('blur',hideInventoryTooltip);
 }
 
 const data = () => helpers.state.staffData || {};
@@ -165,6 +228,8 @@ function queuePage() {
 }
 
 function heldStock(productId) {
+  const summary=list('inventory_summary').find(row=>row.product_id===productId);
+  if(summary)return summary.held;
   const rewards=list('reward_requests').filter(r=>r.status==='pending'&&r.product_id===productId).length;
   return rewards + pendingOrders().reduce((sum, order) => sum + (order.items || []).filter(item => item.product_id === productId).reduce((count, item) => count + item.quantity, 0), 0);
 }
@@ -174,35 +239,53 @@ function preorderStatusResults() {
   return `<p class="search-count" role="status">검색 결과 ${reservations.length}건 / 전체 ${list('reservations').length}건</p>${reservations.length?`<div class="table-wrap"><table><thead><tr><th>이름</th><th>전화번호</th><th>메뉴</th><th>수령 상태</th></tr></thead><tbody>${reservations.map(r=>`<tr><td><strong>${escape(r.name)}</strong></td><td>${escape(phoneLabel(r.phone))}</td><td class="preorder-menu">${escape(preorderMenu(r))}</td><td><span class="status ${r.status==='approved'?'approved':'pending'}">${escape(preorderLabel(r.status))}</span></td></tr>`).join('')}</tbody></table></div>`:`<p class="form-hint">${list('reservations').length?'검색 결과가 없습니다.':'등록된 예판이 없습니다.'}</p>`}`;
 }
 function preorderStatusPanel() {
-  return `<details id="inventory-preorders" class="preorder-status-panel"><summary class="secondary-button">${i('chevron')}예판 수령 현황 <span>${list('reservations').length}건</span></summary><div class="preorder-status-content">${searchField('inventory','admin-preorder-status-search','예판 검색','이름 · 전화번호 뒷자리 · 메뉴 검색')}<div id="inventory-preorder-results">${preorderStatusResults()}</div></div></details>`;
+  const reservations=list('reservations'),remaining=reservations.filter(r=>r.status!=='approved').length;
+  return `<details id="inventory-preorders" class="preorder-status-panel"><summary class="secondary-button">${i('chevron')}예판 수령 현황 <span aria-label="미수령 ${remaining}건 / 전체 ${reservations.length}건">${remaining}/${reservations.length}건</span></summary><div class="preorder-status-content">${searchField('inventory','admin-preorder-status-search','예판 검색','이름 · 전화번호 뒷자리 · 메뉴 검색')}<div id="inventory-preorder-results">${preorderStatusResults()}</div></div></details>`;
+}
+
+function inventoryHoverLabel(label, details, className) {
+  return `<button type="button" class="${className}" data-inventory-tooltip="${escape(details)}">${escape(label)}</button>`;
+}
+
+function inventoryProductName(product) {
+  const summary=list('inventory_summary').find(row=>row.product_id===product.id);
+  if(!summary)return `<strong>${escape(product.name)}</strong>`;
+  const unit=product.unit||'개';
+  const details=[['예판 판매량',summary.preorder_sold],['현판 판매량',summary.walkin_sold],
+    ['이벤트 제공량',summary.event_given],['잔여량',summary.remaining]].map(([label,value])=>`${label}: ${number(value)}${unit}`).join('\n');
+  return inventoryHoverLabel(product.name,details,'inventory-product-name');
 }
 
 function eventSuppliesPanel() {
   const limits=list('event_beverage_limits');
   const oatmeal=list('event_supplies').find(item=>item.key==='oatmeal');
   if(!limits.length&&!oatmeal)return '';
-  return `<section class="content-card inventory-summary"><h2>이벤트 물품</h2><p class="form-hint">남은 수량은 우유·두유의 이벤트 한도와 오트밀의 실제 재고를 나타냅니다.</p>
-    <div class="table-wrap"><table><thead><tr><th scope="col">품목</th><th scope="col">제공 한도</th><th scope="col">지급 대기</th><th scope="col">지급 완료</th><th scope="col">남은 수량</th><th scope="col">관리</th></tr></thead><tbody>
-      ${limits.map(drink=>`<tr><th scope="row">${escape(drink.name)}</th><td>${number(drink.limit)}개</td><td>${number(drink.held)}개</td><td>${number(drink.delivered)}개</td><td><strong>${number(drink.remaining)}개</strong></td><td><button type="button" class="secondary-button" data-action="admin-beverage-limit" data-product="${drink.product_id}" aria-label="${escape(drink.name)} 이벤트 제공 한도 수정">한도 수정</button></td></tr>`).join('')}
-      ${oatmeal?`<tr><th scope="row">${escape(oatmeal.name)}</th><td>—</td><td>${number(oatmeal.held)}개</td><td>${number(oatmeal.delivered)}개</td><td><strong>${number(oatmeal.stock)}개</strong></td><td><button type="button" class="secondary-button" data-action="admin-supply-adjust" aria-label="오트밀 미니바이트 재고 수정">재고 수정</button></td></tr>`:''}
+  return `<section class="content-card inventory-summary"><h2>이벤트 물품</h2>
+    <div class="table-wrap"><table><thead><tr><th scope="col">품목</th><th scope="col">이벤트 재고</th><th scope="col">지급 대기</th><th scope="col">지급 완료</th><th scope="col">관리</th></tr></thead><tbody>
+      ${limits.map(drink=>`<tr><th scope="row">${escape(drink.name)}</th><td><strong>${number(drink.remaining)}개</strong></td><td>${number(drink.held)}개</td><td>${number(drink.delivered)}개</td><td><button type="button" class="secondary-button" data-action="admin-beverage-limit" data-product="${drink.product_id}" aria-label="${escape(drink.name)} 이벤트 제공 한도 수정">한도 수정</button></td></tr>`).join('')}
+      ${oatmeal?`<tr><th scope="row">${escape(oatmeal.name)}</th><td><strong>${number(oatmeal.stock)}개</strong></td><td>${number(oatmeal.held)}개</td><td>${number(oatmeal.delivered)}개</td><td><button type="button" class="secondary-button" data-action="admin-supply-adjust" aria-label="오트밀 미니바이트 재고 수정">재고 수정</button></td></tr>`:''}
     </tbody></table></div></section>`;
 }
 
 function inventorySalesSummary() {
   const stats=data().stats||{};
+  const rows=[
+    ['판매된 빵 개수',`${number(stats.bread_sold)}개`,'승인된 예판·현판·수기 판매의 빵 수량 합계. 음료·이벤트 증정 제외.'],
+    ['이벤트로 증정된 빵 개수',`${number(stats.bread_event_given)}개`,'지급 완료된 빵 보상·임의 지급·이전 직접 지급 합계. 지급 대기·취소 제외.'],
+    ['총 재고 빵 개수',`${number(stats.bread_stock_total)}개`,'현판·이벤트 가능 + 예판 대기 + 주문·이벤트 접수 보관. 음료 제외.'],
+    ['현판 매출(지금까지)',won(stats.walkin_bread_revenue),'승인된 현장·수기 판매의 빵 수량 × 주문 당시 단가 합계. 예판·음료 제외.'],
+    ['예판 매출',won(stats.preorder_bread_revenue),'전체 예약 빵 수량 × 예약 당시 단가 합계. 수령 여부 무관, 음료 제외.'],
+    ['남은 빵을 다 팔면?',won(stats.remaining_bread_revenue),'현재 현판·이벤트 가능 빵 수량 × 현재 판매가 합계. 예판 대기·접수 보관·음료·기존 매출 제외.'],
+    ['우유/두유 매출',won(stats.drink_revenue),'승인된 우유·두유 수량 × 주문 당시 단가 합계. 예판·수기 포함, 이벤트 제공 제외.'],
+  ];
   return `<section class="content-card inventory-summary" aria-labelledby="inventory-sales-title">
     <h2 id="inventory-sales-title">현재 판매 현황</h2>
     <div class="table-wrap"><table aria-labelledby="inventory-sales-title">
       <thead><tr><th scope="col">항목</th><th scope="col">집계</th></tr></thead>
       <tbody>
-        <tr><th scope="row">판매된 빵 개수</th><td>${number(stats.bread_sold)}개</td></tr>
-        <tr><th scope="row">총 재고 빵 개수</th><td>${number(stats.bread_stock_total)}개</td></tr>
-        <tr><th scope="row">판매된 빵 총액</th><td>${won(stats.bread_revenue)}</td></tr>
-        <tr><th scope="row">이벤트로 나간 빵 개수</th><td>${number(stats.bread_event_given)}개</td></tr>
-        <tr><th scope="row">판매된 우유/두유 개수</th><td>우유 ${number(stats.milk_sold)}개 · 두유 ${number(stats.soymilk_sold)}개</td></tr>
+        ${rows.map(([label,value,details])=>`<tr><th scope="row">${inventoryHoverLabel(label,details,'inventory-stat-name')}</th><td>${value}</td></tr>`).join('')}
       </tbody>
     </table></div>
-    <p class="form-hint">총 재고는 현판 재고, 예판 대기, 접수 보관 수량을 합한 값입니다.</p>
   </section>`;
 }
 
@@ -213,7 +296,7 @@ function inventoryPage() {
   ${preorderStatusPanel()}
   <div class="table-wrap"><table><thead><tr><th>품목</th><th>현판·이벤트 가능</th><th>예판 대기</th><th>접수 보관</th><th>매장 예상</th><th></th></tr></thead><tbody>${productList().map(p=>{
     const held=heldStock(p.id);
-    return `<tr><td><strong>${escape(p.name)}</strong></td><td>${p.stock}</td><td>${p.preorder_stock}</td><td>${held}</td><td><strong>${p.stock+p.preorder_stock+held}</strong></td><td><button class="secondary-button" data-action="admin-adjust" data-product="${p.id}">수정</button></td></tr>`;
+    return `<tr><td>${inventoryProductName(p)}</td><td>${p.stock}</td><td>${p.preorder_stock}</td><td>${held}</td><td><strong>${p.stock+p.preorder_stock+held}</strong></td><td><button class="secondary-button" data-action="admin-adjust" data-product="${p.id}">수정</button></td></tr>`;
   }).join('')}</tbody></table></div>
   ${eventSuppliesPanel()}
   <details id="inventory-history" class="history-section"><summary>재고 수정 히스토리</summary><div class="admin-subtabs">${[['all','전체'],['stock','현판·이벤트'],['preorder_stock','예판']].map(([key,label])=>`<button class="tab-chip ${inventoryBucket===key?'active':''}" data-action="admin-inventory-filter" data-bucket="${key}">${label}</button>`).join('')}</div>${logs.length?`<div class="table-wrap"><table><thead><tr><th>시간</th><th>품목</th><th>구분</th><th>변동</th><th>사유</th><th>담당자</th></tr></thead><tbody>${logs.map(log=>`<tr><td>${stamp(log.created_at)}</td><td>${escape(log.product_name)}</td><td>${bucketLabel(log.bucket)}</td><td>${log.delta>0?'+':''}${log.delta}</td><td>${escape(log.reason)}</td><td>${escape(log.actor)}</td></tr>`).join('')}</tbody></table></div>`:'<p>기록이 없습니다.</p>'}</details>
@@ -377,6 +460,7 @@ function notesPage() {
 function help(title,description) { return `<details id="help-${helpers.state.route}" class="screen-help"><summary>${title}</summary><p>${description}</p></details>`; }
 
 export function renderAdmin() {
+  hideInventoryTooltip();
   if (!helpers.state.staffData) return '<div class="system-loading"><span class="spinner"></span>&nbsp; 판매 현황을 불러오고 있어요.</div>';
   return ({ queue: queuePage, inventory: inventoryPage, sales: salesPage, events: eventsPage, notes: notesPage }[helpers.state.route] || queuePage)();
 }
@@ -386,6 +470,7 @@ function loginForm() {
 }
 
 export function renderStaffLogin() {
+  hideInventoryTooltip();
   return `<div class="staff-login"><div class="content-card">${loginForm()}</div><div class="staff-login-footer"><a href="/">구매자 페이지로 돌아가기</a></div></div>`;
 }
 

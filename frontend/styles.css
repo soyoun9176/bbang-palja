@@ -188,6 +188,9 @@
 .inventory-direction{display:flex;gap:8px;margin-bottom:8px}.inventory-direction>.tab-chip{flex:1;min-height:44px}
 .inventory-summary{margin-top:20px}
 .inventory-summary h2{font-size:18px;margin:0 0 14px}
+.inventory-product-name,.inventory-stat-name{padding:0;border:0;background:none;color:inherit;font:inherit;font-weight:650;text-align:left;text-decoration:underline dotted;text-underline-offset:4px;cursor:help}
+.inventory-product-name:focus-visible,.inventory-stat-name:focus-visible{outline:2px solid currentColor;outline-offset:4px;border-radius:2px}
+.inventory-tooltip{position:fixed;z-index:1300;box-sizing:border-box;width:max-content;max-width:min(340px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow-wrap:anywhere;padding:12px 14px;border:1px solid #d9d0b9;border-radius:10px;background:#fffdf5;color:#30392e;box-shadow:0 6px 24px #20261b29;font-size:13px;font-weight:450;line-height:1.65;white-space:pre-line;text-align:left;pointer-events:none}
 .milestone-track,.milestone-stops{height:104px}
 .milestone-limited{display:block;font-size:9px;line-height:12px}
 .beverage-options .form-hint{margin:6px 0 0}
