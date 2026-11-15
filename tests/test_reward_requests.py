@@ -175,6 +175,8 @@ class RewardRequestTests(unittest.TestCase):
         metrics=('bread_sold','bread_stock_total','bread_revenue','bread_event_given','milk_sold','soymilk_sold')
         stats=self.dashboard()['stats']
         self.assertEqual(tuple(stats[key] for key in metrics),(0,12,0,0,0,0))
+        self.assertEqual((stats['preorder_bread_revenue'],stats['walkin_bread_revenue'],
+                          stats['remaining_bread_revenue'],stats['drink_revenue']),(5600,0,19600,0))
 
         # The purchase price is fixed on the order line when it is placed.
         with self.app.db.transaction(write=True) as tx:
@@ -186,6 +188,8 @@ class RewardRequestTests(unittest.TestCase):
                   'product_id':101,'quantity':3,'reason':'현장 지급','request_id':uuid.uuid4().hex},self.staff)
         stats=self.dashboard()['stats']
         self.assertEqual(tuple(stats[key] for key in metrics),(2,6,5600,4,1,2))
+        self.assertEqual((stats['preorder_bread_revenue'],stats['walkin_bread_revenue'],
+                          stats['remaining_bread_revenue'],stats['drink_revenue']),(5600,5600,32000,3000))
 
     def test_stock_shortage_does_not_use_quota_and_a_pending_hold_blocks_lowering_the_limit(self):
         self.set_limit(112,2)

@@ -959,7 +959,8 @@ test('stock on hold includes pending event requests but excludes unselected and 
 
 test('inventory groups oatmeal stock with beverage limits and ends with the server sales totals',async()=>{
   const f=adminFixture();f.state.route='inventory';
-  f.state.staffData.stats={bread_sold:12,bread_stock_total:42,bread_revenue:33600,bread_event_given:4,milk_sold:3,soymilk_sold:2};
+  f.state.staffData.stats={bread_sold:12,bread_stock_total:42,bread_revenue:33600,bread_event_given:4,
+    walkin_bread_revenue:22400,preorder_bread_revenue:56000,remaining_bread_revenue:84000,drink_revenue:5000};
   f.state.staffData.event_beverage_limits=[
     {product_id:112,name:'우유',limit:8,held:2,delivered:3,remaining:3},
     {product_id:113,name:'두유',limit:4,held:0,delivered:4,remaining:0},
@@ -974,10 +975,16 @@ test('inventory groups oatmeal stock with beverage limits and ends with the serv
   assert.match(html,/<th scope="row">오트밀 미니바이트<\/th><td><strong>5개<\/strong><\/td><td>1개<\/td><td>2개<\/td><td><button[^>]+data-action="admin-supply-adjust"/);
   const summary=html.slice(html.indexOf('id="inventory-sales-title"'));
   assert.match(summary,/<table aria-labelledby="inventory-sales-title">/);
-  assert.deepEqual([...summary.matchAll(/<th scope="row">([^<]+)<\/th><td>([^<]+)<\/td>/g)].map(row=>row.slice(1)),[
-    ['판매된 빵 개수','12개'],['총 재고 빵 개수','42개'],['판매된 빵 총액','33600원'],
-    ['이벤트로 나간 빵 개수','4개'],['판매된 우유/두유 개수','우유 3개 · 두유 2개'],
+  assert.deepEqual([...summary.matchAll(/<th scope="row"><button[^>]+>([^<]+)<\/button><\/th><td>([^<]+)<\/td>/g)].map(row=>row.slice(1)),[
+    ['판매된 빵 개수','12개'],['이벤트로 증정된 빵 개수','4개'],['총 재고 빵 개수','42개'],
+    ['현판 매출(지금까지)','22400원'],['예판 매출','56000원'],['남은 빵을 다 팔면?','84000원'],['우유/두유 매출','5000원'],
   ]);
+  assert.equal([...summary.matchAll(/class="inventory-stat-name" title="[^"]+"/g)].length,7);
+  assert.match(summary,/title="전체 예약 빵 수량 × 예약 당시 단가 합계\. 수령 여부 무관, 음료 제외\."/);
+  assert.match(summary,/title="현재 현판·이벤트 가능 빵 수량 × 현재 판매가 합계\./);
+  assert.doesNotMatch(summary,/<p|총 재고는 현판/);
+  const visible=summary.replace(/<[^>]*>/g,'');
+  assert.doesNotMatch(visible,/주문 당시|수령 여부|기존 매출 제외/);
   let modal='';f.context.shared.modal=markup=>{modal=markup;};
   await f.run("handleAdminClick('admin-beverage-limit',{dataset:{product:'112'}})");
   assert.match(modal,/<h2>우유 이벤트 한도 수정/);

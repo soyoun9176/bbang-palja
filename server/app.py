@@ -425,9 +425,24 @@ def sales_totals(tx):
         SELECT COALESCE(SUM(CASE WHEN i.product_id NOT IN (?,?) THEN i.quantity END),0) AS bread_sold,
                COALESCE(SUM(CASE WHEN i.product_id NOT IN (?,?) THEN i.quantity*i.price END),0) AS bread_revenue,
                COALESCE(SUM(CASE WHEN i.product_id=? THEN i.quantity END),0) AS milk_sold,
-               COALESCE(SUM(CASE WHEN i.product_id=? THEN i.quantity END),0) AS soymilk_sold
+               COALESCE(SUM(CASE WHEN i.product_id=? THEN i.quantity END),0) AS soymilk_sold,
+               COALESCE(SUM(CASE WHEN o.type IN ('walkin','manual') AND i.product_id NOT IN (?,?)
+                   THEN i.quantity*i.price END),0) AS walkin_bread_revenue,
+               COALESCE(SUM(CASE WHEN i.product_id IN (?,?) THEN i.quantity*i.price END),0) AS drink_revenue
         FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.status='approved'
-    """, (*DRINK_PRODUCT_IDS, *DRINK_PRODUCT_IDS, MILK_PRODUCT_ID, SOYMILK_PRODUCT_ID))
+    """, (*DRINK_PRODUCT_IDS, *DRINK_PRODUCT_IDS, MILK_PRODUCT_ID, SOYMILK_PRODUCT_ID,
+          *DRINK_PRODUCT_IDS, *DRINK_PRODUCT_IDS))
+
+
+def bread_revenue_totals(tx):
+    placeholders = ','.join('?' for _ in REWARD_PRODUCT_IDS)
+    return tx.one(f"""
+        SELECT
+            (SELECT COALESCE(SUM(quantity*price),0) FROM reservation_items
+             WHERE product_id NOT IN (?,?)) AS preorder_bread_revenue,
+            (SELECT COALESCE(SUM(stock*price),0) FROM products
+             WHERE id IN ({placeholders})) AS remaining_bread_revenue
+    """, (*DRINK_PRODUCT_IDS, *REWARD_PRODUCT_IDS))
 
 
 def bread_stock_total(tx):
@@ -1074,6 +1089,7 @@ class Application:
             with self.db.transaction() as tx:
                 stats = tx.one("SELECT COALESCE(SUM(CASE WHEN status = 'approved' THEN total ELSE 0 END),0) AS revenue, COALESCE(SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END),0) AS approved_orders, COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END),0) AS pending_orders FROM orders")
                 stats.update(sales_totals(tx))
+                stats.update(bread_revenue_totals(tx))
                 stats['bread_stock_total'] = bread_stock_total(tx)
                 stats["milk_stock"] = milk_stock(tx)
                 stats['pending_rewards'] = tx.one("SELECT COUNT(*) AS n FROM reward_requests WHERE status='pending'")['n']

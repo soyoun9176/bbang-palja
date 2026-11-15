@@ -57,10 +57,64 @@ class InventoryOverviewTests(unittest.TestCase):
         self.transition(orders[1], 'approve')
         row = self.summary()
         self.assertEqual((row['preorder_sold'],row['walkin_sold'],row['event_given'],row['held'],row['remaining']), (9,0,0,3,94))
+        self.assertEqual(self.dashboard()['stats']['preorder_bread_revenue'],25200)
         self.transition(orders[0], 'cancel')
         self.transition(orders[0], 'cancel')
         row = self.summary()
         self.assertEqual((row['preorder_sold'],row['held'],row['remaining']), (9,0,91))
+        self.assertEqual(self.dashboard()['stats']['preorder_bread_revenue'],25200)
+
+    def test_revenues_separate_preorders_walkins_drinks_and_current_available_bread(self):
+        with self.app.db.transaction(write=True) as tx:
+            tx.execute('UPDATE products SET stock=0')
+            tx.execute('UPDATE products SET stock=20 WHERE id=101')
+            tx.execute('UPDATE products SET stock=10 WHERE id IN (112,113)')
+        reservation = {'name':'예약 매출','phone':'010-8000-2026','items':[
+            {'product_id':101,'quantity':2},{'product_id':112,'quantity':1}]}
+        self.api('/api/staff/preorders/import',{'reservations':[reservation]},self.staff)
+        pending = self.order(1)
+        sale = self.api('/api/orders',{'items':[{'product_id':101,'quantity':2},
+            {'product_id':112,'quantity':1},{'product_id':113,'quantity':2}],
+            'request_id':uuid.uuid4().hex},self.buyer['token'])['order']
+        self.api('/api/staff/manual-sale',{'guest':True,'name':'수기 판매','items':[
+            {'product_id':101,'quantity':3},{'product_id':112,'quantity':1}],
+            'request_id':uuid.uuid4().hex},self.staff)
+        cancelled = self.order(4)
+        self.transition(cancelled,'cancel')
+        self.api('/api/staff/manual-event-grants',{'guest':True,'name':'빵 증정','kind':'bread','product_id':101,
+            'quantity':1,'reason':'확인','request_id':uuid.uuid4().hex},self.staff)
+        self.api('/api/staff/event-beverage-limits',{'product_id':112,'limit':10,'request_id':uuid.uuid4().hex},self.staff)
+        self.api('/api/staff/manual-event-grants',{'guest':True,'name':'우유 증정','kind':'gift','gift':'milk',
+            'quantity':1,'reason':'확인','request_id':uuid.uuid4().hex},self.staff)
+        # Historical sales and preorders retain their original prices.
+        with self.app.db.transaction(write=True) as tx:
+            tx.execute('UPDATE products SET price=3500 WHERE id=101')
+            tx.execute('UPDATE products SET price=9000 WHERE id=112')
+        self.transition(sale,'approve')
+        stats = self.dashboard()['stats']
+        fields = ('walkin_bread_revenue','preorder_bread_revenue','remaining_bread_revenue','drink_revenue')
+        self.assertEqual(tuple(stats[key] for key in fields),(14000,5600,38500,4000))
+        self.assertEqual((stats['bread_sold'],stats['bread_event_given'],stats['bread_stock_total']),(5,1,14))
+        booking = self.dashboard()['reservations'][0]
+        self.api('/api/preorders/lookup',token=self.buyer['token'],method='GET',
+                 query={'name':[reservation['name']],'phone':[reservation['phone']]})
+        pickup = self.api(f"/api/preorders/{booking['id']}/claim",{'request_id':uuid.uuid4().hex},self.buyer['token'])['order']
+        self.transition(pickup,'approve')
+        self.transition(pickup,'approve')
+        stats = self.dashboard()['stats']
+        self.assertEqual(tuple(stats[key] for key in fields),(14000,5600,38500,5000))
+        self.assertEqual(stats['bread_sold'],7)
+        self.assertEqual(pending['status'],'pending')
+
+    def test_unsold_projection_counts_donut_sets_and_excludes_drinks_and_reserved_stock(self):
+        with self.app.db.transaction(write=True) as tx:
+            tx.execute('UPDATE products SET stock=0')
+            tx.execute('UPDATE products SET stock=3,preorder_stock=5 WHERE id=108')
+            tx.execute('UPDATE products SET stock=96 WHERE id=112')
+            tx.execute('UPDATE products SET stock=48 WHERE id=113')
+        stats = self.dashboard()['stats']
+        self.assertEqual(stats['remaining_bread_revenue'],6000)
+        self.assertEqual((stats['preorder_bread_revenue'],stats['walkin_bread_revenue'],stats['drink_revenue']),(0,0,0))
 
     def test_walkin_and_guest_manual_sales_count_only_after_approval_and_holds_are_still_remaining(self):
         approved = self.order(2)

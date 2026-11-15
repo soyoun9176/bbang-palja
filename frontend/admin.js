@@ -180,13 +180,17 @@ function preorderStatusPanel() {
   return `<details id="inventory-preorders" class="preorder-status-panel"><summary class="secondary-button">${i('chevron')}예판 수령 현황 <span aria-label="미수령 ${remaining}건 / 전체 ${reservations.length}건">${remaining}/${reservations.length}건</span></summary><div class="preorder-status-content">${searchField('inventory','admin-preorder-status-search','예판 검색','이름 · 전화번호 뒷자리 · 메뉴 검색')}<div id="inventory-preorder-results">${preorderStatusResults()}</div></div></details>`;
 }
 
+function inventoryHoverLabel(label, details, className) {
+  return `<button type="button" class="${className}" title="${escape(details)}" aria-label="${escape(label+'\n'+details)}">${escape(label)}</button>`;
+}
+
 function inventoryProductName(product) {
   const summary=list('inventory_summary').find(row=>row.product_id===product.id);
   if(!summary)return `<strong>${escape(product.name)}</strong>`;
   const unit=product.unit||'개';
   const details=[['예판 판매량',summary.preorder_sold],['현판 판매량',summary.walkin_sold],
     ['이벤트 제공량',summary.event_given],['잔여량',summary.remaining]].map(([label,value])=>`${label}: ${number(value)}${unit}`).join('\n');
-  return `<button type="button" class="inventory-product-name" title="${escape(details)}" aria-label="${escape(product.name+'\n'+details)}">${escape(product.name)}</button>`;
+  return inventoryHoverLabel(product.name,details,'inventory-product-name');
 }
 
 function eventSuppliesPanel() {
@@ -202,19 +206,23 @@ function eventSuppliesPanel() {
 
 function inventorySalesSummary() {
   const stats=data().stats||{};
+  const rows=[
+    ['판매된 빵 개수',`${number(stats.bread_sold)}개`,'승인된 예판·현판·수기 판매의 빵 수량 합계. 음료·이벤트 증정 제외.'],
+    ['이벤트로 증정된 빵 개수',`${number(stats.bread_event_given)}개`,'지급 완료된 빵 보상·임의 지급·이전 직접 지급 합계. 지급 대기·취소 제외.'],
+    ['총 재고 빵 개수',`${number(stats.bread_stock_total)}개`,'현판·이벤트 가능 + 예판 대기 + 주문·이벤트 접수 보관. 음료 제외.'],
+    ['현판 매출(지금까지)',won(stats.walkin_bread_revenue),'승인된 현장·수기 판매의 빵 수량 × 주문 당시 단가 합계. 예판·음료 제외.'],
+    ['예판 매출',won(stats.preorder_bread_revenue),'전체 예약 빵 수량 × 예약 당시 단가 합계. 수령 여부 무관, 음료 제외.'],
+    ['남은 빵을 다 팔면?',won(stats.remaining_bread_revenue),'현재 현판·이벤트 가능 빵 수량 × 현재 판매가 합계. 예판 대기·접수 보관·음료·기존 매출 제외.'],
+    ['우유/두유 매출',won(stats.drink_revenue),'승인된 우유·두유 수량 × 주문 당시 단가 합계. 예판·수기 포함, 이벤트 제공 제외.'],
+  ];
   return `<section class="content-card inventory-summary" aria-labelledby="inventory-sales-title">
     <h2 id="inventory-sales-title">현재 판매 현황</h2>
     <div class="table-wrap"><table aria-labelledby="inventory-sales-title">
       <thead><tr><th scope="col">항목</th><th scope="col">집계</th></tr></thead>
       <tbody>
-        <tr><th scope="row">판매된 빵 개수</th><td>${number(stats.bread_sold)}개</td></tr>
-        <tr><th scope="row">총 재고 빵 개수</th><td>${number(stats.bread_stock_total)}개</td></tr>
-        <tr><th scope="row">판매된 빵 총액</th><td>${won(stats.bread_revenue)}</td></tr>
-        <tr><th scope="row">이벤트로 나간 빵 개수</th><td>${number(stats.bread_event_given)}개</td></tr>
-        <tr><th scope="row">판매된 우유/두유 개수</th><td>우유 ${number(stats.milk_sold)}개 · 두유 ${number(stats.soymilk_sold)}개</td></tr>
+        ${rows.map(([label,value,details])=>`<tr><th scope="row">${inventoryHoverLabel(label,details,'inventory-stat-name')}</th><td>${value}</td></tr>`).join('')}
       </tbody>
     </table></div>
-    <p class="form-hint">총 재고는 현판 재고, 예판 대기, 접수 보관 수량을 합한 값입니다.</p>
   </section>`;
 }
 
