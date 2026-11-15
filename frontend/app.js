@@ -187,7 +187,7 @@ function beverageOptions(request){
     const label=limitReached?'이벤트 소진':soldOut?'품절':'선택';
     return `<div><button class="secondary-button full" data-action="choose-beverage" data-request="${request.id}" data-product="${product.id}" ${limitReached||soldOut?'disabled':''}>${icon('milk')}${esc(product.name)} ${label}</button>${limitReached?`<p class="form-hint">선착순 이벤트 ${esc(product.name)}가 바닥났어요.</p>`:''}</div>`;
   }).join('');
-  return `<div class="beverage-options">${options}</div>${drinks.length&&drinks.every(p=>p.stock<=0)?'<p class="form-hint">우유와 두유가 모두 품절이에요.</p>':''}<p class="form-hint">‘안 받을래요’를 누르면 이번 음료 보상은 받지 않아요.</p><div class="button-row"><button class="secondary-button" data-action="decline-beverage" data-request="${request.id}">안 받을래요</button><button class="text-button" data-action="close-modal">나중에 선택하기</button></div>`;
+  return `<div class="beverage-options">${options}</div>${drinks.length&&drinks.every(p=>p.stock<=0)?'<p class="form-hint">우유와 두유가 모두 품절이에요.</p>':''}<div class="button-row"><button class="secondary-button" data-action="decline-beverage" data-request="${request.id}">안 받을래요</button><button class="text-button" data-action="close-modal">나중에 선택하기</button></div>`;
 }
 function openBeverageChoice(request){
   if(!request)return;
