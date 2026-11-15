@@ -2,6 +2,7 @@
 """Validate a flat preorder CSV; reserve existing stock only with --apply."""
 import argparse
 import csv
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -10,7 +11,7 @@ import unicodedata
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from server.app import Application, person_name, phone_number
+from server.app import Application, optional_phone, person_name
 from server.catalog import PRODUCTS
 from server.db import Database
 
@@ -60,8 +61,8 @@ def read_preorders(path):
             row = [cell.strip() for cell in raw[:len(headers)]]
             row += [''] * (len(headers) - len(row))
             name = person_name(row[headers.index('이름')])
-            phone = phone_number(row[headers.index('연락처')])
-            if (name, phone) in seen:
+            phone = optional_phone(row[headers.index('연락처')])
+            if phone is not None and (name, phone) in seen:
                 raise ValueError('같은 이름·연락처가 중복됐습니다. 예약 건수를 확인해 주세요.')
             seen.add((name, phone))
             items = []
@@ -83,6 +84,8 @@ def read_preorders(path):
 
 def run_import(path, *, apply=False, actor='CSV 예판 등록'):
     reservations = read_preorders(path)
+    canonical = [{**row, 'items': sorted(row['items'], key=lambda item: item['product_id'])} for row in reservations]
+    batch = hashlib.sha256(json.dumps(sorted(canonical, key=lambda row: json.dumps(row, sort_keys=True)), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     database = Database(ROOT)
     if database.postgres:
         raise RuntimeError('이 도구는 현재 운영 중인 SQLite DB 전용입니다.')
@@ -90,9 +93,12 @@ def run_import(path, *, apply=False, actor='CSV 예판 등록'):
         raise RuntimeError('기존 DB의 DB_PATH를 지정해 주세요. 새 DB를 자동 생성하지 않습니다.')
     # Reuse API validation without Application startup, catalog changes or demo seeding.
     with database.transaction(write=apply) as tx:
-        report = Application.import_reservations(tx, reservations, actor, dry_run=True)
+        columns = {row['name']: row for row in tx.all('PRAGMA table_info(reservations)')}
+        if 'import_batch' not in columns or columns['phone']['notnull']:
+            raise RuntimeError('예판 DB 구조를 업데이트하려면 새 코드로 API 서버를 한 번 재시작해 주세요.')
+        report = Application.import_reservations(tx, reservations, actor, dry_run=True, import_batch=batch)
         if apply and report['ready']:
-            Application.import_reservations(tx, reservations, actor)
+            Application.import_reservations(tx, reservations, actor, import_batch=batch)
     return {'database': str(database.path.absolute()), 'mode': 'apply' if apply else 'check',
             'applied': apply and report['ready'], **report}
 
