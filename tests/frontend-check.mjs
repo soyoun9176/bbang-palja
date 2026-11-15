@@ -998,6 +998,98 @@ test('beverage rewards indicate first-come limits independently of sale stock',a
   assert.doesNotMatch(options,/모두 품절|선착순 이벤트 두유가/);
 });
 
+test('only the remaining event drink is selectable and both exhausted limits offer a normal die',async()=>{
+  const f=fixture();await f.run('refresh()');
+  f.run("state.products=[{id:112,name:'우유',stock:5,event_reward_remaining:1,beverage_reward_eligible:true},{id:113,name:'두유',stock:5,event_reward_remaining:0,beverage_reward_eligible:true}]");
+  let html=f.run('beverageOptions({id:9})');
+  assert.match(html,/data-product="112" >.*우유 선택/s);
+  assert.match(html,/data-product="113" disabled/);
+  f.run('state.products[0].event_reward_remaining=0');
+  html=f.run('beverageOptions({id:9})');
+  assert.match(html,/data-fallback="true">일반 주사위 받기/);
+  assert.doesNotMatch(html,/data-product=|decline-beverage/);
+});
+
+test('milk rolls replaced by a normal die display automatic delivery and the new wallet',async()=>{
+  const f=fixture();await f.run('refresh()');let prompt='';
+  f.context.capture=html=>prompt=html;f.run('modal=capture');
+  f.run("state.user.dice_balance=1;state.user.dice=[{kind:'instagram',name:'인싸 마법사의 주사위',color:'pink',quantity:1}]");
+  const user={...f.run('state.user'),dice_balance:1,dice:[{kind:'walkin',name:'현장 구매 주사위',color:'plain',quantity:1}]};
+  const row={id:9,roll_id:4,status:'approved',product_name:'일반 주사위',fallback_dice_kind:'walkin'};
+  f.context.fetchOverride=(path,options)=>{
+    if(path==='/api/dice/roll')return f.response({id:4,result:'milk',value:0,score:0,dice_balance:1,dice:{kind:'instagram',color:'pink'},user,fulfillment:row});
+    if(path==='/api/auth/me')return f.response({user});
+    if(path==='/api/rewards')return f.response({rewards:[],requests:[row]});
+    return f.context.normalFetch(path,options);
+  };
+  await f.run('rollDice()');
+  assert.match(prompt,/일반 주사위 1개 지급/);
+  assert.doesNotMatch(prompt,/우유·두유 선택하기|담당자/);
+  assert.equal(f.run('state.user.dice[0].kind'),'walkin');
+  assert.match(f.run('renderDiceControl()'),/일반 주사위 1개를 받았어요/);
+});
+
+test('ten-point drink replacement shows a die delivery instead of physical pickup instructions',async()=>{
+  const f=fixture();await f.run('refresh()');let prompt='';
+  f.context.capture=html=>prompt=html;f.run('modal=capture;state.user.score=10');
+  const row={id:9,status:'approved',product_name:'일반 주사위',fallback_dice_kind:'walkin'};
+  const user={...f.run('state.user'),claimed_milestones:[10],rewards_claimed:1,dice_balance:3};
+  const reward={id:2,threshold:10,kind:'milk',product_name:'일반 주사위',fulfillment:row};
+  f.context.fetchOverride=(path,options)=>{
+    if(path==='/api/rewards/claim')return f.response({reward,user});
+    if(path==='/api/auth/me')return f.response({user});
+    if(path==='/api/rewards')return f.response({rewards:[reward],requests:[row]});
+    return f.context.normalFetch(path,options);
+  };
+  await f.run("claimReward({dataset:{threshold:'10'},disabled:false})");
+  assert.match(prompt,/일반 주사위 1개 지급/);
+  assert.doesNotMatch(prompt,/담당자 지급 대기|음료를 선택/);
+  assert.match(f.run('renderRewardHistory()'),/주사위 자동 지급/);
+});
+
+test('pending drink fallback is requested once and leaves no physical pickup queue',async()=>{
+  const f=fixture();await f.run('refresh()');let release,prompt='';
+  f.context.capture=html=>prompt=html;f.run('modal=capture;closeModal=()=>{}');
+  let row={id:9,status:'awaiting_choice',product_name:'우유·두유 선택',roll_id:4};
+  const user={...f.run('state.user'),dice_balance:3};
+  f.run("state.products=[{id:112,stock:5,event_reward_remaining:0,beverage_reward_eligible:true},{id:113,stock:5,event_reward_remaining:0,beverage_reward_eligible:true}]");
+  f.context.fetchOverride=(path,options)=>{
+    if(path==='/api/reward-requests/9/fallback')return new Promise(resolve=>release=()=>{
+      row={...row,status:'approved',product_name:'일반 주사위',fallback_dice_kind:'walkin'};
+      resolve(f.response({request:row,user}));
+    });
+    if(path==='/api/auth/me')return f.response({user});
+    if(path==='/api/rewards')return f.response({rewards:[{id:4,kind:'dice_milk',fulfillment:row}],requests:[row]});
+    return f.context.normalFetch(path,options);
+  };
+  const first=f.run("chooseBeverage({dataset:{request:'9',fallback:'true'}})");
+  await f.run("chooseBeverage({dataset:{request:'9',fallback:'true'}})");
+  const requests=f.requests.filter(r=>r.path.endsWith('/fallback'));
+  assert.equal(requests.length,1);
+  assert.deepEqual(Object.keys(JSON.parse(requests[0].body)),['request_id']);
+  release();await first;
+  assert.equal(f.run('state.user.dice_balance'),3);
+  assert.equal(f.run('renderRewardRequests()'),'');
+  assert.match(prompt,/일반 주사위 1개 지급/);
+});
+
+test('a stale beverage choice handles a server-side die replacement',async()=>{
+  const f=fixture();await f.run('refresh()');let prompt='';
+  f.context.capture=html=>prompt=html;f.run('modal=capture;closeModal=()=>{};state.lastRoll={id:4,result:"milk",fulfillment:{id:9}}');
+  const row={id:9,roll_id:4,status:'approved',product_name:'일반 주사위',fallback_dice_kind:'walkin'};
+  const user={...f.run('state.user'),dice_balance:3};
+  f.context.fetchOverride=(path,options)=>{
+    if(path==='/api/reward-requests/9/choose')return f.response({request:row,user});
+    if(path==='/api/auth/me')return f.response({user});
+    if(path==='/api/rewards')return f.response({rewards:[],requests:[row]});
+    return f.context.normalFetch(path,options);
+  };
+  await f.run("chooseBeverage({dataset:{request:'9',product:'112'}})");
+  assert.match(prompt,/일반 주사위 1개 지급/);
+  assert.equal(f.run('state.lastRoll.fulfillment.fallback_dice_kind'),'walkin');
+  assert.equal(f.run('renderRewardRequests()'),'');
+});
+
 test('beverage selection disables sold-out drinks and always separates cancellation from postponing',async()=>{
   const f=fixture();await f.run('refresh()');
   f.run("state.products=[{id:112,name:'우유',stock:0,beverage_reward_eligible:true},{id:113,name:'두유',stock:1,beverage_reward_eligible:true}]");
@@ -1007,8 +1099,9 @@ test('beverage selection disables sold-out drinks and always separates cancellat
   assert.match(html,/data-action="decline-beverage" data-request="9">취소하기/);
   assert.match(html,/data-action="close-modal">나중에 선택하기/);
   f.run('state.products[1].stock=0');html=f.run('beverageOptions({id:9})');
-  assert.match(html,/모두 품절/);
-  assert.match(html,/data-action="decline-beverage"/);
+  assert.match(html,/모두 소진/);
+  assert.match(html,/data-fallback="true">일반 주사위 받기/);
+  assert.doesNotMatch(html,/data-action="decline-beverage"/);
 });
 
 test('beverage choice posts selected product once and refreshes the staff-pending state',async()=>{
@@ -1041,8 +1134,8 @@ test('a stock conflict refreshes the drink choices without drawing a new reward'
     return f.context.normalFetch(path,options);
   };
   await f.run("chooseBeverage({dataset:{request:'9',product:'113'}})");
-  assert.match(prompt,/모두 품절/);
-  assert.match(prompt,/decline-beverage/);
+  assert.match(prompt,/모두 소진/);
+  assert.match(prompt,/data-fallback="true">일반 주사위 받기/);
   assert.equal(f.requests.filter(r=>r.path==='/api/dice/roll'||r.path==='/api/rewards/claim').length,0);
 });
 

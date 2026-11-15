@@ -70,6 +70,8 @@ class TypedDiceTests(unittest.TestCase):
             'preorder_gold':('milk',6,9,11,15,22), 'instagram':(1,1,2,2,3,'milk'),
         }
         with self.app.db.transaction(write=True) as tx:tx.execute('UPDATE products SET stock=3 WHERE id=112')
+        self.call('POST','/api/staff/event-beverage-limits',
+                  {'product_id':112,'limit':100,'request_id':uuid.uuid4().hex},self.staff)
         total=0
         for kind, faces in expected.items():
             self.grant(kind,6)

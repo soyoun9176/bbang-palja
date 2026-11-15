@@ -66,6 +66,13 @@ class RewardRequestTests(unittest.TestCase):
     def choose(self,row,pid,buyer=None,identity=None):
         return self.call('POST',f"/api/reward-requests/{row['id']}/choose",{'product_id':pid,'request_id':identity or uuid.uuid4().hex},(buyer or self.buyer)['token'])['request']
 
+    def fallback(self,row,buyer=None,identity=None,**extra):
+        return self.call('POST',f"/api/reward-requests/{row['id']}/fallback",
+                         {'request_id':identity or uuid.uuid4().hex,**extra},(buyer or self.buyer)['token'])
+
+    def me(self,buyer=None):
+        return self.call('GET','/api/auth/me',token=(buyer or self.buyer)['token'])['user']
+
     def transition(self,row,action):
         return self.call('POST',f"/api/staff/reward-requests/{row['id']}/{action}",{},self.staff)['request']
 
@@ -137,6 +144,7 @@ class RewardRequestTests(unittest.TestCase):
         self.assertEqual(self.available(112),3)
 
     def test_manual_beverage_grants_share_the_limit_and_failed_grant_leaves_stock_intact(self):
+        self.stock(112,1)
         self.stock(113,5);self.set_limit(113,1)
         body={'guest':True,'name':'비회원','kind':'gift','gift':'soymilk','quantity':2,
               'reason':'현장 지급','request_id':uuid.uuid4().hex}
@@ -181,7 +189,7 @@ class RewardRequestTests(unittest.TestCase):
 
     def test_stock_shortage_does_not_use_quota_and_a_pending_hold_blocks_lowering_the_limit(self):
         self.set_limit(112,2)
-        self.stock(112,0)
+        self.stock(112,0);self.stock(113,1)
         row=self.milk_roll()['fulfillment']
         with self.assertRaises(APIError) as error:
             self.choose(row,112)
@@ -225,23 +233,167 @@ class RewardRequestTests(unittest.TestCase):
         self.assertEqual([(drink['held'],drink['delivered']) for drink in summary['event_beverage_limits']],[(0,0),(0,0)])
         self.assertEqual(summary['stats']['bread_event_given'],0)
 
-    def test_sold_out_options_are_rejected_and_buyer_can_decline_without_reroll(self):
+    def test_both_physically_sold_out_drinks_automatically_grant_one_walkin_die(self):
         self.stock(112,0);self.stock(113,0)
         identity=uuid.uuid4().hex
         outcome=self.milk_roll(identity=identity);row=outcome['fulfillment']
-        for pid in [112,113]:
-            with self.assertRaises(APIError) as error:self.choose(row,pid)
-            self.assertEqual(error.exception.status,409)
-        body={'request_id':uuid.uuid4().hex}
-        path=f"/api/reward-requests/{row['id']}/decline"
-        result=self.call('POST',path,body,self.buyer['token'])
-        self.assertEqual(self.call('POST',path,body,self.buyer['token']),result)
-        self.assertEqual(result['request']['status'],'cancelled')
+        self.assertEqual((row['status'],row['fallback_dice_kind']),('approved','walkin'))
+        self.assertEqual((outcome['dice_balance'],outcome['user']['dice_balance']),(1,1))
+        for pid in [112,113]:self.assertEqual(self.choose(row,pid)['id'],row['id'])
+        self.assertEqual(self.fallback(row)['request']['id'],row['id'])
+        self.assertEqual(self.me()['dice_balance'],1)
         replay=self.call('POST','/api/dice/roll',{'kind':'instagram','request_id':identity},self.buyer['token'])
         self.assertEqual(replay['id'],outcome['id'])
         with self.app.db.transaction() as tx:
             self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM typed_dice_rolls')['n'],1)
             self.assertEqual(tx.one('SELECT COUNT(*) AS n FROM inventory_logs')['n'],0)
+
+    def test_empty_event_limits_replace_both_special_dice_milk_faces_with_walkin_dice(self):
+        self.stock(112,5);self.stock(113,5)
+        self.set_limit(112,0);self.set_limit(113,0)
+        for kind,face in [('instagram',5),('preorder_gold',0)]:
+            with self.subTest(kind=kind):
+                buyer=self.register(kind)
+                with self.app.db.transaction(write=True) as tx:grant_dice(tx,buyer['user']['id'],kind,1)
+                body={'kind':kind,'request_id':uuid.uuid4().hex}
+                with patch('server.app.secrets.randbelow',return_value=face):
+                    result=self.call('POST','/api/dice/roll',body,buyer['token'])
+                self.assertEqual(self.call('POST','/api/dice/roll',body,buyer['token']),result)
+                self.assertEqual((result['result'],result['value'],result['score']),('milk',0,0))
+                self.assertEqual((result['dice_balance'],result['user']['dice_balance']),(1,1))
+                self.assertEqual([(d['kind'],d['quantity']) for d in result['user']['dice']],[('walkin',1)])
+                self.assertEqual(result['fulfillment']['fallback_dice_kind'],'walkin')
+                with patch('server.app.secrets.randbelow',return_value=3):
+                    normal=self.call('POST','/api/dice/roll',{'kind':'walkin','request_id':uuid.uuid4().hex},buyer['token'])
+                self.assertEqual((normal['value'],normal['score'],normal['dice_balance']),(3,3,0))
+        self.assertEqual((self.available(112),self.available(113)),(5,5))
+        self.assertTrue(all(d['held']==d['delivered']==0 for d in self.dashboard()['event_beverage_limits']))
+
+    def test_ten_point_reward_gives_die_once_and_keeps_its_badge_when_drinks_are_exhausted(self):
+        self.stock(112,3);self.stock(113,3)
+        self.set_limit(112,0);self.set_limit(113,0)
+        with self.app.db.transaction(write=True) as tx:
+            tx.execute('UPDATE users SET score=10 WHERE id=?',(self.buyer['user']['id'],))
+        body={'threshold':10,'request_id':uuid.uuid4().hex}
+        result=self.call('POST','/api/rewards/claim',body,self.buyer['token'])
+        self.assertEqual(self.call('POST','/api/rewards/claim',body,self.buyer['token']),result)
+        self.assertEqual((result['reward']['kind'],result['reward']['product_name']),('milk','일반 주사위'))
+        self.assertEqual(result['reward']['fulfillment']['fallback_dice_kind'],'walkin')
+        self.assertIn(10,result['user']['claimed_milestones'])
+        self.assertTrue(any(b['owned'] and b.get('threshold')==10 for b in result['user']['badges']))
+        with self.assertRaises(APIError):
+            self.call('POST','/api/rewards/claim',{'threshold':10,'request_id':uuid.uuid4().hex},self.buyer['token'])
+        self.assertEqual(self.me()['dice_balance'],1)
+        history=self.call('GET','/api/rewards',token=self.buyer['token'])['rewards']
+        self.assertEqual((history[0]['product_name'],history[0]['fulfillment']['status']),('일반 주사위','approved'))
+
+    def test_one_available_beverage_prevents_fallback_even_if_other_stock_or_limit_is_empty(self):
+        for available,exhausted in [(112,113),(113,112)]:
+            with self.subTest(available=available):
+                self.stock(available,2);self.stock(exhausted,2)
+                self.set_limit(available,2);self.set_limit(exhausted,0)
+                row=self.milk_roll()['fulfillment']
+                self.assertEqual(row['status'],'awaiting_choice')
+                self.assertIsNone(row['fallback_dice_kind'])
+                with self.assertRaises(APIError):self.fallback(row)
+                with self.assertRaises(APIError):self.choose(row,exhausted)
+                chosen=self.choose(row,available)
+                self.assertEqual((chosen['status'],chosen['product_id']),('pending',available))
+                self.assertEqual(self.me()['dice_balance'],0)
+                self.transition(chosen,'cancel')
+
+    def test_stock_and_quota_must_be_available_on_the_same_drink(self):
+        self.stock(112,2);self.set_limit(112,0)
+        self.stock(113,0);self.set_limit(113,2)
+        row=self.milk_roll()['fulfillment']
+        self.assertEqual(row['fallback_dice_kind'],'walkin')
+        self.assertEqual((self.available(112),self.available(113)),(2,0))
+
+    def test_choice_becomes_a_die_if_last_drink_was_sold_while_the_screen_was_open(self):
+        self.stock(112,0);self.stock(113,1)
+        row=self.milk_roll()['fulfillment']
+        shopper=self.register('마지막 음료 구매자')
+        self.call('POST','/api/orders',{'items':[{'product_id':113,'quantity':1}],
+                  'request_id':uuid.uuid4().hex},shopper['token'])
+        converted=self.choose(row,113)
+        self.assertEqual((converted['status'],converted['fallback_dice_kind']),('approved','walkin'))
+        self.stock(113,1)
+        self.assertEqual(self.fallback(row)['request']['id'],row['id'])
+        self.assertEqual((self.me()['dice_balance'],self.available(113)),(1,1))
+
+    def test_two_fallback_requests_cannot_grant_the_same_entitlement_twice(self):
+        self.stock(112,1);self.stock(113,0)
+        row=self.milk_roll()['fulfillment']
+        self.stock(112,0)
+        barrier=threading.Barrier(2)
+        def redeem(_):
+            barrier.wait(timeout=5)
+            return self.fallback(row)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(redeem,range(2)))
+        self.assertTrue(all(result['request']['fallback_dice_kind']=='walkin' for result in results))
+        self.assertEqual(self.me()['dice_balance'],1)
+        self.assertEqual(len(self.dashboard()['reward_requests']),1)
+
+    def test_last_event_serving_race_grants_one_drink_and_one_fallback(self):
+        self.stock(112,2);self.stock(113,0)
+        self.set_limit(112,1);self.set_limit(113,0)
+        first=self.milk_roll()['fulfillment']
+        other=self.register('마지막 이벤트 경쟁자')
+        second=self.milk_roll(other)['fulfillment']
+        barrier=threading.Barrier(2)
+        def choose(entry):
+            row,buyer=entry
+            barrier.wait(timeout=5)
+            return self.choose(row,112,buyer)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            rows=list(pool.map(choose,[(first,self.buyer),(second,other)]))
+        self.assertCountEqual([row['status'] for row in rows],['pending','approved'])
+        self.assertEqual(sum(row['fallback_dice_kind']=='walkin' for row in rows),1)
+        self.assertEqual(self.available(112),1)
+        self.assertEqual(self.me()['dice_balance']+self.me(other)['dice_balance'],1)
+        milk=self.dashboard()['event_beverage_limits'][0]
+        self.assertEqual((milk['held'],milk['delivered'],milk['remaining']),(1,0,0))
+
+    def test_held_or_cancelled_rewards_and_other_users_cannot_claim_fallback(self):
+        self.stock(112,1);self.stock(113,0)
+        row=self.milk_roll()['fulfillment']
+        other=self.register('다른 계정')
+        with self.assertRaises(APIError) as error:self.fallback(row,other)
+        self.assertEqual(error.exception.status,403)
+        with self.assertRaises(APIError):self.fallback(row,kind='preorder_gold',quantity=100)
+        held=self.choose(row,112)
+        with self.assertRaises(APIError):self.fallback(held)
+        self.assertEqual(self.choose(held,112)['status'],'pending')
+        cancelled=self.transition(held,'cancel')
+        self.stock(112,0)
+        with self.assertRaises(APIError):self.fallback(cancelled)
+        self.assertEqual(self.me()['dice_balance'],0)
+
+    def test_existing_database_adds_fallback_tracking_without_reset_or_repeat_grants(self):
+        self.stock(112,1);self.stock(113,0)
+        row=self.milk_roll()['fulfillment']
+        with self.app.db.transaction(write=True) as tx:
+            tx.execute('ALTER TABLE reward_requests DROP COLUMN fallback_dice_kind')
+        self.app=Application()
+        saved=next(r for r in self.dashboard()['reward_requests'] if r['id']==row['id'])
+        self.assertIsNone(saved['fallback_dice_kind'])
+        self.assertEqual((saved['status'],self.me()['dice_balance']),('awaiting_choice',0))
+        self.stock(112,0)
+        self.fallback(saved)
+        self.app=Application()
+        self.assertEqual(self.me()['dice_balance'],1)
+        self.assertEqual(self.fallback(saved)['request']['fallback_dice_kind'],'walkin')
+        self.assertEqual(self.me()['dice_balance'],1)
+
+    def test_decline_and_fallback_do_not_share_a_cached_response_with_the_same_id(self):
+        self.stock(112,1);self.stock(113,0)
+        row=self.milk_roll()['fulfillment']
+        identity=uuid.uuid4().hex
+        self.call('POST',f"/api/reward-requests/{row['id']}/decline",{'request_id':identity},self.buyer['token'])
+        self.stock(112,0)
+        with self.assertRaises(APIError) as error:self.fallback(row,identity=identity)
+        self.assertEqual(error.exception.status,409)
+        self.assertEqual(self.me()['dice_balance'],0)
 
     def test_declining_unselected_drinks_moves_both_reward_sources_out_of_staff_choice_queue(self):
         self.stock(112,0);self.stock(113,2)
@@ -287,7 +439,11 @@ class RewardRequestTests(unittest.TestCase):
                 return 200,value
             except APIError as error:return error.status,None
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(compete,['reward','sale']))
-        self.assertEqual(sorted(status for status,_ in results),[200,409])
+        self.assertIn(sorted(status for status,_ in results),[[200,200],[200,409]])
+        if all(status==200 for status,_ in results):
+            converted=next(value for _,value in results if 'fallback_dice_kind' in value)
+            self.assertEqual(converted['fallback_dice_kind'],'walkin')
+            self.assertEqual(self.me()['dice_balance'],1)
         self.assertEqual(self.available(113),0)
         with self.app.db.transaction() as tx:self.assertEqual(tx.one("SELECT COUNT(*) AS n FROM inventory_logs WHERE product_id=113 AND delta=-1")['n'],1)
 

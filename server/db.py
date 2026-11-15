@@ -268,6 +268,7 @@ CREATE TABLE IF NOT EXISTS reward_requests (
  requested_at TEXT,
  processed_at TEXT,
  processed_by TEXT,
+ fallback_dice_kind TEXT CHECK (fallback_dice_kind IN ('walkin')),
  CHECK ((milestone_id IS NOT NULL AND roll_id IS NULL) OR (milestone_id IS NULL AND roll_id IS NOT NULL))
 );
 CREATE TABLE IF NOT EXISTS memos (
@@ -403,6 +404,12 @@ class Database:
                 schedule_columns=tx.all('PRAGMA table_info(schedule)')
             if 'event_date' not in {row['name'] for row in schedule_columns}:
                 tx.execute('ALTER TABLE schedule ADD COLUMN event_date TEXT')
+            if self.postgres:
+                reward_columns = tx.all("SELECT column_name AS name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='reward_requests'")
+            else:
+                reward_columns = tx.all('PRAGMA table_info(reward_requests)')
+            if 'fallback_dice_kind' not in {row['name'] for row in reward_columns}:
+                tx.execute("ALTER TABLE reward_requests ADD COLUMN fallback_dice_kind TEXT CHECK (fallback_dice_kind IN ('walkin'))")
             tx.execute("INSERT INTO settings(key,value) VALUES('schema_version','phone_accounts_v1') ON CONFLICT(key) DO NOTHING")
         self.allow_achievement_badges()
 
