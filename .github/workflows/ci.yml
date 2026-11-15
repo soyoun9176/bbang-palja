@@ -26,6 +26,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Backend and deployment tests
         run: python3 -m unittest discover -s tests -v
+      - name: Event preparation workflow with generated dummy CSV
+        run: python3 ops/test-event-preparation.py --output-dir "$RUNNER_TEMP/cambo-event-preparation"
       - name: Frontend behavior tests
         run: node --test tests/frontend-check.mjs
       - name: Build versioned static files for cambo-delight Pages
