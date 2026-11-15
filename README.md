@@ -18,7 +18,7 @@
 
 행사 DB 원격 백업: [5분 주기 Google Drive 백업·수동 복원](docs/DB_BACKUP.md). 보관·인증 범위와 운영 연결 현황은 문서에서 확인합니다.
 
-행사 초기화는 품목별 총재고 입력 → 예판 내역 등록 순서로 진행합니다. 현판 가능 수량은 총재고에서 예판 수량을 뺀 값입니다.
+행사 준비는 **운영 기록 초기화 → 관리자 화면에서 총재고 입력 → 예판 CSV 등록** 순서입니다. 현판 가능 수량은 총재고에서 예판 수량을 뺀 값입니다. [실행 방법·CSV 형식·더미 테스트](docs/EVENT_PREPARATION.md)
 
 ## 2. 협업 방법
 
@@ -30,6 +30,7 @@
 
 ```bash
 python3 -m unittest discover -s tests -v
+python3 ops/test-event-preparation.py
 node --test tests/frontend-check.mjs
 python3 ops/build-frontend.py
 ```
