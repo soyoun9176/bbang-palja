@@ -165,6 +165,8 @@ function queuePage() {
 }
 
 function heldStock(productId) {
+  const summary=list('inventory_summary').find(row=>row.product_id===productId);
+  if(summary)return summary.held;
   const rewards=list('reward_requests').filter(r=>r.status==='pending'&&r.product_id===productId).length;
   return rewards + pendingOrders().reduce((sum, order) => sum + (order.items || []).filter(item => item.product_id === productId).reduce((count, item) => count + item.quantity, 0), 0);
 }
@@ -174,17 +176,27 @@ function preorderStatusResults() {
   return `<p class="search-count" role="status">검색 결과 ${reservations.length}건 / 전체 ${list('reservations').length}건</p>${reservations.length?`<div class="table-wrap"><table><thead><tr><th>이름</th><th>전화번호</th><th>메뉴</th><th>수령 상태</th></tr></thead><tbody>${reservations.map(r=>`<tr><td><strong>${escape(r.name)}</strong></td><td>${escape(phoneLabel(r.phone))}</td><td class="preorder-menu">${escape(preorderMenu(r))}</td><td><span class="status ${r.status==='approved'?'approved':'pending'}">${escape(preorderLabel(r.status))}</span></td></tr>`).join('')}</tbody></table></div>`:`<p class="form-hint">${list('reservations').length?'검색 결과가 없습니다.':'등록된 예판이 없습니다.'}</p>`}`;
 }
 function preorderStatusPanel() {
-  return `<details id="inventory-preorders" class="preorder-status-panel"><summary class="secondary-button">${i('chevron')}예판 수령 현황 <span>${list('reservations').length}건</span></summary><div class="preorder-status-content">${searchField('inventory','admin-preorder-status-search','예판 검색','이름 · 전화번호 뒷자리 · 메뉴 검색')}<div id="inventory-preorder-results">${preorderStatusResults()}</div></div></details>`;
+  const reservations=list('reservations'),remaining=reservations.filter(r=>r.status!=='approved').length;
+  return `<details id="inventory-preorders" class="preorder-status-panel"><summary class="secondary-button">${i('chevron')}예판 수령 현황 <span aria-label="미수령 ${remaining}건 / 전체 ${reservations.length}건">${remaining}/${reservations.length}건</span></summary><div class="preorder-status-content">${searchField('inventory','admin-preorder-status-search','예판 검색','이름 · 전화번호 뒷자리 · 메뉴 검색')}<div id="inventory-preorder-results">${preorderStatusResults()}</div></div></details>`;
+}
+
+function inventoryProductName(product) {
+  const summary=list('inventory_summary').find(row=>row.product_id===product.id);
+  if(!summary)return `<strong>${escape(product.name)}</strong>`;
+  const unit=product.unit||'개';
+  const details=[['예판 판매량',summary.preorder_sold],['현판 판매량',summary.walkin_sold],
+    ['이벤트 제공량',summary.event_given],['잔여량',summary.remaining]].map(([label,value])=>`${label}: ${number(value)}${unit}`).join('\n');
+  return `<button type="button" class="inventory-product-name" title="${escape(details)}" aria-label="${escape(product.name+'\n'+details)}">${escape(product.name)}</button>`;
 }
 
 function eventSuppliesPanel() {
   const limits=list('event_beverage_limits');
   const oatmeal=list('event_supplies').find(item=>item.key==='oatmeal');
   if(!limits.length&&!oatmeal)return '';
-  return `<section class="content-card inventory-summary"><h2>이벤트 물품</h2><p class="form-hint">남은 수량은 우유·두유의 이벤트 한도와 오트밀의 실제 재고를 나타냅니다.</p>
-    <div class="table-wrap"><table><thead><tr><th scope="col">품목</th><th scope="col">제공 한도</th><th scope="col">지급 대기</th><th scope="col">지급 완료</th><th scope="col">남은 수량</th><th scope="col">관리</th></tr></thead><tbody>
-      ${limits.map(drink=>`<tr><th scope="row">${escape(drink.name)}</th><td>${number(drink.limit)}개</td><td>${number(drink.held)}개</td><td>${number(drink.delivered)}개</td><td><strong>${number(drink.remaining)}개</strong></td><td><button type="button" class="secondary-button" data-action="admin-beverage-limit" data-product="${drink.product_id}" aria-label="${escape(drink.name)} 이벤트 제공 한도 수정">한도 수정</button></td></tr>`).join('')}
-      ${oatmeal?`<tr><th scope="row">${escape(oatmeal.name)}</th><td>—</td><td>${number(oatmeal.held)}개</td><td>${number(oatmeal.delivered)}개</td><td><strong>${number(oatmeal.stock)}개</strong></td><td><button type="button" class="secondary-button" data-action="admin-supply-adjust" aria-label="오트밀 미니바이트 재고 수정">재고 수정</button></td></tr>`:''}
+  return `<section class="content-card inventory-summary"><h2>이벤트 물품</h2>
+    <div class="table-wrap"><table><thead><tr><th scope="col">품목</th><th scope="col">이벤트 재고</th><th scope="col">지급 대기</th><th scope="col">지급 완료</th><th scope="col">관리</th></tr></thead><tbody>
+      ${limits.map(drink=>`<tr><th scope="row">${escape(drink.name)}</th><td><strong>${number(drink.remaining)}개</strong></td><td>${number(drink.held)}개</td><td>${number(drink.delivered)}개</td><td><button type="button" class="secondary-button" data-action="admin-beverage-limit" data-product="${drink.product_id}" aria-label="${escape(drink.name)} 이벤트 제공 한도 수정">한도 수정</button></td></tr>`).join('')}
+      ${oatmeal?`<tr><th scope="row">${escape(oatmeal.name)}</th><td><strong>${number(oatmeal.stock)}개</strong></td><td>${number(oatmeal.held)}개</td><td>${number(oatmeal.delivered)}개</td><td><button type="button" class="secondary-button" data-action="admin-supply-adjust" aria-label="오트밀 미니바이트 재고 수정">재고 수정</button></td></tr>`:''}
     </tbody></table></div></section>`;
 }
 
@@ -213,7 +225,7 @@ function inventoryPage() {
   ${preorderStatusPanel()}
   <div class="table-wrap"><table><thead><tr><th>품목</th><th>현판·이벤트 가능</th><th>예판 대기</th><th>접수 보관</th><th>매장 예상</th><th></th></tr></thead><tbody>${productList().map(p=>{
     const held=heldStock(p.id);
-    return `<tr><td><strong>${escape(p.name)}</strong></td><td>${p.stock}</td><td>${p.preorder_stock}</td><td>${held}</td><td><strong>${p.stock+p.preorder_stock+held}</strong></td><td><button class="secondary-button" data-action="admin-adjust" data-product="${p.id}">수정</button></td></tr>`;
+    return `<tr><td>${inventoryProductName(p)}</td><td>${p.stock}</td><td>${p.preorder_stock}</td><td>${held}</td><td><strong>${p.stock+p.preorder_stock+held}</strong></td><td><button class="secondary-button" data-action="admin-adjust" data-product="${p.id}">수정</button></td></tr>`;
   }).join('')}</tbody></table></div>
   ${eventSuppliesPanel()}
   <details id="inventory-history" class="history-section"><summary>재고 수정 히스토리</summary><div class="admin-subtabs">${[['all','전체'],['stock','현판·이벤트'],['preorder_stock','예판']].map(([key,label])=>`<button class="tab-chip ${inventoryBucket===key?'active':''}" data-action="admin-inventory-filter" data-bucket="${key}">${label}</button>`).join('')}</div>${logs.length?`<div class="table-wrap"><table><thead><tr><th>시간</th><th>품목</th><th>구분</th><th>변동</th><th>사유</th><th>담당자</th></tr></thead><tbody>${logs.map(log=>`<tr><td>${stamp(log.created_at)}</td><td>${escape(log.product_name)}</td><td>${bucketLabel(log.bucket)}</td><td>${log.delta>0?'+':''}${log.delta}</td><td>${escape(log.reason)}</td><td>${escape(log.actor)}</td></tr>`).join('')}</tbody></table></div>`:'<p>기록이 없습니다.</p>'}</details>

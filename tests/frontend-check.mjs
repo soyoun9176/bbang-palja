@@ -967,9 +967,11 @@ test('inventory groups oatmeal stock with beverage limits and ends with the serv
   f.state.staffData.event_supplies=[{key:'oatmeal',name:'오트밀 미니바이트',stock:5,held:1,delivered:2}];
   const html=f.run('renderAdmin()');
   assert.equal((html.match(/<h2>이벤트 물품<\/h2>/g)||[]).length,1);
-  assert.match(html,/<th scope="row">우유<\/th><td>8개<\/td><td>2개<\/td><td>3개<\/td><td><strong>3개/);
-  assert.match(html,/<th scope="row">두유<\/th><td>4개<\/td><td>0개<\/td><td>4개<\/td><td><strong>0개/);
-  assert.match(html,/<th scope="row">오트밀 미니바이트<\/th><td>—<\/td><td>1개<\/td><td>2개<\/td><td><strong>5개<\/strong><\/td><td><button[^>]+data-action="admin-supply-adjust"/);
+  assert.match(html,/<th scope="col">이벤트 재고<\/th>/);
+  assert.doesNotMatch(html,/<th scope="col">제공 한도|<th scope="col">남은 수량|남은 수량은 우유·두유/);
+  assert.match(html,/<th scope="row">우유<\/th><td><strong>3개<\/strong><\/td><td>2개<\/td><td>3개<\/td>/);
+  assert.match(html,/<th scope="row">두유<\/th><td><strong>0개<\/strong><\/td><td>0개<\/td><td>4개<\/td>/);
+  assert.match(html,/<th scope="row">오트밀 미니바이트<\/th><td><strong>5개<\/strong><\/td><td>1개<\/td><td>2개<\/td><td><button[^>]+data-action="admin-supply-adjust"/);
   const summary=html.slice(html.indexOf('id="inventory-sales-title"'));
   assert.match(summary,/<table aria-labelledby="inventory-sales-title">/);
   assert.deepEqual([...summary.matchAll(/<th scope="row">([^<]+)<\/th><td>([^<]+)<\/td>/g)].map(row=>row.slice(1)),[
@@ -1498,6 +1500,7 @@ test('inventory offers a collapsed preorder status table with plain menu text an
   let html=f.run('renderAdmin()');
   assert.match(html,/<details id="inventory-preorders" class="preorder-status-panel">/);
   assert.match(html,/<summary class="secondary-button">.*예판 수령 현황/);
+  assert.match(html,/aria-label="미수령 2건 \/ 전체 3건">2\/3건<\/span>/);
   assert.match(html,/<th>이름<\/th><th>전화번호<\/th><th>메뉴<\/th><th>수령 상태<\/th>/);
   assert.match(html,/010-1234-5678/);
   assert.match(html,/<td class="preorder-menu">플레인 휘낭시에 2개, 우유 1개<\/td>/);
@@ -1506,9 +1509,40 @@ test('inventory offers a collapsed preorder status table with plain menu text an
   assert.match(html,/수령 완료/);
   f.state.staffData.reservations[0].status='approved';
   html=f.run('renderAdmin()');
+  assert.match(html,/aria-label="미수령 1건 \/ 전체 3건">1\/3건<\/span>/);
   assert.doesNotMatch(html,/수령 대기/);
   f.state.staffData.reservations=[];
-  assert.match(f.run('renderAdmin()'),/등록된 예판이 없습니다/);
+  html=f.run('renderAdmin()');
+  assert.match(html,/등록된 예판이 없습니다/);
+  assert.match(html,/>0\/0건<\/span>/);
+});
+
+test('inventory item hover uses complete server totals and includes pending holds in remaining stock',()=>{
+  const f=adminFixture();f.state.route='inventory';
+  f.state.staffData.inventory_summary=[{product_id:101,preorder_sold:12,walkin_sold:7,event_given:3,held:9,remaining:11}];
+  f.state.staffData.orders=[];f.state.staffData.reward_requests=[];
+  const html=f.run('renderAdmin()');
+  assert.match(html,/<button type="button" class="inventory-product-name" title="예판 판매량: 12개\n현판 판매량: 7개\n이벤트 제공량: 3개\n잔여량: 11개"/);
+  assert.match(html,/aria-label="플레인 휘낭시에\n예판 판매량:/);
+  assert.equal(f.run('heldStock(101)'),9);
+  assert.match(html,/<td>2<\/td><td>0<\/td><td>9<\/td><td><strong>11<\/strong>/);
+});
+
+test('preorder progress counts every booking despite an active status search',()=>{
+  const f=adminFixture();f.state.route='inventory';
+  f.state.staffData.reservations=[manualReservation(),manualReservation({id:8,status:'approved',name:'수령완료자'})];
+  f.run("staffSearch.inventory='수령완료자'");
+  const html=f.run('renderAdmin()');
+  assert.match(html,/>1\/2건<\/span>/);
+  assert.match(html,/검색 결과 1건 \/ 전체 2건/);
+});
+
+test('inventory hover keeps donut quantities in sets and tolerates an older server',()=>{
+  const f=adminFixture();f.state.route='inventory';
+  f.state.staffData.products=[{id:108,name:'도넛',unit:'세트',stock:2,preorder_stock:0}];
+  assert.doesNotMatch(f.run('renderAdmin()'),/class="inventory-product-name"/);
+  f.state.staffData.inventory_summary=[{product_id:108,preorder_sold:1,walkin_sold:2,event_given:0,held:0,remaining:2}];
+  assert.match(f.run('renderAdmin()'),/title="예판 판매량: 1세트\n현판 판매량: 2세트\n이벤트 제공량: 0세트\n잔여량: 2세트"/);
 });
 
 test('order messages use bread dice counts and checkout shows bank transfer instructions',async()=>{
