@@ -15,12 +15,14 @@ let manualLookupVersion = 0;
 let manualPickupMode = 'existing';
 let manualPickupUser = '';
 let inputListenerAdded = false;
+let inventoryTooltip = null;
 const pendingRequests = new Map();
 const staffSearch = {inventory:'',pickup:'',queue:'',users:'',events:''};
 
 export function initAdmin(shared) {
   helpers = shared;
   if (!inputListenerAdded) {
+    initInventoryTooltips();
     const clearFormError = event => event.target.closest?.('form')?.querySelector('[data-form-error]')?.remove();
     document.addEventListener('change', clearFormError);
     document.addEventListener('input', event => {
@@ -51,6 +53,67 @@ export function initAdmin(shared) {
     });
     inputListenerAdded = true;
   }
+}
+
+function hideInventoryTooltip() {
+  if(!inventoryTooltip)return;
+  const {trigger,node}=inventoryTooltip;
+  inventoryTooltip=null;
+  trigger.removeAttribute('aria-describedby');
+  node.remove();
+}
+
+function showInventoryTooltip(trigger,pinned=false) {
+  if(inventoryTooltip?.trigger===trigger){inventoryTooltip.pinned ||= pinned;return;}
+  hideInventoryTooltip();
+  const node=document.createElement('div');
+  node.id='inventory-info-tooltip';
+  node.className='inventory-tooltip';
+  node.setAttribute('role','tooltip');
+  node.textContent=trigger.dataset.inventoryTooltip;
+  node.style.visibility='hidden';
+  document.body.appendChild(node);
+  trigger.setAttribute('aria-describedby',node.id);
+  inventoryTooltip={trigger,node,pinned};
+  const anchor=trigger.getBoundingClientRect(),box=node.getBoundingClientRect(),margin=12,gap=8;
+  const left=Math.max(margin,Math.min(anchor.left,window.innerWidth-box.width-margin));
+  const below=anchor.bottom+gap;
+  const top=Math.max(margin,Math.min(below+box.height<=window.innerHeight-margin?below:anchor.top-box.height-gap,
+                                    window.innerHeight-box.height-margin));
+  node.style.left=`${left}px`;
+  node.style.top=`${top}px`;
+  node.style.visibility='visible';
+}
+
+function initInventoryTooltips() {
+  const triggerFor=target=>target?.closest?.('[data-inventory-tooltip]');
+  document.addEventListener('pointerover',event=>{
+    if(event.pointerType==='touch')return;
+    const trigger=triggerFor(event.target);
+    if(trigger)showInventoryTooltip(trigger);
+  });
+  document.addEventListener('pointerout',event=>{
+    const trigger=triggerFor(event.target);
+    if(inventoryTooltip&&inventoryTooltip.trigger===trigger&&!trigger.contains(event.relatedTarget)&&
+       !inventoryTooltip.pinned&&document.activeElement!==trigger)hideInventoryTooltip();
+  });
+  document.addEventListener('focusin',event=>{
+    const trigger=triggerFor(event.target);
+    if(trigger)showInventoryTooltip(trigger);
+  });
+  document.addEventListener('focusout',event=>{
+    if(inventoryTooltip?.trigger===triggerFor(event.target))hideInventoryTooltip();
+  });
+  document.addEventListener('click',event=>{
+    const trigger=triggerFor(event.target);
+    if(!trigger){hideInventoryTooltip();return;}
+    if(inventoryTooltip?.trigger===trigger&&inventoryTooltip.pinned)hideInventoryTooltip();
+    else showInventoryTooltip(trigger,true);
+  });
+  document.addEventListener('keydown',event=>{if(event.key==='Escape')hideInventoryTooltip();});
+  document.addEventListener('scroll',hideInventoryTooltip,true);
+  window.addEventListener('resize',hideInventoryTooltip);
+  window.addEventListener('blur',hideInventoryTooltip);
 }
 
 const data = () => helpers.state.staffData || {};
@@ -181,7 +244,7 @@ function preorderStatusPanel() {
 }
 
 function inventoryHoverLabel(label, details, className) {
-  return `<button type="button" class="${className}" title="${escape(details)}" aria-label="${escape(label+'\n'+details)}">${escape(label)}</button>`;
+  return `<button type="button" class="${className}" data-inventory-tooltip="${escape(details)}">${escape(label)}</button>`;
 }
 
 function inventoryProductName(product) {
@@ -397,6 +460,7 @@ function notesPage() {
 function help(title,description) { return `<details id="help-${helpers.state.route}" class="screen-help"><summary>${title}</summary><p>${description}</p></details>`; }
 
 export function renderAdmin() {
+  hideInventoryTooltip();
   if (!helpers.state.staffData) return '<div class="system-loading"><span class="spinner"></span>&nbsp; 판매 현황을 불러오고 있어요.</div>';
   return ({ queue: queuePage, inventory: inventoryPage, sales: salesPage, events: eventsPage, notes: notesPage }[helpers.state.route] || queuePage)();
 }
@@ -406,6 +470,7 @@ function loginForm() {
 }
 
 export function renderStaffLogin() {
+  hideInventoryTooltip();
   return `<div class="staff-login"><div class="content-card">${loginForm()}</div><div class="staff-login-footer"><a href="/">구매자 페이지로 돌아가기</a></div></div>`;
 }
 
