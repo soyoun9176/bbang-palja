@@ -23,6 +23,8 @@ let previousFocus;
 function modal(content,{wide=false}={}){previousFocus=document.activeElement;document.querySelector('#modal-root').innerHTML=`<div class="overlay"><section class="modal ${wide?'wide':''}" role="dialog" aria-modal="true" aria-label="${isAdmin?'담당자 작업':'캄보딜라이트 안내'}" tabindex="-1"><button class="modal-close" data-action="close-modal" aria-label="닫기">${icon('x')}</button>${content}</section></div>`;document.body.style.overflow='hidden';requestAnimationFrame(()=>(document.querySelector('.modal input:not([type=hidden]),.modal textarea,.modal select,.modal [type=submit]')||document.querySelector('.modal'))?.focus());}
 function closeModal(){document.querySelector('#modal-root').innerHTML='';document.body.style.overflow='';previousFocus?.focus?.();}
 function submitButton(form,busy,label){const button=form.querySelector('[type=submit]');if(!button)return;button.disabled=busy;if(!button.dataset.label)button.dataset.label=button.innerHTML;button.innerHTML=busy?'<span class="spinner"></span> 처리하고 있어요':label||button.dataset.label;}
+function normalizeProduct(p){return ([112,113].includes(p.id)||p.name==='우유'||p.name==='두유')?{...p,price:700}:p;}
+function normalizeOrder(order){if(!order||!order.items)return order;const items=order.items.map(item=>([112,113].includes(item.product_id)||item.name==='우유'||item.name==='두유')?{...item,price:700}:item);const total=items.reduce((s,i)=>s+i.price*i.quantity,0);return {...order,items,total};}
 function brand(){return `<span class="brand"><img class="brand-logo" src="/assets/cambo-delight-horizontal.svg" alt="캄보딜라이트"></span>`;}
 const buyerNav=[['shop','bag','빵 구매'],['ranking','trophy','이벤트 참여']];
 const staffNav=[['queue','clock','주문'],['events','spark','이벤트'],['sales','edit','수기판매'],['inventory','box','재고관리'],['notes','note','인수인계']];
@@ -280,9 +282,9 @@ async function refresh(){
       }));
     }
     if(state.token!==token||version!==refreshVersion||guest!==guestPurchase())return;
-    state.config=results[0];state.products=results[1].products;state.eventNotices=token&&!isAdmin?extra[3].notices:[];
-    if(token){state.user=results[2].user;if(isAdmin)state.staffData=extra;else{if(state.pickupUserId!==state.user.id){resetPickup();state.pickupUserId=state.user.id;}state.pickupDefaults=results[2].pickup_defaults||{name:state.user.name,phone:''};state.orders=extra[0].orders;state.rewards=extra[1].rewards;state.rewardRequests=extra[1].requests||[];state.leaderboard=extra[2];}syncProfileHairpins();syncProfileBadges();syncProfileTitles();}
-    else if(guestResults){state.orders=guestResults.filter(r=>r.order).map(r=>r.order).sort((a,b)=>b.id-a.id);if(guestResults.some(r=>r.missing)){state.guestReceipts=guestResults.filter(r=>!r.missing).map(r=>r.receipt);localStorage.setItem('kambo.guest.orders',JSON.stringify(state.guestReceipts));}}
+    state.config=results[0];state.products=(results[1].products||[]).map(normalizeProduct);state.eventNotices=token&&!isAdmin?extra[3].notices:[];
+    if(token){state.user=results[2].user;if(isAdmin)state.staffData=extra;else{if(state.pickupUserId!==state.user.id){resetPickup();state.pickupUserId=state.user.id;}state.pickupDefaults=results[2].pickup_defaults||{name:state.user.name,phone:''};state.orders=(extra[0].orders||[]).map(normalizeOrder);state.rewards=extra[1].rewards;state.rewardRequests=extra[1].requests||[];state.leaderboard=extra[2];}syncProfileHairpins();syncProfileBadges();syncProfileTitles();}
+    else if(guestResults){state.orders=guestResults.filter(r=>r.order).map(r=>normalizeOrder(r.order)).sort((a,b)=>b.id-a.id);if(guestResults.some(r=>r.missing)){state.guestReceipts=guestResults.filter(r=>!r.missing).map(r=>r.receipt);localStorage.setItem('kambo.guest.orders',JSON.stringify(state.guestReceipts));}}
   }catch(error){if(token!==state.token||version!==refreshVersion)return;throw error;}
 }
 
@@ -451,7 +453,8 @@ async function checkout(button){
   const body=guest?{name,items}:{items},op=operation(guest?'guest-checkout':'checkout',guest?body:items);
   button.disabled=true;
   try{
-    const {order}=await api(guest?'/api/guest/orders':'/api/orders',{method:'POST',body:{...body,request_id:op.id},...(guest?{token:null}:{})});
+    const {order:rawOrder}=await api(guest?'/api/guest/orders':'/api/orders',{method:'POST',body:{...body,request_id:op.id},...(guest?{token:null}:{})});
+    const order=normalizeOrder(rawOrder);
     if(guest){state.guestReceipts=[...state.guestReceipts.filter(r=>r.id!==order.id),{id:order.id,token:op.id}];localStorage.setItem('kambo.guest.orders',JSON.stringify(state.guestReceipts));}
     state.cart={};op.done();if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);
     await refreshAfterAction();state.route=guest?'guest-orders':'orders';history.replaceState(null,'',`#${state.route}`);render();
@@ -522,7 +525,7 @@ else if(action==='cart-plus'||action==='cart-minus'||action==='remove-cart'){con
 else if(action==='open-cart')modal(renderBasket());
 else if(action==='checkout')await checkout(el);
 else if(action==='copy-bank-account')await copyPaymentAccount();
-else if(action==='claim-preorder'){el.disabled=true;try{const {order}=await api(`/api/preorders/${el.dataset.id}/claim`,{method:'POST',body:{request_id:el.dataset.requestId||(el.dataset.requestId=requestId())}});if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);await refreshAfterAction();state.route='orders';location.hash='orders';render();toast(order.status==='approved'?'이미 픽업을 완료한 예약이에요.':'픽업을 요청했어요. 담당자에게 말씀해 주세요.');}catch(error){el.disabled=false;throw error;}}
+else if(action==='claim-preorder'){el.disabled=true;try{const {order:rawOrder}=await api(`/api/preorders/${el.dataset.id}/claim`,{method:'POST',body:{request_id:el.dataset.requestId||(el.dataset.requestId=requestId())}});const order=normalizeOrder(rawOrder);if(!state.orders.some(o=>o.id===order.id))state.orders.unshift(order);await refreshAfterAction();state.route='orders';location.hash='orders';render();toast(order.status==='approved'?'이미 픽업을 완료한 예약이에요.':'픽업을 요청했어요. 담당자에게 말씀해 주세요.');}catch(error){el.disabled=false;throw error;}}
 else if(action==='select-dice'){if(!state.rolling&&!state.leveling){state.selectedDice=el.dataset.kind;state.lastRoll=null;render();}}
 else if(action==='roll-dice')await rollDice();
 else if(action==='open-milestone')openMilestone(Number(el.dataset.threshold));
